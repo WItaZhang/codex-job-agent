@@ -59,6 +59,7 @@ include = [
     "/LICENSE",
     "/NOTICE.md",
     "/README.md",
+    "/README.zh-CN.md",
     "/pyproject.toml",
     "/uv.lock",
 ]

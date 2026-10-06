@@ -16,30 +16,10 @@
 
 ## 组件
 
-```mermaid
-flowchart TB
-    U[用户：背景、偏好、授权、反馈] <--> C[Codex：规划与语言理解]
-    C <--> S[四个仓库技能：协调 / 适配 / 发现 / 准备]
-    S --> CLI[CLI：校验输入，返回结构化结果]
-    CLI --> D[Discovery：公开 ATS GET / 手动研究导入]
-    CLI --> A[AgentService：资料、岗位、评估、材料、审批]
-    A --> P[纯函数：硬约束 / 基线 / 授权分流]
-    A --> M[Materials：事实引用与隔离产物]
-    A <--> DB[(SQLite：快照、申请、追加事件)]
-    CLI --> X[Executor：锁、版本复核、预算、提交意图]
-    X <--> DB
-    X --> B[Browser：观察 / 填写 / 核实 / 单次提交]
-    B --> ATS[外部申请表单]
-    ATS --> E[网页确认、截图、结果未知]
-    E --> DB
-    DB --> R[合并待办与本地工作台]
-    R --> U
-    DB --> O[运行观察导出 + 证据旁车文件]
-    O --> EV[独立 evaluator]
-    GT[人工 GT / 明确标注的合成工程用例] --> EV
-    EV --> L[时间戳日志、配置快照、指标、输入哈希]
-    L --> DEV[开发阶段：假设、修改、回归、独立验收]
-```
+![Codex 决策、技能组织、本地工具执行，以及基于证据的质量复核](../assets/architecture.zh-CN.svg)
+
+图中突出三类职责：Codex 借助技能决定下一步，本地工具管理状态并校验外部
+执行，独立质量复核读取冻结证据，为用户反馈和开发改进提供依据。
 
 `models.py` 只定义结构；`matching.py` 和 `policy.py` 不执行 I/O。
 `store.py` 只处理持久化。`service.py` 对完整操作使用短事务。

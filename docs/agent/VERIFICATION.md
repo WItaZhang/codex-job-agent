@@ -25,6 +25,10 @@ independent loopback ATS received exactly one POST per scenario. The synthetic
 evaluator accepted the candidate and rejected the deliberately faulty baseline
 at `logs/20261006_213854_378206_synthetic_contract_demo/`.
 
+The independent repository's [first GitHub Actions run](https://github.com/WItaZhang/codex-job-agent/actions/runs/37535531580)
+also passed on both Windows and Ubuntu, including locked installation, CLI
+startup, lint, formatting, the full test suite, synthetic evaluation and build.
+
 The earlier records below describe development-time validation before this
 independent export. Their ignored local log paths are historical references,
 not artifacts included in a fresh clone. Reproduce the mechanical checks with
