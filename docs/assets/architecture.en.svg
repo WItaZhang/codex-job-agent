@@ -1,90 +1,69 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="792" viewBox="0 0 1180 792" role="img" aria-labelledby="title desc">
-<title id="title">Codex Job Agent — system architecture</title>
-<desc id="desc">Personal context conditions the Codex planner. Repository skills guide one reasoning host. Structured actions and observations connect Codex to local tools and persistent state. Reading job sites is separate from submission, which checks authorization, packet version and budget. Observed acknowledgement or an unknown result returns to the tools. Packets are frozen before submission; confirmed submissions can be sampled for independent reviews and user feedback. Development validation and reviewed changes are separate from runtime activity.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="448" viewBox="0 0 1240 448" role="img" aria-labelledby="title desc">
+<title id="title">Codex Job Agent: how it works</title>
+<desc id="desc">Your experience and goals guide Codex to discover opportunities and tailor applications, with more attention to strong matches. Your submission rules independently determine automatic application or your review before submission. Track applications and next actions, then use your feedback to refine the next search.</desc>
 <defs>
-<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#20252C"/></marker>
-<marker id="audit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#326B68"/></marker>
+<marker id="flow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#242936"/></marker>
+<marker id="feedback" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#8A919B"/></marker>
 </defs>
-<rect width="1180" height="792" fill="#FFFFFF"/>
-<style>text{font-family:Arial,"Microsoft YaHei","PingFang SC",sans-serif;fill:#20252C} .serif{font-family:Georgia,"Noto Serif CJK SC",SimSun,serif}.mono{font-family:"Cascadia Code",Consolas,"Microsoft YaHei",monospace}</style>
-<text x="40" y="37" font-size="16" font-weight="700" text-anchor="start" style="fill:#20252C">CODEX JOB AGENT</text>
-<text x="1140" y="37" font-size="14" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">SYSTEM ARCHITECTURE / 01</text>
-<path d="M40 56 H1140" fill="none" stroke="#20252C" stroke-width="1.2"/>
-<text x="40" y="103" font-size="20" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(a)</text>
-<text x="84" y="103" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Personal context</text>
-<text x="330" y="103" font-size="20" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(b)</text>
-<text x="374" y="103" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Agent–tool interaction</text>
-<path d="M921 95 H953" fill="none" stroke="#20252C" stroke-width="1.4" marker-end="url(#arrow)"/>
-<text x="964" y="101" font-size="14" font-weight="400" text-anchor="start" style="fill:#626A73">Runtime</text>
-<path d="M921 119 H953" fill="none" stroke="#326B68" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#audit)"/>
-<text x="964" y="125" font-size="14" font-weight="400" text-anchor="start" style="fill:#626A73">Evidence / review</text>
-<rect x="40" y="148" width="206" height="204" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
-<text x="58" y="180" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Confirmed facts</text>
-<text x="58" y="204" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">experience · sources</text>
-<text x="58" y="248" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Preferences</text>
-<text x="58" y="272" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">roles · constraints</text>
-<text x="58" y="316" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Authorization</text>
-<text x="58" y="340" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">automatic / review</text>
-<path d="M58 219 H228 M58 287 H228" fill="none" stroke="#C5C9CC" stroke-width="0.8"/>
-<path d="M246 213 H323" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
-<path d="M246 322 H289 V397 H323" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
-<text x="299" y="357" font-size="15" font-weight="400" text-anchor="start" style="fill:#626A73">policy</text>
-<rect x="330" y="148" width="440" height="144" fill="#F5F3F8" stroke="#625781" stroke-width="1.35"/>
-<text x="352" y="187" font-size="30" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">Codex</text>
-<text x="748" y="184" font-size="13" font-weight="400" text-anchor="end" style="fill:#625781" class="mono">REASONING HOST</text>
-<text x="352" y="221" font-size="20" font-weight="400" text-anchor="start" style="fill:#20252C">Dynamic planning &amp; language reasoning</text>
-<path d="M352 239 H748" fill="none" stroke="#D8D2E3" stroke-width="0.8"/>
-<text x="352" y="271" font-size="16" font-weight="400" text-anchor="start" style="fill:#625781">4 skills: adapt · discover · prepare · coordinate</text>
-<path d="M451 299 V369" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
-<text x="438" y="340" font-size="16" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">actions</text>
-<path d="M655 369 V299" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
-<text x="668" y="340" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73" class="mono">observations</text>
-<rect x="330" y="376" width="440" height="172" fill="#FFFFFF" stroke="#C5C9CC" stroke-width="1.2"/>
-<text x="352" y="409" font-size="23" font-weight="600" text-anchor="start" style="fill:#20252C">Local tools</text>
-<text x="748" y="407" font-size="13" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">PYTHON</text>
-<text x="352" y="440" font-size="18" font-weight="400" text-anchor="start" style="fill:#626A73">discover · inspect · prepare</text>
-<rect x="348" y="461" width="404" height="69" fill="#F0F6F4" stroke="#326B68" stroke-width="1.15"/>
-<text x="364" y="487" font-size="20" font-weight="600" text-anchor="start" style="fill:#326B68">Submission gate</text>
-<text x="364" y="514" font-size="17" font-weight="400" text-anchor="start" style="fill:#326B68">authorization · packet version · budget</text>
-<path d="M40 455 C40 439,246 439,246 455 V522 C246 538,40 538,40 522 Z" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
-<path d="M40 455 C40 471,246 471,246 455" fill="none" stroke="#C5C9CC" stroke-width="1.2"/>
-<text x="143.0" y="492" font-size="20" font-weight="600" text-anchor="middle" style="fill:#20252C">Persistent state</text>
-<text x="143.0" y="519" font-size="16" font-weight="400" text-anchor="middle" style="fill:#626A73">jobs · packets · events</text>
-<text x="143" y="559" font-size="14" font-weight="400" text-anchor="middle" style="fill:#626A73" class="mono">SQLite</text>
-<path d="M253 488 H323" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
-<rect x="935" y="166" width="205" height="221" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
-<text x="1037.5" y="201" font-size="22" font-weight="600" text-anchor="middle" style="fill:#20252C">Job sites / ATS</text>
-<path d="M953 218 H1122" fill="none" stroke="#C5C9CC" stroke-width="0.8"/>
-<text x="1037.5" y="249" font-size="19" font-weight="400" text-anchor="middle" style="fill:#20252C">Public openings</text>
-<text x="1037.5" y="313" font-size="19" font-weight="400" text-anchor="middle" style="fill:#20252C">Application forms</text>
-<path d="M965 340 H1110 M965 353 H1075 M965 366 H1095" fill="none" stroke="#D7DBDD" stroke-width="1"/>
-<path d="M777 426 H825 V248 H928" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
-<text x="837" y="235" font-size="15" font-weight="400" text-anchor="start" style="fill:#626A73">read / inspect</text>
-<path d="M777 505 H875 V314 H928" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
-<text x="890" y="452" font-size="16" font-weight="400" text-anchor="start" style="fill:#326B68">authorized</text>
-<text x="890" y="475" font-size="16" font-weight="400" text-anchor="start" style="fill:#326B68">submission</text>
-<path d="M1037 394 V572 H731 V555" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
-<text x="1127" y="596" font-size="16" font-weight="400" text-anchor="end" style="fill:#626A73">acknowledgement / unknown</text>
-<path d="M354 555 V640 H153 V648" fill="none" stroke="#326B68" stroke-width="1.35" stroke-dasharray="5 4" marker-end="url(#audit)"/>
-<text x="368" y="591" font-size="15" font-weight="400" text-anchor="start" style="fill:#326B68">packet + trace</text>
-<path d="M40 607 H1140" fill="none" stroke="#C5C9CC" stroke-width="1"/>
-<text x="40" y="633" font-size="20" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(c)</text>
-<text x="84" y="633" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Evidence &amp; evaluation</text>
-<text x="1140" y="633" font-size="14" font-weight="400" text-anchor="end" style="fill:#626A73">runtime audit  /  development validation</text>
-<rect x="40" y="655" width="226" height="77" fill="#FBF9F5" stroke="#C7BAA5" stroke-width="1.2"/>
-<text x="57" y="686" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Frozen packet</text>
-<text x="57" y="715" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">before submission</text>
-<path d="M273 693 H309" fill="none" stroke="#326B68" stroke-width="1.35" stroke-dasharray="5 4" marker-end="url(#audit)"/>
-<rect x="316" y="655" width="288" height="77" fill="#F4F8F6" stroke="#AABFBA" stroke-width="1.2"/>
-<text x="333" y="686" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Independent review</text>
-<text x="333" y="715" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">confirmed sample → user inbox</text>
-<path d="M611 693 H719" fill="none" stroke="#326B68" stroke-width="1.35" stroke-dasharray="5 4" marker-end="url(#audit)"/>
-<text x="665" y="680" font-size="14" font-weight="400" text-anchor="middle" style="fill:#326B68">findings</text>
-<path d="M680 649 V741" fill="none" stroke="#C5C9CC" stroke-width="1" stroke-dasharray="5 4"/>
-<rect x="726" y="655" width="414" height="77" fill="#FFFFFF" stroke="#C5C9CC" stroke-width="1.2"/>
-<text x="743" y="686" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Development validation</text>
-<text x="743" y="715" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">diagnose → regress → reviewed changes</text>
-<path d="M40 753 H1140" fill="none" stroke="#20252C" stroke-width="1"/>
-<text x="40" y="776" font-size="15" font-weight="400" text-anchor="start" style="fill:#626A73" font-style="italic">Model judgment guides work; explicit contracts govern external actions.</text>
-<text x="1140" y="776" font-size="14" font-weight="400" text-anchor="end" style="fill:#626A73">No runtime self-modification</text>
+<rect width="1240" height="448" fill="#FFFFFF"/>
+<style>text{font-family:Arial,"Microsoft YaHei","PingFang SC",sans-serif}.serif{font-family:Georgia,"Times New Roman",serif}</style>
+<path d="M120 151 V61 H906 V122" fill="none" stroke="#8A919B" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5" marker-end="url(#feedback)"/>
+<text x="906" y="150" font-size="19" font-weight="400" text-anchor="middle" fill="#67707C">Your submission rules</text>
+<rect x="80" y="151" width="80" height="94" rx="3" fill="#FAFAFB" stroke="#A7ADB8" stroke-width="1.3"/>
+<circle cx="120" cy="178" r="10" fill="#FFFFFF" stroke="#67707C"/>
+<path d="M103 203 C104 185,136 185,137 203" fill="none" stroke="#67707C" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M99 220 H141 M106 231 H134" fill="none" stroke="#D5D9DF" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="120" y="286" font-size="23" font-weight="600" text-anchor="middle" fill="#242936">Your goals</text>
+<text x="120" y="315" font-size="17" font-weight="400" text-anchor="middle" fill="#67707C">Experience · preferences</text>
+<path d="M178 222 H247" fill="none" stroke="#242936" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#flow)"/>
+<rect x="255" y="105" width="480" height="242" rx="5" fill="#F5F4FA" stroke="#B7B3CE" stroke-width="1.3"/>
+<text x="495" y="140" font-size="27" font-weight="600" text-anchor="middle" fill="#575588" class="serif">Codex Job Agent</text>
+<rect x="316" y="186" width="37" height="31" rx="2" fill="#FFFFFF" stroke="#D5D9DF" stroke-width="1.3"/>
+<path d="M324 197 H344" fill="none" stroke="#D5D9DF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M324 206 H337" fill="none" stroke="#D5D9DF" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="364" y="176" width="37" height="31" rx="2" fill="#FFFFFF" stroke="#8C89AF" stroke-width="1.3"/>
+<path d="M372 187 H392" fill="none" stroke="#8C89AF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M372 196 H385" fill="none" stroke="#8C89AF" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="412" y="188" width="37" height="31" rx="2" fill="#FFFFFF" stroke="#D5D9DF" stroke-width="1.3"/>
+<path d="M420 199 H440" fill="none" stroke="#D5D9DF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M420 208 H433" fill="none" stroke="#D5D9DF" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="316" y="229" width="37" height="31" rx="2" fill="#FFFFFF" stroke="#8C89AF" stroke-width="1.3"/>
+<path d="M324 240 H344" fill="none" stroke="#8C89AF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M324 249 H337" fill="none" stroke="#8C89AF" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="364" y="219" width="37" height="31" rx="2" fill="#FFFFFF" stroke="#D5D9DF" stroke-width="1.3"/>
+<path d="M372 230 H392" fill="none" stroke="#D5D9DF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M372 239 H385" fill="none" stroke="#D5D9DF" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="412" y="231" width="37" height="31" rx="2" fill="#FFFFFF" stroke="#8C89AF" stroke-width="1.3"/>
+<path d="M420 242 H440" fill="none" stroke="#8C89AF" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M420 251 H433" fill="none" stroke="#8C89AF" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="585" y="174" width="62" height="82" rx="2" fill="#E9E7F3" stroke="#C8C4DB" stroke-width="1.3"/>
+<rect x="576" y="181" width="62" height="82" rx="2" fill="#FFFFFF" stroke="#575588" stroke-width="1.5"/>
+<path d="M588 198 H616" fill="none" stroke="#575588" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M588 213 H625" fill="none" stroke="#ADA8C5" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M588 224 H621" fill="none" stroke="#ADA8C5" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M588 238 H625" fill="none" stroke="#ADA8C5" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M588 249 H615" fill="none" stroke="#ADA8C5" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M470 224 H535" fill="none" stroke="#242936" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#flow)"/>
+<text x="383" y="295" font-size="22" font-weight="600" text-anchor="middle" fill="#242936">Discover broadly</text>
+<text x="609" y="295" font-size="22" font-weight="600" text-anchor="middle" fill="#242936">Tailor applications</text>
+<text x="609" y="324" font-size="18" font-weight="400" text-anchor="middle" fill="#575588">Extra care for strong matches</text>
+<path d="M743 222 H770" fill="none" stroke="#242936" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M770 222 V196 H800" fill="none" stroke="#242936" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#flow)"/>
+<path d="M770 222 V282 H800" fill="none" stroke="#242936" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#flow)"/>
+<rect x="809" y="172" width="196" height="48" rx="3" fill="#FFFFFF" stroke="#A7ADB8" stroke-width="1.3"/>
+<rect x="809" y="258" width="196" height="48" rx="3" fill="#FFFFFF" stroke="#A7ADB8" stroke-width="1.3"/>
+<text x="907" y="203" font-size="22" font-weight="400" text-anchor="middle" fill="#242936">Auto-apply</text>
+<text x="907" y="289" font-size="22" font-weight="400" text-anchor="middle" fill="#242936">Review → apply</text>
+<path d="M1005 196 H1040 V239" fill="none" stroke="#242936" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M1005 282 H1040 V239 H1082" fill="none" stroke="#242936" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#flow)"/>
+<rect x="1092" y="195" width="86" height="83" rx="3" fill="#FFFFFF" stroke="#A7ADB8" stroke-width="1.3"/>
+<circle cx="1109" cy="216" r="3" fill="#67707C" stroke="none"/>
+<path d="M1121 216 H1157" fill="none" stroke="#B2B7C0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="1109" cy="237" r="3" fill="#67707C" stroke="none"/>
+<path d="M1121 237 H1151" fill="none" stroke="#B2B7C0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="1109" cy="258" r="3" fill="#67707C" stroke="none"/>
+<path d="M1121 258 H1160" fill="none" stroke="#B2B7C0" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="1135" y="316" font-size="22" font-weight="600" text-anchor="middle" fill="#242936">Track progress</text>
+<path d="M1135 334 V390 H120 V333" fill="none" stroke="#8A919B" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5" marker-end="url(#feedback)"/>
+<text x="628" y="423" font-size="19" font-weight="400" text-anchor="middle" fill="#67707C">Your feedback shapes the next search</text>
 </svg>

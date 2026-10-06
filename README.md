@@ -2,22 +2,24 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-A personal job-search agent built around **Codex**, combining adaptive task planning with persistent user context, authorized browser execution and independent quality evaluation.
+A personal job-search agent for **Codex**: expand your search, give strong matches more attention, and choose what it may submit automatically.
 
-## System architecture
+## How it works
 
 <picture>
   <source media="(max-width: 700px)" srcset="docs/assets/architecture.en.compact.svg">
-  <img src="docs/assets/architecture.en.svg" alt="System architecture: personalized context informs Codex planning; local tools execute authorized applications and preserve evidence for independent evaluation.">
+  <img src="docs/assets/architecture.en.svg" alt="Your goals guide broad job discovery and tailored applications. Your submission rules choose automatic application or your review, with progress and feedback returning to you.">
 </picture>
 
-*Figure 1. (a) Confirmed facts, preferences and user policy condition planning. (b) Codex interacts with stateful tools through an action–observation loop; submission follows explicit execution checks. (c) Frozen evidence supports runtime sampling and independent review, with implementation changes validated separately during development.*
+*Figure 1. Your goals guide the search; your rules control submission. Strong matches receive extra preparation.*
 
-**Context and planning.** Confirmed experience, preferences, constraints and submission policies persist across sessions. Four repository skills guide Codex in researching jobs, preparing materials and choosing the next action from the current state. Reasoning uses the active Codex session; this project requires no separate model API key.
+**Start with you.** Confirm your experience, job preferences and constraints, then set the boundary between automatic applications and those you want to review. The agent reuses this context in later sessions.
 
-**State and execution.** Local Python tools discover openings on public Greenhouse, Lever and Ashby boards, merge duplicate targets, and manage profiles, application packets and browser operations through a structured CLI. Approval binds the complete packet and its versions. The executor records intent before submission; an unclear receipt stays `unknown` until checked. Missing information and review decisions are collected in a local inbox and dashboard.
+**Search broadly, prepare with care.** Codex researches opportunities and prepares applications from your confirmed experience, giving strong matches more attention. It can continue unfinished work and adjust priorities as new information arrives.
 
-**Review and iteration.** Frozen application packets support sampled reviews of relevance and factual support. Evidence-backed findings inform development changes, evaluator calibration and independent regression checks. The running agent does not rewrite its own code, skills or evaluators.
+**Stay in control.** Applications follow your saved rules. Questions and materials that need your input are collected together, alongside application progress. Your feedback helps refine future choices.
+
+See the [usage guide](docs/agent/USAGE.md) for the daily workflow and the [engineering design](docs/agent/ARCHITECTURE.md) for implementation details.
 
 ## Get started
 

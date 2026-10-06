@@ -18,13 +18,13 @@
 
 <picture>
   <source media="(max-width: 700px)" srcset="../assets/architecture.zh-CN.compact.svg">
-  <img src="../assets/architecture.zh-CN.svg" alt="Codex 决策、技能组织、本地工具执行，以及基于证据的质量复核。">
+  <img src="../assets/architecture.zh-CN.svg" alt="产品概览：求职目标指导机会发现和申请准备，用户规则决定自动投递或审核后投递，并集中查看进展。">
 </picture>
 
-图 (a) 区分已确认事实、偏好与投递授权；图 (b) 展示 Codex 与本地工具的动作—
-观察循环，并把读取岗位与获准后的提交分开；图 (c) 区分运行期的抽样评审与
-开发期的根因分析、回归和实现修改。图形由 [同一份源文件](../assets/build_architecture.py)
-生成中英文宽版与窄版，保持职责和标注一致。
+上图从用户视角概括产品：求职目标指导机会发现与申请准备，高匹配岗位获得
+更多投入，用户设定自动投递和审核的边界，并集中查看进展。虚线表示用户控制
+与反馈。图形由 [同一份源文件](../assets/build_architecture.py) 生成中英文宽版与
+窄版。下面说明支撑这一体验的工程组件与执行边界。
 
 `models.py` 只定义结构；`matching.py` 和 `policy.py` 不执行 I/O。
 `store.py` 只处理持久化。`service.py` 对完整操作使用短事务。
