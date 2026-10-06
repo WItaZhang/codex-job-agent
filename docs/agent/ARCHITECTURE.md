@@ -16,7 +16,10 @@
 
 ## 组件
 
-![Codex 决策、技能组织、本地工具执行，以及基于证据的质量复核](../assets/architecture.zh-CN.svg)
+<picture>
+  <source media="(max-width: 700px)" srcset="../assets/architecture.zh-CN.compact.svg">
+  <img src="../assets/architecture.zh-CN.svg" alt="Codex 决策、技能组织、本地工具执行，以及基于证据的质量复核。">
+</picture>
 
 图中突出三类职责：Codex 借助技能决定下一步，本地工具管理状态并校验外部
 执行，独立质量复核读取冻结证据，为用户反馈和开发改进提供依据。

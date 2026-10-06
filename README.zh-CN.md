@@ -12,7 +12,10 @@
 
 ## 如何工作
 
-![三层架构：Codex 规划工作，本地工具约束执行，证据支持复核。](docs/assets/architecture.zh-CN.svg)
+<picture>
+  <source media="(max-width: 700px)" srcset="docs/assets/architecture.zh-CN.compact.svg">
+  <img src="docs/assets/architecture.zh-CN.svg" alt="Codex 规划工作，本地工具约束执行，证据支持独立复核。">
+</picture>
 
 **Codex 负责规划与写作。** 四个技能帮助它结合你的目标和当前队列，选择下一步有价值的操作。推理使用当前 Codex 会话，本项目无需另外配置模型 API key。
 

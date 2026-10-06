@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="1040" viewBox="0 0 600 1040" role="img" aria-labelledby="title desc">
+  <title id="title">Codex 求职 Agent 架构，紧凑视图</title>
+  <desc id="desc">用户背景、偏好与授权指导 Codex。Codex 通过四个仓库技能完成理解、研究、动态规划与材料撰写。本地 Python 工具管理已确认事实和持久状态，检查授权、版本与预算，执行浏览器操作。运行证据来自外部岗位网站与申请表单，进入独立质量评审，推动经过审核的开发改进。运行时不会自行修改自身。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
+      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#718596" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="teal-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#228678" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect width="600" height="1040" rx="20" fill="#F6F8FA"/>
+  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" fill="#172D40">
+    <text x="24" y="42" font-size="32" font-weight="700" letter-spacing="-0.4">Codex 负责决策</text>
+    <text x="24" y="86" font-size="32" font-weight="700" letter-spacing="-0.4">本地工具负责执行</text>
+
+    <rect x="24" y="112" width="552" height="88" rx="12" fill="#E9EFF4"/>
+    <text x="48" y="145" font-size="25" font-weight="700">用户</text>
+    <text x="48" y="178" font-size="22" fill="#506779">背景事实 · 求职偏好 · 投递与审核授权</text>
+    <path d="M300 208 V226" fill="none" stroke="#718596" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="24" y="234" width="552" height="224" rx="16" fill="#172D40"/>
+    <rect x="48" y="255" width="5" height="26" rx="2.5" fill="#66CDB7"/>
+    <text x="66" y="278" font-size="29" font-weight="700" fill="#FFFFFF">Codex</text>
+    <text x="180" y="276" font-size="22" fill="#BBD1DF">理解、推理与任务编排</text>
+    <text x="48" y="314" font-size="22" fill="#F1F5F8">理解用户 · 研究岗位 · 动态规划 · 撰写材料</text>
+    <text x="48" y="348" font-size="22" fill="#BBD1DF">四个仓库技能</text>
+    <g fill="#2B4356">
+      <rect x="48" y="361" width="240" height="36" rx="8"/>
+      <rect x="312" y="361" width="240" height="36" rx="8"/>
+      <rect x="48" y="409" width="240" height="36" rx="8"/>
+      <rect x="312" y="409" width="240" height="36" rx="8"/>
+    </g>
+    <g font-size="22" fill="#FFFFFF" text-anchor="middle">
+      <text x="168" y="386">任务协调</text>
+      <text x="432" y="386">个性化适配</text>
+      <text x="168" y="434">岗位发现</text>
+      <text x="432" y="434">申请准备与执行</text>
+    </g>
+
+    <path d="M180 466 V492" fill="none" stroke="#718596" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <text x="205" y="487" font-size="22" fill="#5B6D7C">工具调用 · 结构化结果</text>
+
+    <rect x="24" y="500" width="552" height="230" rx="16" fill="#FFFFFF" stroke="#CDD9E0" stroke-width="1.4"/>
+    <rect x="48" y="518" width="5" height="27" rx="2.5" fill="#228678"/>
+    <text x="66" y="542" font-size="27" font-weight="700">本地 Python 运行时</text>
+    <path d="M48 559 H552" stroke="#E1E8ED"/>
+    <g fill="#228678">
+      <circle cx="54" cy="587" r="4"/>
+      <circle cx="54" cy="634" r="4"/>
+      <circle cx="54" cy="681" r="4"/>
+    </g>
+    <g font-size="22" fill="#405B6F">
+      <text x="75" y="595">已确认事实 · 持久化状态</text>
+      <text x="75" y="642">授权 · 内容版本 · 操作预算</text>
+      <text x="75" y="689">浏览器操作 · 可核验的结果</text>
+    </g>
+
+    <path d="M300 738 V760" fill="none" stroke="#718596" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+    <rect x="24" y="768" width="552" height="60" rx="12" fill="#E9EFF4"/>
+    <text x="300" y="806" font-size="23" font-weight="600" text-anchor="middle">外部招聘网站与申请表单</text>
+
+    <path d="M300 836 V860" fill="none" stroke="#228678" stroke-width="2" marker-end="url(#teal-arrow)"/>
+    <rect x="24" y="868" width="552" height="150" rx="14" fill="#EAF4F0" stroke="#C8E1D7" stroke-width="1.2"/>
+    <text x="48" y="904" font-size="26" font-weight="700" fill="#1D594F">质量评审与反馈</text>
+    <g font-size="22" fill="#235F55">
+      <text x="48" y="940">运行证据 → 独立质量评审</text>
+      <text x="48" y="973">经过审核的开发改进</text>
+    </g>
+    <text x="48" y="1004" font-size="22" fill="#51766D">运行时不会自行修改自身。</text>
+  </g>
+</svg>

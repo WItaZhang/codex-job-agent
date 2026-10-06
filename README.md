@@ -12,7 +12,10 @@ A personal job-search agent built for **Codex**, delivered as repository skills 
 
 ## How it works
 
-![Three layers: Codex plans the work, local tools control execution, and evidence supports review.](docs/assets/architecture.en.svg)
+<picture>
+  <source media="(max-width: 700px)" srcset="docs/assets/architecture.en.compact.svg">
+  <img src="docs/assets/architecture.en.svg" alt="Codex plans the work, local tools control execution, and evidence supports independent review.">
+</picture>
 
 **Codex plans and writes.** Four skills help it choose the next useful action from your goals and the current queue. It uses the active Codex session; no separate model API key is required by this project.
 
