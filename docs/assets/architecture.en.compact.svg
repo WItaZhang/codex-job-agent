@@ -1,72 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="600" height="1040" viewBox="0 0 600 1040" role="img" aria-labelledby="title desc">
-  <title id="title">Codex Job Agent architecture, compact view</title>
-  <desc id="desc">User background, preferences and authorization guide Codex. Codex reasons and plans with four repository skills. Local Python tools manage confirmed facts and persistent state, check authorization, versions and budgets, and perform browser actions. External job boards and application forms provide observations. Recorded evidence feeds independent quality review and reviewed development changes. The runtime never rewrites itself.</desc>
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#718596" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="teal-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M2 1 L8 5 L2 9" fill="none" stroke="#228678" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-  </defs>
-  <rect width="600" height="1040" rx="20" fill="#F6F8FA"/>
-  <g font-family="Segoe UI, Arial, sans-serif" fill="#172D40">
-    <text x="24" y="42" font-size="32" font-weight="700" letter-spacing="-0.5">Codex decides.</text>
-    <text x="24" y="86" font-size="32" font-weight="700" letter-spacing="-0.5">Local tools execute.</text>
-
-    <rect x="24" y="112" width="552" height="88" rx="12" fill="#E9EFF4"/>
-    <text x="48" y="145" font-size="25" font-weight="700">You</text>
-    <text x="48" y="178" font-size="22" fill="#506779">Background · preferences · authorization</text>
-    <path d="M300 208 V226" fill="none" stroke="#718596" stroke-width="2" marker-end="url(#arrow)"/>
-
-    <rect x="24" y="234" width="552" height="224" rx="16" fill="#172D40"/>
-    <rect x="48" y="255" width="5" height="26" rx="2.5" fill="#66CDB7"/>
-    <text x="66" y="278" font-size="29" font-weight="700" fill="#FFFFFF">Codex</text>
-    <text x="180" y="276" font-size="22" fill="#BBD1DF">Reasoning &amp; planning</text>
-    <text x="48" y="314" font-size="22" fill="#F1F5F8">Understand · research · plan · write</text>
-    <text x="48" y="348" font-size="22" fill="#BBD1DF">Four repository skills</text>
-    <g fill="#2B4356">
-      <rect x="48" y="361" width="240" height="36" rx="8"/>
-      <rect x="312" y="361" width="240" height="36" rx="8"/>
-      <rect x="48" y="409" width="240" height="36" rx="8"/>
-      <rect x="312" y="409" width="240" height="36" rx="8"/>
-    </g>
-    <g font-size="22" fill="#FFFFFF" text-anchor="middle">
-      <text x="168" y="386">Coordinate</text>
-      <text x="432" y="386">Personalize</text>
-      <text x="168" y="434">Discover</text>
-      <text x="432" y="434">Prepare &amp; apply</text>
-    </g>
-
-    <path d="M180 466 V492" fill="none" stroke="#718596" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <text x="205" y="487" font-size="22" fill="#5B6D7C">Tool calls · results</text>
-
-    <rect x="24" y="500" width="552" height="230" rx="16" fill="#FFFFFF" stroke="#CDD9E0" stroke-width="1.4"/>
-    <rect x="48" y="518" width="5" height="27" rx="2.5" fill="#228678"/>
-    <text x="66" y="542" font-size="27" font-weight="700">Local Python runtime</text>
-    <path d="M48 559 H552" stroke="#E1E8ED"/>
-    <g fill="#228678">
-      <circle cx="54" cy="587" r="4"/>
-      <circle cx="54" cy="634" r="4"/>
-      <circle cx="54" cy="681" r="4"/>
-    </g>
-    <g font-size="22" fill="#405B6F">
-      <text x="75" y="595">Confirmed facts · persistent state</text>
-      <text x="75" y="642">Authorization · versions · budgets</text>
-      <text x="75" y="689">Browser actions · observed result</text>
-    </g>
-
-    <path d="M300 738 V760" fill="none" stroke="#718596" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <rect x="24" y="768" width="552" height="60" rx="12" fill="#E9EFF4"/>
-    <text x="300" y="806" font-size="23" font-weight="600" text-anchor="middle">External job boards &amp; application forms</text>
-
-    <path d="M300 836 V860" fill="none" stroke="#228678" stroke-width="2" marker-end="url(#teal-arrow)"/>
-    <rect x="24" y="868" width="552" height="150" rx="14" fill="#EAF4F0" stroke="#C8E1D7" stroke-width="1.2"/>
-    <text x="48" y="904" font-size="26" font-weight="700" fill="#1D594F">Quality &amp; feedback</text>
-    <g font-size="22" fill="#235F55">
-      <text x="48" y="940">Evidence → independent review</text>
-      <text x="48" y="973">Reviewed development changes</text>
-    </g>
-    <text x="48" y="1004" font-size="22" fill="#51766D">The runtime never rewrites itself.</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="1128" viewBox="0 0 680 1128" role="img" aria-labelledby="title desc">
+<title id="title">Codex Job Agent — system architecture</title>
+<desc id="desc">Compact system diagram. User context conditions a Codex action–observation loop. Local tools separate discovery and inspection from authorized submission, persist jobs and evidence, and observe outcomes. Runtime sampled reviews are distinct from development validation.</desc>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#20252C"/></marker>
+<marker id="audit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#326B68"/></marker>
+</defs>
+<rect width="680" height="1128" fill="#FFFFFF"/>
+<style>text{font-family:Arial,"Microsoft YaHei","PingFang SC",sans-serif;fill:#20252C} .serif{font-family:Georgia,"Noto Serif CJK SC",SimSun,serif}.mono{font-family:"Cascadia Code",Consolas,"Microsoft YaHei",monospace}</style>
+<text x="28" y="36" font-size="21" font-weight="700" text-anchor="start" style="fill:#20252C">CODEX JOB AGENT</text>
+<text x="652" y="36" font-size="19" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">01</text>
+<path d="M28 57 H652" fill="none" stroke="#20252C" stroke-width="1.2"/>
+<text x="28" y="102" font-size="24" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(a)</text>
+<text x="80" y="102" font-size="24" font-weight="600" text-anchor="start" style="fill:#20252C">Personal context</text>
+<rect x="28" y="126" width="624" height="98" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
+<path d="M236 142 V182 M444 142 V182" fill="none" stroke="#C5C9CC" stroke-width="0.8"/>
+<text x="132" y="164" font-size="23" font-weight="600" text-anchor="middle" style="fill:#20252C">Confirmed facts</text>
+<text x="340" y="164" font-size="23" font-weight="600" text-anchor="middle" style="fill:#20252C">Preferences</text>
+<text x="548" y="164" font-size="23" font-weight="600" text-anchor="middle" style="fill:#20252C">Authorization</text>
+<text x="340" y="205" font-size="20" font-weight="400" text-anchor="middle" style="fill:#626A73">user-confirmed profile &amp; submission policy</text>
+<path d="M340 231 V286" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="28" y="268" font-size="24" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(b)</text>
+<text x="80" y="268" font-size="24" font-weight="600" text-anchor="start" style="fill:#20252C">Agent &amp; tools</text>
+<rect x="28" y="294" width="624" height="155" fill="#F5F3F8" stroke="#625781" stroke-width="1.3"/>
+<text x="50" y="337" font-size="33" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">Codex</text>
+<text x="628" y="333" font-size="18" font-weight="400" text-anchor="end" style="fill:#625781" class="mono">REASONING HOST</text>
+<text x="50" y="376" font-size="24" font-weight="400" text-anchor="start" style="fill:#20252C">plan · research · compose · revise</text>
+<path d="M50 397 H630" fill="none" stroke="#D8D2E3" stroke-width="0.8"/>
+<text x="50" y="428" font-size="22" font-weight="400" text-anchor="start" style="fill:#625781">guided by four repository skills</text>
+<path d="M215 456 V526" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="198" y="498" font-size="22" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">actions</text>
+<path d="M370 526 V456" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="388" y="498" font-size="22" font-weight="400" text-anchor="start" style="fill:#626A73" class="mono">observations</text>
+<rect x="28" y="534" width="404" height="230" fill="#FFFFFF" stroke="#C5C9CC" stroke-width="1.2"/>
+<text x="50" y="572" font-size="27" font-weight="600" text-anchor="start" style="fill:#20252C">Local tools</text>
+<text x="50" y="609" font-size="22" font-weight="400" text-anchor="start" style="fill:#626A73">discover · inspect · prepare</text>
+<rect x="48" y="632" width="364" height="111" fill="#F0F6F4" stroke="#326B68" stroke-width="1.15"/>
+<text x="66" y="667" font-size="25" font-weight="600" text-anchor="start" style="fill:#326B68">Submission gate</text>
+<text x="66" y="703" font-size="23" font-weight="400" text-anchor="start" style="fill:#326B68">authorization · version</text>
+<text x="66" y="730" font-size="23" font-weight="400" text-anchor="start" style="fill:#326B68">budget · submit intent</text>
+<rect x="500" y="555" width="152" height="188" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
+<text x="576" y="599" font-size="24" font-weight="600" text-anchor="middle" style="fill:#20252C">Job sites</text>
+<text x="576" y="633" font-size="24" font-weight="400" text-anchor="middle" style="fill:#20252C">ATS</text>
+<path d="M518 649 H634" fill="none" stroke="#C5C9CC" stroke-width="1"/>
+<text x="576" y="683" font-size="21" font-weight="400" text-anchor="middle" style="fill:#626A73">receipt</text>
+<text x="576" y="716" font-size="21" font-weight="400" text-anchor="middle" style="fill:#626A73">or unknown</text>
+<path d="M439 587 H493" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="466" y="569" font-size="17" font-weight="400" text-anchor="middle" style="fill:#626A73">read</text>
+<path d="M439 703 H493" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="466" y="685" font-size="17" font-weight="400" text-anchor="middle" style="fill:#326B68">apply</text>
+<path d="M110 771 V788 H340" fill="none" stroke="#C5C9CC" stroke-width="1.3"/>
+<text x="340" y="818" font-size="23" font-weight="400" text-anchor="middle" style="fill:#626A73">Persistent state · jobs, packets, events</text>
+<path d="M28 850 H652" fill="none" stroke="#C5C9CC" stroke-width="1"/>
+<text x="28" y="891" font-size="24" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(c)</text>
+<text x="80" y="891" font-size="24" font-weight="600" text-anchor="start" style="fill:#20252C">Evidence &amp; evaluation</text>
+<path d="M340 920 V1030" fill="none" stroke="#C5C9CC" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="28" y="942" font-size="24" font-weight="600" text-anchor="start" style="fill:#326B68">Runtime audit</text>
+<text x="28" y="978" font-size="22" font-weight="400" text-anchor="start" style="fill:#20252C">Frozen packet → sample</text>
+<text x="28" y="1014" font-size="22" font-weight="400" text-anchor="start" style="fill:#20252C">Review → user inbox</text>
+<text x="370" y="942" font-size="24" font-weight="600" text-anchor="start" style="fill:#20252C">Development</text>
+<text x="370" y="978" font-size="22" font-weight="400" text-anchor="start" style="fill:#20252C">RCA · regression</text>
+<text x="370" y="1014" font-size="22" font-weight="400" text-anchor="start" style="fill:#20252C">Reviewed changes</text>
+<text x="28" y="1066" font-size="21" font-weight="400" text-anchor="start" style="fill:#626A73" font-style="italic">Freeze before submit; sample after confirmation.</text>
+<path d="M28 1090 H652" fill="none" stroke="#20252C" stroke-width="1"/>
+<text x="28" y="1116" font-size="19" font-weight="400" text-anchor="start" style="fill:#626A73">No runtime self-modification</text>
 </svg>

@@ -1,94 +1,90 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="780" viewBox="0 0 1080 780" role="img" aria-labelledby="title desc">
-  <title id="title">Codex 求职 Agent 架构</title>
-  <desc id="desc">用户提供背景、求职偏好和投递授权。Codex 负责理解、研究、动态规划与材料撰写，由四个仓库技能组织领域操作。本地 Python 工具负责事实与状态、执行检查，以及外部招聘网站的岗位发现和申请操作。运行证据进入独立质量评审，再推动经过审核的开发改进。运行时不会自行修改代码、技能或评测标准。</desc>
-  <defs>
-    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse">
-      <path d="M1 1 L6 4 L1 7" fill="none" stroke="#718596" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="teal-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M1 1 L6 4 L1 7" fill="none" stroke="#228678" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-  </defs>
-  <rect width="1080" height="780" rx="20" fill="#F6F8FA"/>
-  <g font-family="Segoe UI, Microsoft YaHei, PingFang SC, Noto Sans CJK SC, sans-serif" fill="#172D40">
-    <text x="40" y="53" font-size="30" font-weight="700" letter-spacing="-0.4">Codex 负责决策，本地工具负责执行</text>
-    <text x="40" y="83" font-size="19" fill="#5B6D7C">一个个人求职 Agent，清晰分离推理、外部操作与质量改进。</text>
-
-    <rect x="40" y="108" width="1000" height="62" rx="12" fill="#E9EFF4"/>
-    <circle cx="72" cy="139" r="13" fill="#D3DFE8"/>
-    <circle cx="72" cy="135" r="4" fill="#506B80"/>
-    <path d="M65 145 C65 139 79 139 79 145" fill="#506B80"/>
-    <text x="98" y="146" font-size="21" font-weight="650">用户</text>
-    <path d="M165 125 V153" stroke="#C6D3DD"/>
-    <text x="190" y="146" font-size="20">背景事实</text>
-    <circle cx="329" cy="139" r="2.5" fill="#92A3B1"/>
-    <text x="351" y="146" font-size="20">求职偏好</text>
-    <circle cx="491" cy="139" r="2.5" fill="#92A3B1"/>
-    <text x="513" y="146" font-size="20">自动投递与人工审核的边界</text>
-    <path d="M540 174 V186" fill="none" stroke="#718596" stroke-width="1.8" marker-end="url(#arrow)"/>
-
-    <rect x="40" y="190" width="1000" height="170" rx="16" fill="#172D40"/>
-    <rect x="64" y="216" width="5" height="24" rx="2.5" fill="#66CDB7"/>
-    <text x="84" y="237" font-size="29" font-weight="700" fill="#FFFFFF">Codex</text>
-    <text x="197" y="236" font-size="20" fill="#BBD1DF">理解、推理与任务编排</text>
-    <text x="64" y="274" font-size="21" fill="#F1F5F8">理解用户需求 · 研究岗位 · 动态规划 · 撰写申请材料</text>
-    <text x="64" y="322" font-size="18" font-weight="600" fill="#BBD1DF">仓库技能集</text>
-    <g fill="#2B4356">
-      <rect x="250" y="297" width="180" height="36" rx="8"/>
-      <rect x="444" y="297" width="180" height="36" rx="8"/>
-      <rect x="638" y="297" width="180" height="36" rx="8"/>
-      <rect x="832" y="297" width="184" height="36" rx="8"/>
-    </g>
-    <g font-size="18" fill="#FFFFFF" text-anchor="middle">
-      <text x="340" y="321">任务协调</text>
-      <text x="534" y="321">个性化适配</text>
-      <text x="728" y="321">岗位发现</text>
-      <text x="924" y="321">申请准备与执行</text>
-    </g>
-
-    <path d="M425 366 V388" fill="none" stroke="#718596" stroke-width="1.8" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <text x="447" y="383" font-size="18" fill="#5B6D7C">工具调用 · 结构化结果</text>
-
-    <rect x="40" y="394" width="770" height="190" rx="16" fill="#FFFFFF" stroke="#CDD9E0" stroke-width="1.3"/>
-    <rect x="64" y="417" width="5" height="23" rx="2.5" fill="#228678"/>
-    <text x="84" y="438" font-size="26" font-weight="700">本地 Python 运行时</text>
-    <path d="M64 455 H786" stroke="#E1E8ED"/>
-    <path d="M298 476 V559 M547 476 V559" stroke="#E1E8ED"/>
-    <g font-size="20" font-weight="650">
-      <text x="64" y="488">事实与状态</text>
-      <text x="322" y="488">执行条件检查</text>
-      <text x="572" y="488">浏览器操作</text>
-    </g>
-    <g font-size="18" fill="#5B6D7C">
-      <text x="64" y="519">已确认事实与来源</text>
-      <text x="64" y="547">SQLite · 事件记录</text>
-      <text x="322" y="519">授权 · 内容版本</text>
-      <text x="322" y="547">预算 · 操作锁</text>
-      <text x="572" y="519">观察 · 填写 · 核实</text>
-      <text x="572" y="547">提交 · 检查结果</text>
-    </g>
-
-    <path d="M816 492 H839" fill="none" stroke="#718596" stroke-width="1.8" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-    <rect x="846" y="419" width="194" height="145" rx="14" fill="#E9EFF4"/>
-    <text x="943" y="454" text-anchor="middle" font-size="22" font-weight="700">外部招聘网站</text>
-    <path d="M870 471 H1016" stroke="#CDD9E0"/>
-    <g font-size="18" fill="#506779" text-anchor="middle">
-      <text x="943" y="500">公开岗位信息</text>
-      <text x="943" y="526">申请表单</text>
-    </g>
-
-    <path d="M425 590 V618" fill="none" stroke="#228678" stroke-width="1.8" marker-end="url(#teal-arrow)"/>
-    <text x="447" y="610" font-size="18" fill="#377E73">可追溯的运行证据</text>
-
-    <rect x="40" y="624" width="1000" height="124" rx="14" fill="#EAF4F0" stroke="#C8E1D7" stroke-width="1.2"/>
-    <text x="64" y="659" font-size="23" font-weight="700" fill="#1D594F">质量评审与反馈</text>
-    <g font-size="20" fill="#235F55">
-      <text x="64" y="692">冻结材料与证据</text>
-      <text x="304" y="692">独立质量评审与反馈</text>
-      <text x="620" y="692">经过审核的开发改进</text>
-    </g>
-    <path d="M235 685 H278" fill="none" stroke="#228678" stroke-width="1.8" marker-end="url(#teal-arrow)"/>
-    <path d="M513 685 H591" fill="none" stroke="#228678" stroke-width="1.8" marker-end="url(#teal-arrow)"/>
-    <text x="64" y="726" font-size="18" fill="#51766D">运行时不会自行修改代码、技能或评测标准。</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="792" viewBox="0 0 1180 792" role="img" aria-labelledby="title desc">
+<title id="title">Codex Job Agent — system architecture</title>
+<desc id="desc">个性化上下文输入 Codex；仓库技能指导同一个推理宿主。动作与观察连接 Codex、本地工具和持久状态。岗位读取与提交分开，提交前检查授权、申请包版本和预算。网页确认或未知结果返回工具。提交前冻结申请包，确认投递后可抽样进行独立评审并反馈给用户。开发验证及经审核的修改与运行期分开。</desc>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#20252C"/></marker>
+<marker id="audit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L7 4 L0 8 Z" fill="#326B68"/></marker>
+</defs>
+<rect width="1180" height="792" fill="#FFFFFF"/>
+<style>text{font-family:Arial,"Microsoft YaHei","PingFang SC",sans-serif;fill:#20252C} .serif{font-family:Georgia,"Noto Serif CJK SC",SimSun,serif}.mono{font-family:"Cascadia Code",Consolas,"Microsoft YaHei",monospace}</style>
+<text x="40" y="37" font-size="16" font-weight="700" text-anchor="start" style="fill:#20252C">CODEX JOB AGENT</text>
+<text x="1140" y="37" font-size="14" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">系统架构 / 01</text>
+<path d="M40 56 H1140" fill="none" stroke="#20252C" stroke-width="1.2"/>
+<text x="40" y="103" font-size="20" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(a)</text>
+<text x="84" y="103" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">个性化上下文</text>
+<text x="330" y="103" font-size="20" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(b)</text>
+<text x="374" y="103" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">Agent 与工具交互</text>
+<path d="M921 95 H953" fill="none" stroke="#20252C" stroke-width="1.4" marker-end="url(#arrow)"/>
+<text x="964" y="101" font-size="14" font-weight="400" text-anchor="start" style="fill:#626A73">运行期</text>
+<path d="M921 119 H953" fill="none" stroke="#326B68" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#audit)"/>
+<text x="964" y="125" font-size="14" font-weight="400" text-anchor="start" style="fill:#626A73">证据与评审</text>
+<rect x="40" y="148" width="206" height="204" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
+<text x="58" y="180" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">已确认事实</text>
+<text x="58" y="204" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">经历与来源</text>
+<text x="58" y="248" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">偏好与约束</text>
+<text x="58" y="272" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">目标岗位与硬性条件</text>
+<text x="58" y="316" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">投递授权</text>
+<text x="58" y="340" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">自动投递 / 用户审核</text>
+<path d="M58 219 H228 M58 287 H228" fill="none" stroke="#C5C9CC" stroke-width="0.8"/>
+<path d="M246 213 H323" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<path d="M246 322 H289 V397 H323" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="299" y="357" font-size="15" font-weight="400" text-anchor="start" style="fill:#626A73">授权策略</text>
+<rect x="330" y="148" width="440" height="144" fill="#F5F3F8" stroke="#625781" stroke-width="1.35"/>
+<text x="352" y="187" font-size="30" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">Codex</text>
+<text x="748" y="184" font-size="13" font-weight="400" text-anchor="end" style="fill:#625781" class="mono">推理宿主</text>
+<text x="352" y="221" font-size="20" font-weight="400" text-anchor="start" style="fill:#20252C">动态规划与语言推理</text>
+<path d="M352 239 H748" fill="none" stroke="#D8D2E3" stroke-width="0.8"/>
+<text x="352" y="271" font-size="16" font-weight="400" text-anchor="start" style="fill:#625781">四个技能：适配 · 发现 · 准备 · 协调</text>
+<path d="M451 299 V369" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="438" y="340" font-size="16" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">结构化动作</text>
+<path d="M655 369 V299" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="668" y="340" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73" class="mono">工具观察</text>
+<rect x="330" y="376" width="440" height="172" fill="#FFFFFF" stroke="#C5C9CC" stroke-width="1.2"/>
+<text x="352" y="409" font-size="23" font-weight="600" text-anchor="start" style="fill:#20252C">本地工具</text>
+<text x="748" y="407" font-size="13" font-weight="400" text-anchor="end" style="fill:#626A73" class="mono">PYTHON</text>
+<text x="352" y="440" font-size="18" font-weight="400" text-anchor="start" style="fill:#626A73">发现岗位 · 观察表单 · 准备材料</text>
+<rect x="348" y="461" width="404" height="69" fill="#F0F6F4" stroke="#326B68" stroke-width="1.15"/>
+<text x="364" y="487" font-size="20" font-weight="600" text-anchor="start" style="fill:#326B68">提交前检查</text>
+<text x="364" y="514" font-size="17" font-weight="400" text-anchor="start" style="fill:#326B68">授权 · 申请包版本 · 预算</text>
+<path d="M40 455 C40 439,246 439,246 455 V522 C246 538,40 538,40 522 Z" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
+<path d="M40 455 C40 471,246 471,246 455" fill="none" stroke="#C5C9CC" stroke-width="1.2"/>
+<text x="143.0" y="492" font-size="20" font-weight="600" text-anchor="middle" style="fill:#20252C">持久状态</text>
+<text x="143.0" y="519" font-size="16" font-weight="400" text-anchor="middle" style="fill:#626A73">岗位 · 申请包 · 事件</text>
+<text x="143" y="559" font-size="14" font-weight="400" text-anchor="middle" style="fill:#626A73" class="mono">SQLite</text>
+<path d="M253 488 H323" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<rect x="935" y="166" width="205" height="221" fill="#FAFAF8" stroke="#C5C9CC" stroke-width="1.2"/>
+<text x="1037.5" y="201" font-size="22" font-weight="600" text-anchor="middle" style="fill:#20252C">招聘网站 / ATS</text>
+<path d="M953 218 H1122" fill="none" stroke="#C5C9CC" stroke-width="0.8"/>
+<text x="1037.5" y="249" font-size="19" font-weight="400" text-anchor="middle" style="fill:#20252C">公开岗位</text>
+<text x="1037.5" y="313" font-size="19" font-weight="400" text-anchor="middle" style="fill:#20252C">申请表单</text>
+<path d="M965 340 H1110 M965 353 H1075 M965 366 H1095" fill="none" stroke="#D7DBDD" stroke-width="1"/>
+<path d="M777 426 H825 V248 H928" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<text x="837" y="235" font-size="15" font-weight="400" text-anchor="start" style="fill:#626A73">读取 / 观察</text>
+<path d="M777 505 H875 V314 H928" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="890" y="452" font-size="16" font-weight="400" text-anchor="start" style="fill:#326B68">获准后</text>
+<text x="890" y="475" font-size="16" font-weight="400" text-anchor="start" style="fill:#326B68">提交</text>
+<path d="M1037 394 V572 H731 V555" fill="none" stroke="#20252C" stroke-width="1.5" marker-end="url(#arrow)"/>
+<text x="1127" y="596" font-size="16" font-weight="400" text-anchor="end" style="fill:#626A73">网页确认 / 结果未知</text>
+<path d="M354 555 V640 H153 V648" fill="none" stroke="#326B68" stroke-width="1.35" stroke-dasharray="5 4" marker-end="url(#audit)"/>
+<text x="368" y="591" font-size="15" font-weight="400" text-anchor="start" style="fill:#326B68">申请包与执行记录</text>
+<path d="M40 607 H1140" fill="none" stroke="#C5C9CC" stroke-width="1"/>
+<text x="40" y="633" font-size="20" font-weight="700" text-anchor="start" style="fill:#20252C" class="serif">(c)</text>
+<text x="84" y="633" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">证据与评测</text>
+<text x="1140" y="633" font-size="14" font-weight="400" text-anchor="end" style="fill:#626A73">运行期抽检  /  开发期验证</text>
+<rect x="40" y="655" width="226" height="77" fill="#FBF9F5" stroke="#C7BAA5" stroke-width="1.2"/>
+<text x="57" y="686" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">冻结的申请包</text>
+<text x="57" y="715" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">提交前保留快照</text>
+<path d="M273 693 H309" fill="none" stroke="#326B68" stroke-width="1.35" stroke-dasharray="5 4" marker-end="url(#audit)"/>
+<rect x="316" y="655" width="288" height="77" fill="#F4F8F6" stroke="#AABFBA" stroke-width="1.2"/>
+<text x="333" y="686" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">独立评审</text>
+<text x="333" y="715" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">确认后抽样 → 用户待办</text>
+<path d="M611 693 H719" fill="none" stroke="#326B68" stroke-width="1.35" stroke-dasharray="5 4" marker-end="url(#audit)"/>
+<text x="665" y="680" font-size="14" font-weight="400" text-anchor="middle" style="fill:#326B68">问题证据</text>
+<path d="M680 649 V741" fill="none" stroke="#C5C9CC" stroke-width="1" stroke-dasharray="5 4"/>
+<rect x="726" y="655" width="414" height="77" fill="#FFFFFF" stroke="#C5C9CC" stroke-width="1.2"/>
+<text x="743" y="686" font-size="20" font-weight="600" text-anchor="start" style="fill:#20252C">开发期验证</text>
+<text x="743" y="715" font-size="16" font-weight="400" text-anchor="start" style="fill:#626A73">根因分析 → 回归比较 → 审核修改</text>
+<path d="M40 753 H1140" fill="none" stroke="#20252C" stroke-width="1"/>
+<text x="40" y="776" font-size="15" font-weight="400" text-anchor="start" style="fill:#626A73">模型判断指导任务；显式契约约束外部操作。</text>
+<text x="1140" y="776" font-size="14" font-weight="400" text-anchor="end" style="fill:#626A73">运行期不自行改写实现</text>
 </svg>

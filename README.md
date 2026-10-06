@@ -2,26 +2,22 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-**More relevant opportunities. More care for your strongest matches.**
+A personal job-search agent built around **Codex**, combining adaptive task planning with persistent user context, authorized browser execution and independent quality evaluation.
 
-A personal job-search agent built for **Codex**, delivered as repository skills and a local Python toolkit. Tell Codex what you want; it researches jobs, prepares applications and resumes work from saved state. You choose which applications can proceed automatically and which need your review.
-
-- **Personal from the start.** Confirm your experience, preferences and constraints once; carry them into later sessions.
-- **Coverage with priorities.** Discover openings across public Greenhouse, Lever and Ashby boards, merge duplicate targets and focus preparation on strong matches.
-- **A manageable review queue.** Collect missing information, application decisions and quality findings in a local inbox and dashboard.
-
-## How it works
+## System architecture
 
 <picture>
   <source media="(max-width: 700px)" srcset="docs/assets/architecture.en.compact.svg">
-  <img src="docs/assets/architecture.en.svg" alt="Codex plans the work, local tools control execution, and evidence supports independent review.">
+  <img src="docs/assets/architecture.en.svg" alt="System architecture: personalized context informs Codex planning; local tools execute authorized applications and preserve evidence for independent evaluation.">
 </picture>
 
-**Codex plans and writes.** Four skills help it choose the next useful action from your goals and the current queue. It uses the active Codex session; no separate model API key is required by this project.
+*Figure 1. (a) Confirmed facts, preferences and user policy condition planning. (b) Codex interacts with stateful tools through an action–observation loop; submission follows explicit execution checks. (c) Frozen evidence supports runtime sampling and independent review, with implementation changes validated separately during development.*
 
-**Local tools maintain state and execute.** A structured CLI handles profiles, jobs, materials, policy, persistence and browser operations. Approval binds the complete application packet and its versions. The executor records intent before submission; an unclear receipt stays `unknown` until checked.
+**Context and planning.** Confirmed experience, preferences, constraints and submission policies persist across sessions. Four repository skills guide Codex in researching jobs, preparing materials and choosing the next action from the current state. Reasoning uses the active Codex session; this project requires no separate model API key.
 
-**Evidence supports review and development.** Frozen application packets support sampled quality reviews. Findings feed independent regression checks during development; the running agent does not rewrite its own code, skills or evaluators.
+**State and execution.** Local Python tools discover openings on public Greenhouse, Lever and Ashby boards, merge duplicate targets, and manage profiles, application packets and browser operations through a structured CLI. Approval binds the complete packet and its versions. The executor records intent before submission; an unclear receipt stays `unknown` until checked. Missing information and review decisions are collected in a local inbox and dashboard.
+
+**Review and iteration.** Frozen application packets support sampled reviews of relevance and factual support. Evidence-backed findings inform development changes, evaluator calibration and independent regression checks. The running agent does not rewrite its own code, skills or evaluators.
 
 ## Get started
 
