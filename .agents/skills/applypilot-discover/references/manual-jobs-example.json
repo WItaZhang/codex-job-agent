@@ -1,0 +1,16 @@
+[
+  {
+    "source": "manual",
+    "source_id": "",
+    "url": "https://careers.example.com/jobs/platform-engineer",
+    "apply_url": "https://careers.example.com/jobs/platform-engineer/apply",
+    "title": "Platform Engineer",
+    "company": "Example Company",
+    "location": "Example City",
+    "description": "Synthetic example only. Replace with the full currently published job description.",
+    "attributes": {
+      "research_note": "Synthetic example; not a verified opening"
+    },
+    "fetched_at": "2026-10-02T00:00:00+00:00"
+  }
+]

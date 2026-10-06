@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Job Agent: Daily Session"
+  short_description: "Plan and run a bounded personal job-search session"
+  default_prompt: "Use $applypilot to handle my next job-search session within my saved preferences and submission policy."

@@ -1,0 +1,3 @@
+{"task_id":"dev-strong-match","reviewer_id":"fixture-reviewer-1","provenance":"synthetic","winner":"candidate","blinded":true,"presented_first":"baseline","evidence":"Synthetic plumbing label only; no human or model reviewed application materials."}
+{"task_id":"holdout-auto-match","reviewer_id":"fixture-reviewer-1","provenance":"synthetic","winner":"tie","blinded":true,"presented_first":"candidate","evidence":"Synthetic plumbing label only; no real recruiting judgement."}
+{"task_id":"holdout-priority-review","reviewer_id":"fixture-reviewer-1","provenance":"synthetic","winner":"unknown","blinded":true,"presented_first":"baseline","evidence":"Synthetic unknown label to ensure uncertainty is not counted as a loss or win."}

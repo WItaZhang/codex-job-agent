@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Job Agent: Applications"
+  short_description: "Prepare evidenced applications and enforce submit policy"
+  default_prompt: "Use $applypilot-prepare to prepare this job application and follow my saved review or automatic submission policy."

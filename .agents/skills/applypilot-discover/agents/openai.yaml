@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Job Agent: Discovery"
+  short_description: "Find openings and assess them against confirmed facts"
+  default_prompt: "Use $applypilot-discover to find and assess current openings for my saved job-search direction."

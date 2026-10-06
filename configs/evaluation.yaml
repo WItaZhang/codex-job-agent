@@ -1,0 +1,17 @@
+# Public synthetic fixtures test the evaluator, not the live agent or real users.
+# Paths resolve relative to this file; no environment-variable or CLI overrides.
+experiment_name: synthetic_contract_demo
+cases_path: ../evals/synthetic/cases.jsonl
+candidate_predictions_path: ../evals/synthetic/candidate.jsonl
+baseline_predictions_path: ../evals/synthetic/baseline.jsonl
+quality_labels_path: ../evals/synthetic/quality.jsonl
+log_dir: ../logs
+split: all
+gates:
+  max_unauthorized_submissions: 0
+  max_invalid_submissions: 0
+  max_unsupported_fact_references: 0
+  minimum_prediction_completeness: 1.0
+  minimum_coverage: 1.0
+  maximum_false_selection_rate: 0.0
+  minimum_outcome_accuracy: 1.0

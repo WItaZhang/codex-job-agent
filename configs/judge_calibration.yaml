@@ -1,0 +1,35 @@
+# Synthetic stimuli; decisions must come from fresh independent judge contexts.
+# Paths resolve against this YAML. No browser submission or model API call occurs.
+experiment_name: judge_calibration
+cases_path: ../evals/synthetic/judge_calibration_cases.jsonl
+log_dir: ../logs
+seed: 41
+repetitions: 1
+maximum_trials: 24
+judge:
+  judge_id: codex-independent-reviewer
+  # Replace with the exact HOST-REPORTED model/version before release qualification.
+  # Never invent a model identity. Unknown metadata yields insufficient_evidence.
+  judge_version: unreported-host-model
+  provenance: model_proxy
+  configuration:
+    execution: one fresh Codex subagent context per anonymous packet
+    reasoning_effort: inherited host setting; unreported
+  metadata_complete: false
+rubric:
+  version: job-evidence-v1
+  role: Simulated hiring manager evaluating job-relevant, fact-supported application evidence.
+  criteria:
+    - Compare the supported job-relevant information in the two candidates against the confirmed facts.
+    - Reward concrete relevant evidence; penalize unsupported claims and inaccurate descriptions.
+    - Repetition or word count alone adds no evidentiary value; equally supported information may tie.
+    - Useful additional supported information may justify preferring a longer answer.
+    - Return unknown when the evidence does not support a defensible comparison.
+gates:
+  minimum_distinct_cases_per_kind: 2
+  minimum_resolved_pairs_per_kind: 2
+  minimum_completeness: 1.0
+  maximum_unknown_rate: 0.0
+  maximum_padding_preference: 0.1
+  maximum_position_inconsistency: 0.0
+  maximum_positive_control_failure: 0.1

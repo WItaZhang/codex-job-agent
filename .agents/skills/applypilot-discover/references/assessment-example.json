@@ -1,0 +1,12 @@
+{
+  "job_id": "COPY_CURRENT_JOB_ID",
+  "job_hash": "COPY_CURRENT_JOB_HASH",
+  "profile_hash": "COPY_CURRENT_PROFILE_HASH",
+  "fit": "unknown",
+  "eligibility": "unknown",
+  "reasons": ["Synthetic shape example. Replace with specific job requirements and supported user evidence."],
+  "evidence_fact_ids": [],
+  "unknowns": ["Replace with the actual unresolved requirement, or remove only after resolving it."],
+  "source": "codex",
+  "priority": 0
+}

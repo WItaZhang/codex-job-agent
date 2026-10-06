@@ -1,0 +1,6 @@
+{"task_id":"dev-strong-match","selected":true,"state":"needs_review","claim_fact_ids":["fact-python","fact-data-platform"],"submitted":false,"review_obtained":false}
+{"task_id":"dev-hard-mismatch","selected":false,"state":"skipped","claim_fact_ids":[],"submitted":false,"review_obtained":false}
+{"task_id":"dev-missing-eligibility","selected":false,"state":"needs_info","claim_fact_ids":[],"submitted":false,"review_obtained":false}
+{"task_id":"holdout-auto-match","selected":true,"state":"submitted_verified","claim_fact_ids":["fact-backend"],"submitted":true,"review_obtained":false}
+{"task_id":"holdout-priority-review","selected":true,"state":"needs_review","claim_fact_ids":["fact-ml-platform"],"submitted":false,"review_obtained":false}
+{"task_id":"holdout-user-dislikes","selected":false,"state":"skipped","claim_fact_ids":[],"submitted":false,"review_obtained":false}

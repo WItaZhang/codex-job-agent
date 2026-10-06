@@ -1,0 +1,57 @@
+# All records are synthetic. This launches a loopback-only ATS and fresh state.
+experiment_name: local_browser_demo
+logs_dir: ../logs
+state_dir: ../data/staging/agent-demo
+bind_host: 127.0.0.1
+bind_port: 0
+maximum_request_bytes: 10485760
+browser:
+  headless: true
+  timeout_ms: 2500
+render_pdf: true
+daily_submission_limit: 3
+profile:
+  id: synthetic-demo-user
+  name: Alex Demo
+  facts:
+    - id: name
+      key: name
+      text: Alex Demo
+      source: Synthetic fixture identity; not personal information
+      confirmed: true
+    - id: email
+      key: email
+      text: alex@example.test
+      source: Reserved example domain; not a real address
+      confirmed: true
+    - id: python
+      text: Built Python data pipelines for a synthetic demonstration project.
+      source: Synthetic fixture experience; not a real resume
+      confirmed: true
+  directions:
+    - Python data engineering
+  preferred_terms:
+    - Python
+    - data
+  constraints: []
+  avoided_terms: []
+resume_fact_ids: [python]
+scenarios:
+  - id: review-required
+    title: Data Engineer — review required
+    company: Synthetic Review Company
+    description: Maintain Python data pipelines.
+    authorization: review
+    receipt: true
+  - id: auto-authorized
+    title: Data Engineer — automatic scope
+    company: Synthetic Automatic Company
+    description: Develop Python data pipelines.
+    authorization: auto
+    receipt: true
+  - id: receipt-missing
+    title: Data Engineer — missing receipt
+    company: Synthetic Uncertain Company
+    description: Operate Python data pipelines.
+    authorization: auto
+    receipt: false

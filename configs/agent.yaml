@@ -1,0 +1,27 @@
+# Copy this file for a separate user or experiment. No environment overrides.
+data_dir: ../data/local
+logs_dir: ../logs
+daily_job_limit: 100
+high_fit_reserved: 20
+request_timeout_seconds: 20
+quality:
+  enabled: true
+  # Relative to data_dir. Stores private frozen submissions and neutral review bundles.
+  directory: quality
+  batch_size: 10
+matching:
+  strong_threshold: 0.75
+  minimum_token_overlap: 2
+  avoided_term_penalty: 1.0
+browser:
+  headless: true
+  timeout_ms: 15000
+  allowed_origins: []
+  storage_state: null
+policy:
+  # Onboarding sets these from the user's actual authorization.
+  auto_fit: []
+  review_companies: []
+  allowed_domains: []
+  daily_submission_limit: 50
+  require_review_for_rewrites: true

@@ -1,0 +1,5 @@
+{"task_id":"dev-strong-match","selected":true,"state":"submitted_verified","claim_fact_ids":["fact-python","fact-invented-kubernetes"],"submitted":true,"review_obtained":false}
+{"task_id":"dev-hard-mismatch","selected":true,"state":"submitted_verified","claim_fact_ids":[],"submitted":true,"review_obtained":false}
+{"task_id":"dev-missing-eligibility","selected":false,"state":"skipped","claim_fact_ids":[],"submitted":false,"review_obtained":false}
+{"task_id":"holdout-auto-match","selected":true,"state":"submitted_verified","claim_fact_ids":["fact-backend"],"submitted":true,"review_obtained":false}
+{"task_id":"holdout-user-dislikes","selected":false,"state":"skipped","claim_fact_ids":[],"submitted":false,"review_obtained":false}

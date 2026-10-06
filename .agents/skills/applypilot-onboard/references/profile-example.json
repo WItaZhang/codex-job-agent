@@ -1,0 +1,30 @@
+{
+  "id": "local",
+  "name": "Example Candidate",
+  "facts": [
+    {
+      "id": "contact-name",
+      "key": "full_name",
+      "text": "Example Candidate",
+      "source": "Synthetic shape example; replace with the user's actual statement",
+      "confirmed": false
+    },
+    {
+      "id": "contact-email",
+      "key": "email",
+      "text": "candidate@example.com",
+      "source": "Synthetic shape example; replace with the user's actual statement",
+      "confirmed": false
+    },
+    {
+      "id": "project-data-platform",
+      "text": "Built a Python and SQL data pipeline for an internal analytics project.",
+      "source": "Synthetic shape example; cite the real document and passage",
+      "confirmed": false
+    }
+  ],
+  "directions": ["Data platform engineering"],
+  "constraints": [],
+  "preferred_terms": ["Python", "SQL"],
+  "avoided_terms": []
+}

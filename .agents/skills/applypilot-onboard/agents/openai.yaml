@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Job Agent: Personalization"
+  short_description: "Confirm facts, job preferences and application scope"
+  default_prompt: "Use $applypilot-onboard to personalize my job agent from my background and application preferences."
