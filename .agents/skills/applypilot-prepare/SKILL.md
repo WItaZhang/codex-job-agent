@@ -33,9 +33,15 @@ match, devote additional effort to selecting the best relevant project evidence,
 ordering it for the role, answering the actual questions and checking the final
 document. A generic cover letter is not a substitute for those decisions.
 
-The built-in `render` command selects and orders confirmed facts verbatim into
-Markdown, HTML and optionally PDF. It does not transform a list of facts into a
-professionally designed resume by itself. Review the actual output for readable
+Use `context.profile_evidence` for stable evidence IDs derived from the typed
+profile: a complete record (`project-data-platform`) or one field
+(`contact.email`). Packet `fact_ids` retain their compatibility name but refer
+to these IDs; never maintain another facts collection.
+
+The built-in `render` command groups selected confirmed records/fields by
+profile section into Markdown, HTML and optionally PDF. Include contact fields
+explicitly: it never silently inserts unselected personal or visa information.
+It provides a basic sectioned document, not a professionally tailored layout. Review the actual output for readable
 structure and completeness. For a user-requested richer resume or free-text
 answer, use available document tools, keep the artifact under configured local
 data, and map substantive claims to fact IDs. Review dates, numbers, ownership,

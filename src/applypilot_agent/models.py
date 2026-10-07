@@ -2,56 +2,25 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator
 
+from .contracts import Record
+from .profile_models import Constraint, Profile
 
-class Record(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-
-
-class Fact(Record):
-    id: str = Field(min_length=1)
-    text: str = Field(min_length=1)
-    source: str = Field(min_length=1)
-    confirmed: bool = False
-    key: str | None = None
-    value: str | bool | None = None
-    scope_job_ids: list[str] = Field(default_factory=list)
-
-
-class Constraint(Record):
-    field: str
-    operator: Literal["equals", "contains", "excludes", "one_of"]
-    value: str | list[str]
-
-    @model_validator(mode="after")
-    def valid_values(self):
-        values = self.value if isinstance(self.value, list) else [self.value]
-        if not self.field.strip() or not values or any(not item.strip() for item in values):
-            raise ValueError("Constraint field and values must not be empty")
-        if self.operator == "equals" and len(values) != 1:
-            raise ValueError("equals accepts one value; use one_of for alternatives")
-        return self
-
-
-class Profile(Record):
-    id: str = "local"
-    name: str = Field(min_length=1)
-    facts: list[Fact] = Field(default_factory=list)
-    directions: list[str] = Field(default_factory=list)
-    constraints: list[Constraint] = Field(default_factory=list)
-    preferred_terms: list[str] = Field(default_factory=list)
-    avoided_terms: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def unique_facts(self):
-        ids = [fact.id for fact in self.facts]
-        if len(ids) != len(set(ids)):
-            raise ValueError("Fact IDs must be unique")
-        keys = [fact.key for fact in self.facts if fact.key]
-        if len(keys) != len(set(keys)):
-            raise ValueError("Fact keys must be unique; resolve conflicting answers first")
-        return self
+__all__ = [
+    "Answer",
+    "ApplicationState",
+    "Assessment",
+    "Attachment",
+    "Claim",
+    "Constraint",
+    "Decision",
+    "Job",
+    "Packet",
+    "Policy",
+    "Profile",
+    "Record",
+]
 
 
 class Job(Record):

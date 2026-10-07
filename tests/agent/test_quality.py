@@ -15,7 +15,8 @@ from typer.testing import CliRunner
 
 from applypilot_agent.config import Settings
 from applypilot_agent.execution import Executor
-from applypilot_agent.models import Answer, Assessment, Attachment, Fact, Job, Packet, Profile
+from applypilot_agent.models import Answer, Assessment, Attachment, Job, Packet, Profile
+from applypilot_agent.profile_models import PersonalInfo, Project, Provenance, SearchPreferences
 from applypilot_agent.quality import QualityReport, QualityService
 from applypilot_agent.quality.archive import verified_snapshot
 from applypilot_agent.serialization import digest
@@ -52,12 +53,27 @@ def service(tmp_path):
     result = AgentService(Settings(data_dir=tmp_path / "state", logs_dir=tmp_path / "logs"))
     result.save_profile(
         Profile(
-            name="Synthetic Candidate",
-            facts=[
-                Fact(id="name", text="Synthetic Candidate", source="Synthetic fixture", confirmed=True),
-                Fact(id="python", text="Built Python pipelines", source="Synthetic fixture", confirmed=True),
-                Fact(id="unconfirmed", text="Private unconfirmed fact", source="Fixture", confirmed=False),
+            personal=PersonalInfo(
+                id="contact",
+                full_name="Synthetic Candidate",
+                email="candidate@example.test",
+                evidence=Provenance(source="Synthetic fixture", confirmed=True),
+            ),
+            projects=[
+                Project(
+                    id="python",
+                    name="Python pipelines",
+                    summary="Built Python pipelines",
+                    evidence=Provenance(source="Synthetic fixture", confirmed=True),
+                ),
+                Project(
+                    id="unconfirmed",
+                    name="Private project",
+                    summary="Private unconfirmed fact",
+                    evidence=Provenance(source="Synthetic fixture"),
+                ),
             ],
+            preferences=SearchPreferences(preferred_terms=["Python"]),
         )
     )
     return result
@@ -93,9 +109,9 @@ def prepare_job(service, number=0, *, extra_answer=False):
         ),
     )
     attachment = Attachment.model_validate(service.render(job_id, ["python"], pdf=False)["attachment"])
-    answers = {"#name": Answer(value="Synthetic Candidate", fact_ids=["name"])}
+    answers = {"#name": Answer(value="Synthetic Candidate", fact_ids=["contact.full_name"])}
     if extra_answer:
-        answers["#unused"] = Answer(value="UNSENT_ANSWER_MUST_NOT_LEAK", fact_ids=["name"])
+        answers["#unused"] = Answer(value="UNSENT_ANSWER_MUST_NOT_LEAK", fact_ids=["contact.full_name"])
     packet = Packet(
         job_id=job_id,
         job_hash=context["job_hash"],
@@ -332,7 +348,7 @@ def test_bundle_uses_frozen_versions_and_separate_views_without_unsent_data(serv
     current = service.context(ticket["job_id"])
     Path(current["application"]["packet"]["attachments"][0]["path"]).write_text("Later edited resume")
     profile = service.profile()
-    profile.facts[1].text = "Later changed source fact"
+    profile.projects[0].summary = "Later changed source fact"
     service.save_profile(profile)
     replay = quality.prepare(ticket["id"])
     assert replay["bundle_hash"] == bundle["bundle_hash"]

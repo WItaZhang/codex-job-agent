@@ -75,7 +75,10 @@ uv run applypilot-agent --config configs/agent.yaml assess JOB_ID --path data/lo
 ```
 
 Choose `fit` (`strong`, `possible`, `no`, `unknown`) and `eligibility` (`pass`,
-`fail`, `unknown`) separately. Cite confirmed fact IDs and concrete JD
+`fail`, `unknown`) separately. Read qualifications from the typed background
+sections and search requirements from `profile.preferences`. Cite confirmed
+record/field IDs from `context.profile_evidence` (for example a project ID or
+`project-data-platform.summary`) in `evidence_fact_ids`, and concrete JD
 requirements in `reasons`. A missing optional skill need not reject a job;
 unknown work authorization or an unresolved hard constraint cannot become pass.
 Use `unknowns` for consequential unresolved questions. A required skill cannot

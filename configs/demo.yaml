@@ -11,30 +11,28 @@ browser:
 render_pdf: true
 daily_submission_limit: 3
 profile:
+  schema_version: 2
   id: synthetic-demo-user
-  name: Alex Demo
-  facts:
-    - id: name
-      key: name
-      text: Alex Demo
+  personal:
+    id: contact
+    full_name: Alex Demo
+    email: alex@example.test
+    evidence:
       source: Synthetic fixture identity; not personal information
       confirmed: true
-    - id: email
-      key: email
-      text: alex@example.test
-      source: Reserved example domain; not a real address
-      confirmed: true
+  projects:
     - id: python
-      text: Built Python data pipelines for a synthetic demonstration project.
-      source: Synthetic fixture experience; not a real resume
-      confirmed: true
-  directions:
-    - Python data engineering
-  preferred_terms:
-    - Python
-    - data
-  constraints: []
-  avoided_terms: []
+      name: Synthetic data pipeline
+      summary: Built Python data pipelines for a synthetic demonstration project.
+      technologies: [Python]
+      evidence:
+        source: Synthetic fixture experience; not a real resume
+        confirmed: true
+  preferences:
+    directions: [Python data engineering]
+    preferred_terms: [Python, data]
+    constraints: []
+    avoided_terms: []
 resume_fact_ids: [python]
 scenarios:
   - id: review-required

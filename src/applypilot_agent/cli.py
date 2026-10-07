@@ -71,9 +71,9 @@ def schema(kind: str):
 
 @app.command("profile-set")
 @guarded
-def profile_set(ctx: typer.Context, path: Path):
-    """Save confirmed facts and preferences from onboarding; never infer confirmation."""
-    emit(ctx.obj.save_profile(Profile.model_validate(read_json(path))))
+def profile_set(ctx: typer.Context, path: Path, expected_hash: str | None = None):
+    """Replace the typed current profile; use --expected-hash when editing existing state."""
+    emit(ctx.obj.save_profile(Profile.model_validate(read_json(path)), expected_hash=expected_hash))
 
 
 @app.command()
@@ -81,6 +81,16 @@ def profile_set(ctx: typer.Context, path: Path):
 def profile(ctx: typer.Context):
     value = ctx.obj.profile()
     emit({"profile": value.model_dump(), "profile_hash": digest(value)})
+
+
+@app.command("profile-export")
+@guarded
+def profile_export(ctx: typer.Context, path: Path):
+    """Export a readable current snapshot. The output path is explicit task input."""
+    value = ctx.obj.profile()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    emit({"path": str(path.resolve()), "profile_hash": digest(value), "kind": "snapshot"})
 
 
 @app.command("import-jobs")

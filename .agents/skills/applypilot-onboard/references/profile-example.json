@@ -1,30 +1,191 @@
 {
+  "schema_version": 2,
   "id": "local",
-  "name": "Example Candidate",
-  "facts": [
-    {
-      "id": "contact-name",
-      "key": "full_name",
-      "text": "Example Candidate",
-      "source": "Synthetic shape example; replace with the user's actual statement",
-      "confirmed": false
+  "personal": {
+    "id": "contact",
+    "evidence": {
+      "source": "Synthetic shape example only; replace with an authorized source and passage",
+      "confirmed": false,
+      "scope_job_ids": []
     },
+    "field_evidence": {},
+    "full_name": "Example Candidate",
+    "preferred_name": null,
+    "email": "candidate@example.test",
+    "phone": null,
+    "location": "Example City",
+    "linkedin_url": null,
+    "github_url": null,
+    "website_url": null
+  },
+  "work_authorization": [
     {
-      "id": "contact-email",
-      "key": "email",
-      "text": "candidate@example.com",
-      "source": "Synthetic shape example; replace with the user's actual statement",
-      "confirmed": false
-    },
-    {
-      "id": "project-data-platform",
-      "text": "Built a Python and SQL data pipeline for an internal analytics project.",
-      "source": "Synthetic shape example; cite the real document and passage",
-      "confirmed": false
+      "id": "work-us",
+      "evidence": {
+        "source": "Synthetic shape example only; replace with an authorized source and passage",
+        "confirmed": false,
+        "scope_job_ids": []
+      },
+      "field_evidence": {},
+      "country": "US",
+      "status": "Example status; verify actual visa and authorization separately",
+      "authorized_to_work": null,
+      "requires_sponsorship_now": null,
+      "requires_sponsorship_future": null,
+      "valid_until": null
     }
   ],
-  "directions": ["Data platform engineering"],
-  "constraints": [],
-  "preferred_terms": ["Python", "SQL"],
-  "avoided_terms": []
+  "education": [
+    {
+      "id": "education-ms",
+      "evidence": {
+        "source": "Synthetic shape example only; replace with an authorized source and passage",
+        "confirmed": false,
+        "scope_job_ids": []
+      },
+      "field_evidence": {},
+      "start_date": "2022-09",
+      "end_date": "2024-06",
+      "current": null,
+      "institution": "Synthetic University",
+      "degree": "MSc",
+      "field_of_study": "Computer Science",
+      "location": null,
+      "gpa": null,
+      "thesis": null,
+      "highlights": [
+        "Synthetic thesis on data processing"
+      ]
+    }
+  ],
+  "work_experience": [
+    {
+      "id": "work-engineer",
+      "evidence": {
+        "source": "Synthetic shape example only; replace with an authorized source and passage",
+        "confirmed": false,
+        "scope_job_ids": []
+      },
+      "field_evidence": {},
+      "start_date": "2024-07",
+      "end_date": null,
+      "current": true,
+      "employer": "Synthetic Company",
+      "title": "Data Engineer",
+      "employment_type": "Full-time",
+      "location": null,
+      "summary": "Built internal data services.",
+      "highlights": [
+        "Implemented a documented pipeline for the synthetic team."
+      ],
+      "technologies": [
+        "Python",
+        "SQL"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "id": "project-data-platform",
+      "evidence": {
+        "source": "Synthetic shape example only; replace with an authorized source and passage",
+        "confirmed": false,
+        "scope_job_ids": []
+      },
+      "field_evidence": {},
+      "start_date": null,
+      "end_date": null,
+      "current": null,
+      "name": "Synthetic analytics platform",
+      "role": "Developer",
+      "summary": "Built a Python and SQL data pipeline for an internal analytics project.",
+      "highlights": [],
+      "technologies": [
+        "Python",
+        "SQL"
+      ],
+      "url": null,
+      "work_experience_id": "work-engineer"
+    }
+  ],
+  "publications": [
+    {
+      "id": "paper-pipelines",
+      "evidence": {
+        "source": "Synthetic shape example only; replace with an authorized source and passage",
+        "confirmed": false,
+        "scope_job_ids": []
+      },
+      "field_evidence": {},
+      "title": "A Synthetic Study of Data Pipelines",
+      "authors": [
+        "Example Candidate",
+        "Example Coauthor"
+      ],
+      "venue": "Synthetic Workshop",
+      "year": 2024,
+      "status": "under_review",
+      "doi": null,
+      "url": null,
+      "contribution": "Designed the synthetic evaluation."
+    }
+  ],
+  "competitions": [
+    {
+      "id": "competition-data",
+      "evidence": {
+        "source": "Synthetic shape example only; replace with an authorized source and passage",
+        "confirmed": false,
+        "scope_job_ids": []
+      },
+      "field_evidence": {},
+      "name": "Synthetic Data Challenge",
+      "organizer": "Synthetic Organizer",
+      "year": 2023,
+      "award": "Example award",
+      "rank": "Example rank",
+      "team": "Synthetic Team",
+      "contribution": "Built the feature processing pipeline.",
+      "url": null
+    }
+  ],
+  "skills": [
+    {
+      "id": "skill-python",
+      "evidence": {
+        "source": "Synthetic shape example only; replace with an authorized source and passage",
+        "confirmed": false,
+        "scope_job_ids": []
+      },
+      "field_evidence": {},
+      "name": "Python",
+      "category": "Programming language",
+      "proficiency": null,
+      "supporting_record_ids": [
+        "project-data-platform"
+      ]
+    }
+  ],
+  "availability": {
+    "id": "availability",
+    "evidence": {
+      "source": "Synthetic shape example only; replace with an authorized source and passage",
+      "confirmed": false,
+      "scope_job_ids": []
+    },
+    "field_evidence": {},
+    "earliest_start": null,
+    "notice_period": null
+  },
+  "preferences": {
+    "directions": [
+      "Data platform engineering"
+    ],
+    "constraints": [],
+    "preferred_terms": [
+      "Python",
+      "SQL"
+    ],
+    "avoided_terms": []
+  }
 }

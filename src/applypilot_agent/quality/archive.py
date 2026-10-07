@@ -5,6 +5,8 @@ import json
 import re
 from pathlib import Path
 
+from ..profile_evidence import confirmed_evidence
+from ..profile_models import Profile
 from ..serialization import canonical, digest, utc_now
 from .rubric import RUBRIC
 
@@ -79,6 +81,17 @@ def verified_snapshot(directory: Path, record: dict) -> tuple[dict, Path]:
     return manifest, path.parent
 
 
+def archived_evidence(profile: dict, job_id: str) -> list[dict]:
+    # Read-only compatibility for immutable pre-v2 submission archives.
+    if "facts" in profile and "schema_version" not in profile:
+        return [
+            fact
+            for fact in profile["facts"]
+            if fact["confirmed"] and (not fact["scope_job_ids"] or job_id in fact["scope_job_ids"])
+        ]
+    return [item.model_dump() for item in confirmed_evidence(Profile.model_validate(profile), job_id).values()]
+
+
 def export_bundle(output: Path, ticket: dict, manifest: dict, source_dir: Path) -> dict:
     """Neutral copied files: no original filenames, producer grades or browser plan."""
     output.mkdir(parents=True, exist_ok=False)
@@ -110,11 +123,7 @@ def export_bundle(output: Path, ticket: dict, manifest: dict, source_dir: Path) 
     }
     factual = {
         "rubric": {key: RUBRIC[key] for key in ("version", "provenance", "factual", "shared")},
-        "facts": [
-            fact
-            for fact in manifest["profile"]["facts"]
-            if fact["confirmed"] and (not fact["scope_job_ids"] or manifest["job_id"] in fact["scope_job_ids"])
-        ],
+        "facts": archived_evidence(manifest["profile"], manifest["job_id"]),
         "answer_links": [
             {"id": f"answer-{index}", "fact_ids": answer["fact_ids"]}
             for index, answer in enumerate(submitted_answers.values(), 1)

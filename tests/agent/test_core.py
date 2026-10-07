@@ -6,7 +6,8 @@ import pytest
 
 from applypilot_agent.config import Settings
 from applypilot_agent.matching import baseline, check_constraints
-from applypilot_agent.models import Assessment, Constraint, Fact, Job, Packet, Policy, Profile
+from applypilot_agent.models import Assessment, Constraint, Job, Packet, Policy, Profile
+from applypilot_agent.profile_models import PersonalInfo, Project, Provenance, SearchPreferences
 from applypilot_agent.serialization import digest, job_digest
 from applypilot_agent.service import AgentService
 
@@ -17,12 +18,21 @@ def service(tmp_path):
     service = AgentService(settings)
     service.save_profile(
         Profile(
-            name="Example Candidate",
-            facts=[
-                Fact(id="python", text="Built Python data pipelines", source="test resume", confirmed=True),
-                Fact(id="email", text="candidate@example.test", source="user", confirmed=True, key="email"),
+            personal=PersonalInfo(
+                id="contact",
+                full_name="Example Candidate",
+                email="candidate@example.test",
+                evidence=Provenance(source="Synthetic fixture", confirmed=True),
+            ),
+            projects=[
+                Project(
+                    id="python",
+                    name="Python pipelines",
+                    summary="Built Python data pipelines",
+                    evidence=Provenance(source="Synthetic fixture", confirmed=True),
+                ),
             ],
-            preferred_terms=["Python"],
+            preferences=SearchPreferences(preferred_terms=["Python"]),
         )
     )
     service.import_jobs(
@@ -58,7 +68,7 @@ def test_changed_profile_invalidates_packet_and_approval(service):
     saved = service.save_packet(packet)
     service.approve("job-1", saved["packet_hash"], "User approved this exact packet")
     profile = service.profile()
-    profile.facts[0].text = "Maintained Python pipelines"
+    profile.projects[0].summary = "Maintained Python pipelines"
     service.save_profile(profile)
     with pytest.raises(ValueError, match="stale"):
         service.approve("job-1", saved["packet_hash"], "Old approval")
@@ -86,7 +96,7 @@ def test_new_packet_invalidates_previous_approval(service):
 
 def test_missing_constraint_is_unknown_not_rejection(service):
     profile = service.profile()
-    profile.constraints = [Constraint(field="sponsorship", operator="equals", value="yes")]
+    profile.preferences.constraints = [Constraint(field="sponsorship", operator="equals", value="yes")]
     job = Job.model_validate(service.context("job-1")["job"])
     assert check_constraints(profile, job)[0] == "unknown"
     assessment = baseline(profile, job)
@@ -96,7 +106,7 @@ def test_missing_constraint_is_unknown_not_rejection(service):
 
 def test_codex_cannot_override_explicit_constraint(service):
     profile = service.profile()
-    profile.constraints = [Constraint(field="location", operator="equals", value="Remote")]
+    profile.preferences.constraints = [Constraint(field="location", operator="equals", value="Remote")]
     service.save_profile(profile)
     context = service.context("job-1")
     assessment = Assessment(
@@ -184,7 +194,7 @@ def test_cross_source_refresh_updates_canonical_job_and_invalidates_old_review(s
 
 def test_scoped_fact_cannot_be_reused_for_other_job(service):
     profile = service.profile()
-    profile.facts[0].scope_job_ids = ["a-different-job"]
+    profile.projects[0].evidence.scope_job_ids = ["a-different-job"]
     service.save_profile(profile)
     service.assess("job-1")
     with pytest.raises(ValueError, match="Unsupported"):

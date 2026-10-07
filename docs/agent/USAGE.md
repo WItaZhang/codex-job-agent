@@ -49,13 +49,20 @@ JSON，也不需要每次求职都重复介绍自己。
 
 它会分开保存：
 
-- **事实**：经历、项目、技能、日期、联系方式及表单答案，有来源和确认状态。
+- **结构化档案**：个人信息、工作许可、教育、工作经历、项目、论文、竞赛、技能和
+  可入职时间各有固定字段；每条记录有稳定 ID、来源和确认状态。
 - **偏好与限制**：希望做什么、哪些条件必须满足、哪些条件只是更喜欢。
 - **投递授权**：哪些匹配档位可以自动提交、哪些公司必须审核、允许的投递站点
   和每天的提交尝试上限。
 
 未确认的信息不会自动补成事实。例如，“简历里没有写 Kubernetes”不等于
 “用户不会 Kubernetes”，也不意味着助手可以替用户编出相关项目。
+
+查看[档案模型说明](PROFILE.md)、[空白模板](../../.agents/skills/applypilot-onboard/references/profile-template.json)
+和[完整结构示例](../../.agents/skills/applypilot-onboard/references/profile-example.json)。
+运行时只读 SQLite 中的一份当前档案；修改原记录的字段，不叠加相互否定的事实。
+`profile-export data/local/profile.json` 可导出可读文件，编辑后通过 `profile-set`
+保存才会生效。更新时携带导出返回的 `--expected-hash`，防止旧文件覆盖较新档案。
 
 默认配置不允许自动提交。你可以在首次设置时授权，也可以之后修改。已经明确
 授权的范围内，助手不需要每个岗位都再问一次；超出范围才会交给你处理。
@@ -165,6 +172,7 @@ uv run applypilot-agent --config configs/agent.yaml schema browser
 
 # 保存已有真实资料，导入已研究的岗位，或读取一个已核实的公开岗位板
 uv run applypilot-agent --config configs/agent.yaml profile-set data/local/profile.json
+uv run applypilot-agent --config configs/agent.yaml profile-export data/local/profile.json
 uv run applypilot-agent --config configs/agent.yaml import-jobs data/local/researched-jobs.json
 uv run applypilot-agent --config configs/agent.yaml discover lever leverdemo
 
@@ -225,12 +233,17 @@ uv run applypilot-agent --config configs/agent.yaml events --job-id JOB_ID
   不能为了通过流程而跳过检查或使用其他浏览器直接提交。
 - 自动提交必须有真实可验证的完成条件。当前没有为所有 ATS 预置完整的表单和回执
   适配表；无法建立完成条件时可以准备材料，但会留下具体交接事项。
-- 内置材料生成器把选中的已确认事实按顺序排成简洁文档。它不自动创造经历，也不
+- 内置材料生成器把选中的已确认记录/字段按档案分区排成简洁文档；证据 ID 来自
+  `context.profile_evidence`，如 `contact.email`。它不自动创造经历，也不
   保证所有简历风格都适合；高匹配岗位应检查最终文档，并在需要时审核更丰富的改写。
 - 事实引用和文件哈希能检查来源、版本和文件完整性，不能证明任意文字改写语义真实。
   模型评审是辅助信号，真实用户反馈、人工盲评和招聘结果仍需分别采集。
 - 技能和本地工具面向协作式 Codex 使用；它们不是限制拥有完整 shell 权限的恶意代理
   的安全沙箱。维护代码或技能时仍须独立检查回归和行为边界。
+
+开发时可另行运行 [当前档案更新实验](PROFILE_MEMORY_EXPERIMENT.md)，比较 Codex
+直接更新与 LangMem Profile。它需要可选 `memory-eval` 依赖，只使用合成资料，
+不初始化或修改个人档案；不属于日常求职流程。
 
 工程验证可运行：
 

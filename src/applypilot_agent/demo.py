@@ -17,6 +17,7 @@ from .config import Settings
 from .demo_support import DemoConfig, DemoScenario, LocalATS, load_demo_config
 from .execution import Executor
 from .models import Answer, Assessment, Attachment, Claim, Job, Packet, Policy
+from .profile_evidence import profile_evidence
 from .serialization import utc_now
 from .service import AgentService
 
@@ -45,8 +46,11 @@ def _prepare_packet(service: AgentService, executor: Executor, config: DemoConfi
     inspection = executor.inspect(job_id)
     _require(len(inspection["fields"]) >= 3, "The real browser did not observe the expected local form")
     rendered = service.render(job_id, config.resume_fact_ids, pdf=config.render_pdf)
-    facts = {fact.id: fact for fact in config.profile.facts}
-    facts_by_key = {fact.key: fact for fact in config.profile.facts if fact.key}
+    facts = {fact.id: fact for fact in profile_evidence(config.profile)}
+    facts_by_key = {
+        "name": facts[f"{config.profile.personal.id}.full_name"],
+        "email": facts[f"{config.profile.personal.id}.email"],
+    }
     answers = {
         "#name": Answer(value=facts_by_key["name"].text, fact_ids=[facts_by_key["name"].id]),
         "#email": Answer(value=facts_by_key["email"].text, fact_ids=[facts_by_key["email"].id]),

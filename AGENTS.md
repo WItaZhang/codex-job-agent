@@ -1,5 +1,23 @@
 # Codex Job Agent development
 
+## Project identity
+
+User-confirmed on 2026-10-06: the active personal project is
+`WItaZhang/codex-job-agent`: https://github.com/WItaZhang/codex-job-agent.
+
+Use this repository's code, configuration, skills and local state as the source
+of truth for project questions and changes. The sibling `ApplyPilot 2` checkout
+is a legacy project, not the current working project. Do not carry its database
+contents, profile status or implementation conclusions into this project;
+verify them here. Use the legacy checkout only when the user explicitly asks
+to inspect it or compare projects.
+
+The retained `applypilot*` skill names, `applypilot-agent` CLI and
+`applypilot_agent` Python package are compatibility names within this project.
+They do not mean that work should return to the legacy ApplyPilot checkout.
+
+## Runtime
+
 The user-facing runtime is `src/applypilot_agent`, with repository skills in
 `.agents/skills`. Codex owns planning and language reasoning; the Python package
 provides explicit, stateful tools. This standalone repository contains only the

@@ -15,6 +15,8 @@ Unknown facts are batched into an inbox; unrelated jobs can continue.
 ## Modules and boundaries
 
 - `models`: versioned input/output contracts, no I/O.
+- `profile_models`: typed current background, preferences and field provenance.
+- `profile_evidence`: derived record/field references for matching, forms and audits.
 - `config`: YAML loading and resolved paths, no application decisions.
 - `store`: SQLite transactions, snapshots and append-only events.
 - `matching`: deterministic baseline and constraint checks; Codex can supply
@@ -28,13 +30,23 @@ Unknown facts are batched into an inbox; unrelated jobs can continue.
 - `quality`: frozen submission evidence, persistent random audit batches, neutral
   reviewer views, evidence-bound model reports and user-facing alerts.
 - `evaluation.calibration`: frozen paired stimuli and independent judge-bias diagnostics.
+- `evaluation.profile_memory`: development-only synthetic comparison of direct
+  Codex profile updates and real LangMem Profile updates through a shared Codex
+  CLI model adapter; optional dependencies, isolated logs, no production writes.
 - `improvement`: development-only RCA proposals and independently reviewed,
   recomputed regression/comparison evidence; no runtime self-modification.
 - `cli`: thin JSON command interface consumed by skills and humans.
 
 ## Required invariants
 
-1. Confirmed user facts are separate from preferences and action authorization.
+1. Typed profile v2 separates personal/contact, work authorization, education,
+   employment, projects, publications, competitions, skills and availability
+   from search preferences and action authorization. `profile_models` validates
+   stable entity IDs and field provenance; `profile_evidence` derives read-only
+   citation IDs, never another writable facts collection. See [PROFILE.md](PROFILE.md).
+   Profile edits replace the active record; immutable versions preserve history.
+   `profile-export` produces readable JSON; `profile-set --expected-hash` guards
+   against stale edits. Legacy flat profiles require reviewed conversion.
 2. Provider failure never becomes a business score or a successful submission.
 3. Job, profile, packet and browser plan versions bind approval; changes invalidate it.
 4. Persist submission intent before the external click. Unknown outcomes cannot be
@@ -67,6 +79,9 @@ checks establish a working Codex skill set and tested local execution contract,
 not universal ATS submission support or measured hiring improvement.
 
 The quality lifecycle and its operator commands are documented in [QUALITY.md](QUALITY.md).
+The optional profile-update comparison is documented in
+[PROFILE_MEMORY_EXPERIMENT.md](PROFILE_MEMORY_EXPERIMENT.md). It does not enable
+native Codex Memories or add a second model API to the production runtime.
 Python freezes and validates evidence; the active Codex coordinator runs separate
 review contexts. This is not an unattended model-review service or a statistical
 drift detector. Model-proxy findings remain distinct from human evaluation.

@@ -7,6 +7,7 @@ from .matching import baseline, check_constraints
 from .materials import render_resume, validate_evidence
 from .models import Assessment, Job, Packet, Profile
 from .policy import route
+from .profile_evidence import confirmed_evidence, profile_evidence
 from .serialization import destination_key, digest, job_digest, utc_now
 from .store import Store
 
@@ -27,14 +28,19 @@ class AgentService:
             raise ValueError("No profile. Complete onboarding before matching or applying.")
         return Profile.model_validate(data)
 
-    def save_profile(self, profile: Profile) -> dict:
+    def save_profile(self, profile: Profile, *, expected_hash: str | None = None) -> dict:
+        profile = Profile.model_validate(profile.model_dump(mode="json"))
         with self.store.transaction() as db:
+            if expected_hash is not None:
+                current = self.store.get(db, "profile", "active")
+                if current is None or digest(current) != expected_hash:
+                    raise ValueError("Profile changed since it was read; reload before saving")
             self.store.put(db, "profile", "active", profile)
             self.store.put(db, "profile_version", digest(profile), profile)
             self.store.event(db, "profile_updated", {"profile_hash": digest(profile)})
             # Preserve packets for review; their version check will prevent reuse.
             db.execute("UPDATE applications SET approval=NULL WHERE state NOT IN ('submitted','submitting','unknown')")
-        return {"profile_hash": digest(profile), "confirmed_facts": sum(f.confirmed for f in profile.facts)}
+        return {"profile_hash": digest(profile), "confirmed_evidence_count": len(confirmed_evidence(profile))}
 
     def import_jobs(self, jobs: list[Job]) -> dict:
         aliases, observed = {}, set()
@@ -90,6 +96,7 @@ class AgentService:
             return {
                 "profile": profile.model_dump(),
                 "profile_hash": digest(profile),
+                "profile_evidence": [item.model_dump() for item in confirmed_evidence(profile, job_id).values()],
                 "job": job.model_dump(),
                 "job_hash": job_digest(job),
                 "application": self.store.application(db, job_id),
@@ -112,7 +119,7 @@ class AgentService:
                 raise ValueError("Assessment refers to stale or different inputs")
             known = {
                 fact.id
-                for fact in profile.facts
+                for fact in profile_evidence(profile)
                 if fact.confirmed and (not fact.scope_job_ids or job.id in fact.scope_job_ids)
             }
             if set(assessment.evidence_fact_ids) - known:
@@ -200,7 +207,7 @@ class AgentService:
         profile = Profile.model_validate(context["profile"])
         scoped_facts = {
             fact.id
-            for fact in profile.facts
+            for fact in profile_evidence(profile)
             if fact.confirmed and (not fact.scope_job_ids or job_id in fact.scope_job_ids)
         }
         if set(fact_ids) - scoped_facts:
@@ -219,7 +226,7 @@ class AgentService:
             from .serialization import canonical
 
             manifest.write_text(canonical(identity), encoding="utf-8")
-        result = render_resume(profile, fact_ids, output, pdf=pdf)
+        result = render_resume(profile, fact_ids, output, pdf=pdf, job_id=job_id)
         with self.store.transaction() as db:
             self.store.put(
                 db,

@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "id": "local",
+  "personal": {
+    "id": "contact",
+    "evidence": {
+      "source": "Not yet supplied",
+      "confirmed": false,
+      "scope_job_ids": []
+    },
+    "field_evidence": {},
+    "full_name": null,
+    "preferred_name": null,
+    "email": null,
+    "phone": null,
+    "location": null,
+    "linkedin_url": null,
+    "github_url": null,
+    "website_url": null
+  },
+  "work_authorization": [],
+  "education": [],
+  "work_experience": [],
+  "projects": [],
+  "publications": [],
+  "competitions": [],
+  "skills": [],
+  "availability": null,
+  "preferences": {
+    "directions": [],
+    "constraints": [],
+    "preferred_terms": [],
+    "avoided_terms": []
+  }
+}

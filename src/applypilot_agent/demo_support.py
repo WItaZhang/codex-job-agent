@@ -16,6 +16,7 @@ from pydantic import Field, model_validator
 
 from .config import BrowserSettings
 from .models import Profile, Record
+from .profile_evidence import confirmed_evidence, profile_evidence
 from .serialization import utc_now
 
 
@@ -49,11 +50,11 @@ class DemoConfig(Record):
         modes = {(scenario.authorization, scenario.receipt) for scenario in self.scenarios}
         if modes != {("review", True), ("auto", True), ("auto", False)}:
             raise ValueError("Demo requires review+receipt, auto+receipt and auto+missing-receipt scenarios")
-        facts = {fact.id: fact for fact in self.profile.facts if fact.confirmed}
+        facts = {fact.id: fact for fact in profile_evidence(self.profile) if fact.confirmed}
         if set(self.resume_fact_ids) - facts.keys():
             raise ValueError("Demo resume facts must all be confirmed")
-        keys = {fact.key for fact in self.profile.facts if fact.confirmed}
-        if not {"name", "email"}.issubset(keys):
+        keys = set(confirmed_evidence(self.profile))
+        if not {f"{self.profile.personal.id}.full_name", f"{self.profile.personal.id}.email"}.issubset(keys):
             raise ValueError("Synthetic profile requires confirmed name and email facts")
         return self
 

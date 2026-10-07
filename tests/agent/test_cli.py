@@ -13,7 +13,18 @@ def test_profile_and_local_job_import_through_cli(tmp_path):
     config.write_text(yaml.safe_dump({"data_dir": "state", "logs_dir": "logs"}), encoding="utf-8")
     profile = tmp_path / "candidate.json"
     profile.write_text(
-        json.dumps({"name": "Synthetic Candidate", "facts": [], "preferred_terms": ["Python"]}), encoding="utf-8"
+        json.dumps(
+            {
+                "schema_version": 2,
+                "personal": {
+                    "id": "contact",
+                    "full_name": "Synthetic Candidate",
+                    "evidence": {"source": "Synthetic CLI fixture", "confirmed": True},
+                },
+                "preferences": {"preferred_terms": ["Python"]},
+            }
+        ),
+        encoding="utf-8",
     )
     jobs = tmp_path / "jobs.json"
     jobs.write_text(

@@ -14,7 +14,8 @@ from applypilot_agent.config import Settings
 from applypilot_agent.demo import run_demo
 from applypilot_agent.execution import Executor
 from applypilot_agent.lease import LeaseBusy
-from applypilot_agent.models import Answer, Assessment, Attachment, Fact, Job, Packet, Policy, Profile
+from applypilot_agent.models import Answer, Assessment, Attachment, Job, Packet, Policy, Profile
+from applypilot_agent.profile_models import PersonalInfo, Project, Provenance, SearchPreferences
 from applypilot_agent.service import AgentService
 
 
@@ -84,11 +85,21 @@ def prepared_service(tmp_path: Path, *, automatic=False, approve=True) -> AgentS
     service = AgentService(Settings(data_dir=tmp_path / "state", logs_dir=tmp_path / "logs", policy=policy))
     service.save_profile(
         Profile(
-            name="Synthetic Person",
-            facts=[
-                Fact(id="name", text="Synthetic Person", source="synthetic fixture", confirmed=True),
-                Fact(id="python", text="Built Python pipelines", source="synthetic fixture", confirmed=True),
+            personal=PersonalInfo(
+                id="contact",
+                full_name="Synthetic Person",
+                email="candidate@example.test",
+                evidence=Provenance(source="Synthetic fixture", confirmed=True),
+            ),
+            projects=[
+                Project(
+                    id="python",
+                    name="Python pipelines",
+                    summary="Built Python pipelines",
+                    evidence=Provenance(source="Synthetic fixture", confirmed=True),
+                ),
             ],
+            preferences=SearchPreferences(preferred_terms=["Python"]),
         )
     )
     service.import_jobs(
@@ -125,7 +136,7 @@ def prepared_service(tmp_path: Path, *, automatic=False, approve=True) -> AgentS
         job_id="job",
         job_hash=context["job_hash"],
         profile_hash=context["profile_hash"],
-        answers={"#name": Answer(value="Synthetic Person", fact_ids=["name"])},
+        answers={"#name": Answer(value="Synthetic Person", fact_ids=["contact.full_name"])},
         attachments=[attachment],
         browser_plan={
             "url": "https://example.test/apply",
@@ -175,7 +186,7 @@ def test_change_during_preparation_is_rechecked_before_submission(tmp_path, chan
             service.settings.policy.auto_fit = []
         elif change == "facts":
             profile = service.profile()
-            profile.facts[1].text = "Maintained Python pipelines"
+            profile.projects[0].summary = "Maintained Python pipelines"
             service.save_profile(profile)
         else:
             packet = service.context("job")["application"]["packet"]

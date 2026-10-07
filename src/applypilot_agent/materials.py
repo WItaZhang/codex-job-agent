@@ -5,6 +5,7 @@ from html import escape
 from pathlib import Path
 
 from .models import Attachment, Packet, Profile
+from .profile_evidence import confirmed_evidence, profile_evidence
 
 
 def file_hash(path: Path) -> str:
@@ -15,7 +16,7 @@ def file_hash(path: Path) -> str:
 def validate_evidence(profile: Profile, packet: Packet) -> None:
     facts = {
         fact.id: fact
-        for fact in profile.facts
+        for fact in profile_evidence(profile)
         if fact.confirmed and (not fact.scope_job_ids or packet.job_id in fact.scope_job_ids)
     }
     for item in [*packet.claims, *packet.answers.values()]:
@@ -30,21 +31,35 @@ def validate_evidence(profile: Profile, packet: Packet) -> None:
             raise ValueError(f"Attachment missing or changed: {path}")
 
 
-def render_resume(profile: Profile, fact_ids: list[str], output: Path, *, pdf: bool = True) -> dict:
+def render_resume(
+    profile: Profile, fact_ids: list[str], output: Path, *, pdf: bool = True, job_id: str | None = None
+) -> dict:
     """Render selected confirmed facts verbatim; tailoring chooses evidence, never invents it."""
-    facts = {fact.id: fact for fact in profile.facts if fact.confirmed}
+    facts = confirmed_evidence(profile, job_id)
     if not fact_ids or set(fact_ids) - facts.keys():
         raise ValueError("Select at least one confirmed fact; every ID must exist")
     output.mkdir(parents=True, exist_ok=True)
     selected = [facts[key] for key in dict.fromkeys(fact_ids)]
-    markdown = f"# {profile.name}\n\n" + "\n\n".join(fact.text for fact in selected) + "\n"
+    sections = {}
+    whole_records = {item.record_id for item in selected if item.field is None}
+    for item in selected:
+        if item.field is not None and item.record_id in whole_records:
+            continue
+        sections.setdefault(item.section, []).append(item.text)
+    markdown = "# Resume\n\n"
+    body = ""
+    for section, texts in sections.items():
+        title = section.replace("_", " ").title()
+        markdown += f"## {title}\n\n" + "\n\n".join(texts) + "\n\n"
+        body += f"<h2>{escape(title)}</h2>" + "".join(
+            f"<p>{escape(text).replace(chr(10), '<br>')}</p>" for text in texts
+        )
     (output / "resume.md").write_text(markdown, encoding="utf-8")
-    body = "".join(f"<p>{escape(fact.text).replace(chr(10), '<br>')}</p>" for fact in selected)
     document = (
         "<!doctype html><html><head><meta charset='utf-8'><title>Resume</title>"
         "<style>@page{size:A4;margin:18mm}body{font:11pt Arial,sans-serif;color:#17202a}"
         "h1{font-size:22pt}p{line-height:1.4;break-inside:avoid;white-space:pre-wrap}</style>"
-        f"</head><body><h1>{escape(profile.name)}</h1>{body}</body></html>"
+        f"</head><body><h1>Resume</h1>{body}</body></html>"
     )
     html_path = output / "resume.html"
     html_path.write_text(document, encoding="utf-8")

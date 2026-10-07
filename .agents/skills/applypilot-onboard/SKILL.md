@@ -19,26 +19,34 @@ uv run applypilot-agent --config configs/agent.yaml schema config
 
 Treat “No profile” as onboarding, not a tool outage. For input structure only,
 read [profile-example.json](references/profile-example.json). It is synthetic,
-not user data; its facts are deliberately unconfirmed.
+not user data; its records are deliberately unconfirmed.
 
 ## Personalize with few questions
 
 Infer an initial draft from provided context, then ask only consequential gaps
 in one compact batch. Reuse already explicit answers. Cover these distinct items:
 
-- **Facts:** user-confirmed experience, skills, education, dates and contact or
-  form answers. Give every fact a stable ID, source and optional unique `key`.
-  `confirmed: true` requires an explicit user statement, a previously confirmed
-  record, or the user's authorization to treat a designated source as factual.
-  Merely finding a file or extracting a model's guess does not confirm it.
-  Use a fact's optional typed `value` for a precisely confirmed form answer
-  (including a boolean); retain readable source context in `text`. For an
-  answer or consent valid only for particular jobs, set `scope_job_ids` to those
-  actual IDs. Do not turn a job-specific agreement into reusable blanket consent.
+- **Structured background:** put contact details in `personal`, work/visa permission
+  in `work_authorization` (one record per country), then use `education`,
+  `work_experience`, `projects`, `publications`, `competitions`, `skills` and
+  `availability` with their typed fields. Do not store a flat `facts` list or
+  duplicate a structured field in free-text notes. Read the actual schema; keep
+  unknown values null and missing lists empty. Preserve date precision.
+  Every entity has a globally unique stable `id` and `evidence` (source,
+  confirmed, scope_job_ids). `confirmed: true` requires an explicit user
+  statement, an already confirmed record, or authorization to treat the named
+  source as factual. Extraction alone does not confirm information. Use
+  `field_evidence` when a populated field has a different source, confirmation
+  or job scope. Confirm only the exact fields supported by the source; never
+  promote an inferred visa status or publication status alongside other fields.
+  Foreign keys connect projects to work experiences and skills to background
+  records; they do not infer additional qualifications or confirmation.
 - **Direction and preferences:** role families, important working conditions,
-  preferred and avoided terms. Preferences are not claims about qualifications.
+  preferred and avoided terms, under `preferences`. Preferences are not claims
+  about qualifications.
 - **Hard constraints:** only requirements the user really treats as mandatory.
-  Use `title`, `company`, `location` or documented job attributes. Operators are
+  Store in `preferences.constraints`; use `title`, `company`, `location` or
+  documented job attributes. Operators are
   `equals`, `contains`, `excludes`, `one_of`; these are literal, case-insensitive
   comparisons, not semantic or numerical filters. Missing required attributes
   remain unknown. Do not turn a salary range into a string comparison and call
@@ -54,14 +62,29 @@ recruiter reaction or your own opinion is not user feedback.
 
 ## Persist what the user actually decided
 
-Write the completed profile JSON under the configured `data_dir` (default
-`data/local/profile.json`), keeping existing fact IDs stable when their meaning
-is unchanged. Use `profile-set`; never patch the database.
+The active SQLite profile is the only runtime source of truth. First-time
+onboarding can start from [profile-template.json](references/profile-template.json).
+For edits, always read/export the current database profile, rather than reuse an
+old input file. Export to the configured private data directory, edit records
+in place by stable ID, and save the complete validated result. A changed paper
+status replaces that paper's status; do not append a second paper or a sentence
+negating the previous value. Preserve unrelated records and their provenance.
 
 ```text
-uv run applypilot-agent --config configs/agent.yaml profile-set data/local/profile.json
-uv run applypilot-agent --config configs/agent.yaml profile
+uv run applypilot-agent --config configs/agent.yaml profile-export data/local/profile.json
+# Edit the exported JSON; use the profile_hash returned by that export.
+uv run applypilot-agent --config configs/agent.yaml profile-set data/local/profile.json --expected-hash CURRENT_PROFILE_HASH
+uv run applypilot-agent --config configs/agent.yaml profile-export data/local/profile.json
 ```
+
+For a new profile, write the completed template and use `profile-set` without
+`--expected-hash`. The JSON is an explicit draft/export, not a second live store;
+file edits take effect only after successful `profile-set`. On a stale-hash
+error, reread current state and reconcile the requested change; never retry
+without the guard. Never patch the database. Old flat profiles require reviewed
+conversion into typed records; do not invent structured fields from ambiguous
+text or discard unresolved source material. See the profile contract in
+`docs/agent/PROFILE.md`.
 
 Save action authorization in the selected YAML's `policy`, independently of the
 profile. Preserve unrelated values. An empty `auto_fit` keeps review as default.

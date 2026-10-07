@@ -31,6 +31,15 @@ contrasts test padding, content degradation, useful detail and swapped order.
 These do not turn the optional comparison labels below into authenticated human
 outcomes. See [the quality lifecycle](../docs/agent/QUALITY.md).
 
+## Current-profile update experiment
+
+`synthetic/profile_memory_cases.jsonl` belongs to a separate experiment that
+executes real model calls: direct full-profile updates versus LangMem Profile,
+through the same Codex CLI transport. Its 8 synthetic scenarios contain 24
+sequential updates and deterministic reference states. It does not measure native
+Codex background Memories, real-user outcomes, or the fixed candidate above.
+See [the protocol and commands](../docs/agent/PROFILE_MEMORY_EXPERIMENT.md).
+
 ## Input contracts
 
 One JSON object per line, with strict types and no unknown fields:

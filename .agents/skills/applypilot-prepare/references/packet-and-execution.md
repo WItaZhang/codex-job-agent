@@ -27,6 +27,12 @@ uv run applypilot-agent --config configs/agent.yaml render JOB_ID --fact FACT_ID
 uv run applypilot-agent --config configs/agent.yaml schema packet
 ```
 
+`FACT_ID` / `fact_ids` are compatibility names for current typed evidence IDs
+from `context.profile_evidence`, such as `contact.email` or a project record ID.
+A whole-record citation requires every populated field to be confirmed and
+applicable to this job. Select an individual field when only that field is known.
+No separate editable facts list exists.
+
 `render` returns the attachment's absolute path and SHA-256, plus HTML/Markdown
 paths. Select actual confirmed fact IDs in the intended order; include useful
 contact, experience and education context when relevant. Rendering a PDF is the

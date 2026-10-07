@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 from .matching import check_constraints
 from .models import Assessment, Decision, Job, Packet, Policy, Profile
+from .profile_evidence import confirmed_evidence
 
 
 def route(profile: Profile, job: Job, assessment: Assessment, policy: Policy, packet: Packet | None = None) -> Decision:
@@ -31,9 +32,10 @@ def route(profile: Profile, job: Job, assessment: Assessment, policy: Policy, pa
         return Decision(action="review", reasons=["User requires review for this company"])
     if assessment.fit not in policy.auto_fit:
         return Decision(action="review", reasons=["Match category requires user review"])
-    facts = {fact.id: fact.text for fact in profile.facts if fact.confirmed}
+    facts = {fact.id: fact.text for fact in confirmed_evidence(profile, job.id).values()}
     answer_values = {
-        fact.id: fact.value if fact.value is not None else fact.text for fact in profile.facts if fact.confirmed
+        fact.id: fact.value if fact.value is not None else fact.text
+        for fact in confirmed_evidence(profile, job.id).values()
     }
     rewritten = any(claim.text not in [facts.get(key) for key in claim.fact_ids] for claim in packet.claims) or any(
         answer.value not in [answer_values.get(key) for key in answer.fact_ids] for answer in packet.answers.values()

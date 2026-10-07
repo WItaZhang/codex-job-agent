@@ -20,7 +20,8 @@ from applypilot_agent.config import Settings
 from applypilot_agent.execution import Executor
 from applypilot_agent.lease import LeaseBusy
 from applypilot_agent.matching import check_constraints
-from applypilot_agent.models import Assessment, Constraint, Fact, Job, Packet, Policy, Profile
+from applypilot_agent.models import Assessment, Constraint, Job, Packet, Policy, Profile
+from applypilot_agent.profile_models import PersonalInfo, Project, Provenance, SearchPreferences
 from applypilot_agent.serialization import digest
 from applypilot_agent.service import AgentService
 
@@ -51,8 +52,21 @@ def reviewed_service(tmp_path):
     service = AgentService(Settings(data_dir=tmp_path / "data", logs_dir=tmp_path / "logs"))
     service.save_profile(
         Profile(
-            name="Synthetic Applicant",
-            facts=[Fact(id="python", text="Built Python services", confirmed=True, source="synthetic user")],
+            personal=PersonalInfo(
+                id="contact",
+                full_name="Synthetic Applicant",
+                email="candidate@example.test",
+                evidence=Provenance(source="Synthetic fixture", confirmed=True),
+            ),
+            projects=[
+                Project(
+                    id="python",
+                    name="Python pipelines",
+                    summary="Built Python services",
+                    evidence=Provenance(source="Synthetic fixture", confirmed=True),
+                ),
+            ],
+            preferences=SearchPreferences(preferred_terms=["Python"]),
         )
     )
     service.import_jobs(
@@ -201,7 +215,7 @@ def test_empty_constraint_values_rejected(value):
 
 def test_attributes_cannot_override_authoritative_location(reviewed_service):
     profile = reviewed_service.profile()
-    profile.constraints = [Constraint(field="location", operator="equals", value="Remote")]
+    profile.preferences.constraints = [Constraint(field="location", operator="equals", value="Remote")]
     job = Job.model_validate(reviewed_service.context("job")["job"])
     job.attributes["location"] = "Remote"
     assert check_constraints(profile, job)[0] == "fail"

@@ -5,11 +5,11 @@
   "answers": {
     "#full-name": {
       "value": "Example Candidate",
-      "fact_ids": ["contact-name"]
+      "fact_ids": ["contact.full_name"]
     },
     "#email": {
-      "value": "candidate@example.com",
-      "fact_ids": ["contact-email"]
+      "value": "candidate@example.test",
+      "fact_ids": ["contact.email"]
     }
   },
   "claims": [],
@@ -18,7 +18,7 @@
     "url": "https://careers.example.com/jobs/platform-engineer/apply",
     "fields": [
       {"selector": "#full-name", "kind": "text", "value": "Example Candidate"},
-      {"selector": "#email", "kind": "text", "value": "candidate@example.com"}
+      {"selector": "#email", "kind": "text", "value": "candidate@example.test"}
     ],
     "submit_selector": null,
     "confirmation_selector": null,

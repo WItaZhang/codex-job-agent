@@ -37,6 +37,9 @@ dev = [
     "pytest>=7.0",
     "ruff>=0.1",
 ]
+memory-eval = [
+    "langmem>=0.0.30,<0.1",
+]
 
 [build-system]
 requires = ["hatchling"]
