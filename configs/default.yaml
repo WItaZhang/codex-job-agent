@@ -1,0 +1,20 @@
+# 所有阈值和参数都在这里，代码中不写死。
+scoring:
+  level_points: {strong_avoid: -2, avoid: -1, prefer: 1, strong_prefer: 2}
+  recommend_threshold: 1          # 推荐线 θ：未被排除且分数 ≥ θ 视为"推荐"
+  salary_below_floor_penalty: 2   # 岗位薪资低于下限时扣的分（软条件）
+  salary_compare: max             # 岗位给出薪资区间时，取哪个值与下限比较：max | min
+daily:
+  recommended: 7
+  exploration: 3
+analysis:
+  max_causes: 6                   # 第一步最多展示几个候选原因
+  max_flipped_shown: 3            # 每个方案最多列出几个被翻转的历史岗位
+hard_review:
+  every_days: 7
+llm:
+  provider: fake                  # fake | anthropic | openai_compatible（后两者在后续切片实现）
+  model: null
+  api_key_env: null
+storage:
+  db_path: data/local/agent.sqlite

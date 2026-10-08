@@ -1,0 +1,28 @@
+[project]
+name = "intent-job-agent"
+version = "0.1.0"
+description = "Job discovery agent that maintains user intent from daily feedback"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.14.0",
+    "pyyaml>=6.0.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
