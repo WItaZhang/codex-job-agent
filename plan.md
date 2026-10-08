@@ -82,3 +82,66 @@ src/<pkg>/
   - 回放的数字和一个独立编写的简单重算函数结果一致；
   - 岗位 description 不会出现在 fake client 收到的 prompt 里。
 - 多天模拟：从 base_intent 开始连续跑多天，检查 spec §9 的四条完成标准。
+
+---
+
+# 切片 2 计划：工具层和每日闭环（待用户确认）
+
+目标：做完以后，你可以在 Claude Code 里导入真实岗位，每天收到 7+3 个岗位，在对话中打 label、选原因、确认修改。
+**用户确认本计划之前，不写实现代码。**
+
+## 1. 做什么，不做什么
+
+| 做 | 不做（后续切片） |
+| --- | --- |
+| MCP 服务（`mcp` 官方 Python SDK，stdio），工具分读 / 准备 / 提交三级 | 冷启动起草（切片 3）；在那之前用 YAML 文件初始化意图 |
+| `.claude/settings.json`：提交级工具全部设为"每次询问"；`.mcp.json` 注册服务 | ATS 抓取、定时任务、硬约束体检（切片 4） |
+| JSON 导入岗位；agent 读岗位原文后提交标签 | 网页界面；独立运行模式的模型适配器 |
+| 选出每日 7+3 并保存，label 只能打在当天选出的岗位上 | Codex 的审批配置（先只配 Claude Code，文档里说明） |
+
+## 2. 工具清单
+
+| 级别 | 工具 | 说明 |
+| --- | --- | --- |
+| 读 | `get_intent` | 当前意图（文字等级，不显示分值） |
+| 读 | `get_today(day)` | 当天 10 个岗位：编号、推荐/探索、标题、标签，**不含原文** |
+| 读 | `show_job(job_id)` | 岗位原文，包在"不可信内容"标记里返回 |
+| 读 | `list_open_analyses` / `get_analysis(id)` | 待处理的分析，选项带编号 |
+| 准备 | `import_jobs(path)` | 从 `data/local/` 下的 JSON 文件导入岗位 |
+| 准备 | `list_untagged_jobs` / `submit_job_tags(job_id, tags)` | agent 读原文后提交标签；代码校验维度、规范化别名、标出新 key |
+| 准备 | `select_today(day)` | 选出 7+3 并保存；被硬约束排除的岗位不进入 |
+| 准备 | `rank_causes(analysis_id, order)` | agent 为候选原因排序 |
+| 准备 | `choose_cause` / `refresh` / `decline` | 和切片 1 的 engine 一一对应 |
+| 准备 | `feedback(analysis_id, text, changes)` | agent 把你的意见翻译成修改，代码校验后生成新选项 |
+| 提交 | `record_labels(day, labels)` | 一天的 label 一次提交，只批准一次；推荐位 / 探索位以当天保存的选择为准，agent 无法伪造 |
+| 提交 | `decide(analysis_id, proposal_id, inputs)` | 确认方案 |
+| 提交 | `correct_tags(job_id, remove, add)` | misread 修正 |
+| 提交 | `initialize_intent(path)` | 从 YAML 初始化（切片 3 之前的临时入口，只能用一次） |
+
+`record_labels` 的每条 label 可以带：点选的原因 key、你的原话、agent 对原话的理解（对应的 key / 需要问的范围 / 是否提到薪资 / 现有维度表达不了的内容）。
+
+## 3. 每日 7+3 怎么选
+
+- 候选：已打标签、从未展示过、没被硬约束排除的岗位。
+- 推荐位：按分数取前 7 名。
+- 探索位：从剩下的岗位里取 3 个，优先选命中"回避/强烈回避"条目的，不够时从排名中段补齐。具体比例写在配置里。这一条是 spec 未决问题"探索位的具体抽样方法"的暂定做法。
+
+## 4. 模块
+
+```
+src/intent_job_agent/
+  tools.py        工具函数和级别登记表（不依赖 MCP，方便测试）
+  mcp_server.py   把 tools.py 注册成 MCP 工具
+  selection.py    纯函数：每日 7+3
+  importing.py    JSON 岗位导入、标签提交校验
+```
+
+engine 的改动：理解结果可以通过参数直接传入，没有传入时才调用 `structured()`。
+
+## 5. 测试（先写）
+
+- 每个工具都登记了级别；`.claude/settings.json` 里"每次询问"的列表正好等于提交级工具；定时任务能用的工具不包含提交级。
+- `record_labels` 拒绝不在当天选择里的岗位；推荐位 / 探索位取自保存的选择，而不是参数。
+- 7+3：硬约束排除的岗位不进入；探索位优先命中回避条目的岗位；不会重复展示。
+- 标签提交：未知维度被拒；别名被规范化；新 key 被标出。
+- 用工具从头跑一遍合成的一天：导入 → 打标签 → 选 7+3 → 记录 label → 分析 → 选原因 → 确认。切片 1 的全部测试继续通过。
