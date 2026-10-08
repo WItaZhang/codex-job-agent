@@ -8,8 +8,6 @@ from intent_job_agent.domain import Level, Salary
 from intent_job_agent.engine import LabelInput
 from intent_job_agent.llm import FakeClient
 
-from .conftest import World
-
 DAY1, DAY2 = "2026-10-08", "2026-10-09"
 
 
@@ -44,20 +42,24 @@ def test_s01_reason_chip_location(world):
             "tech_stack.python",
         ]
     )
-    report = world.day(DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_keys=["location.china.beijing"]))
+    report = world.day(
+        DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_keys=["location.china.beijing"])
+    )
     analysis = only(report.analyses)
     assert analysis.step1 == "skip"
     proposals = analysis.proposals
     assert having(proposals, ("add", "location.china.beijing", Level.exclude))
     assert having(proposals, ("add", "location.china.beijing", Level.strong_avoid))
-    # Range option derived from where the user has wanted jobs: keep Shanghai (city, since Beijing is in China) and the US.
+    # Range option from where the user has wanted jobs: Shanghai (a city, as Beijing is in China) and the US.
     assert having(proposals, ("set", "location.china.shanghai", Level.require), ("add", "location.us", Level.require))
     assert set(analysis.choices[-2:]) == {"feedback", "no_change"}
 
 
 def test_every_hard_option_is_paired_with_its_soft_level(world):
     job = world.job(["role.ml_engineering", "location.china.beijing", "work_mode.onsite"])
-    report = world.day(DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_keys=["location.china.beijing"]))
+    report = world.day(
+        DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_keys=["location.china.beijing"])
+    )
     proposals = only(report.analyses).proposals
     for p in proposals:
         if p.is_hard:
@@ -93,7 +95,9 @@ def _s03_world(make_world, extra_history=False):
     world.history(["company_type.big_tech", "work_mode.onsite"], "reject", label_id="h0")
     world.history(["company_type.big_tech", "work_mode.onsite"], "reject", label_id="h1")
     if extra_history:
-        world.history(["company_type.big_tech", "work_mode.hybrid", "role.backend_engineering"], "reject", label_id="h2")
+        world.history(
+            ["company_type.big_tech", "work_mode.hybrid", "role.backend_engineering"], "reject", label_id="h2"
+        )
     job = world.job(["role.backend_engineering", "specialty.ai_infra", "company_type.big_tech", "work_mode.remote"])
     analysis = only(world.day(DAY1, LabelInput(job=job, value="want", slot="exploration")).analyses)
     return world, analysis
@@ -144,7 +148,9 @@ def test_s05_company_specific_reason(make_world):
             "company.x",
         ]
     )
-    report = world.day(DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_text="这家公司最近裁员新闻很多"))
+    report = world.day(
+        DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_text="这家公司最近裁员新闻很多")
+    )
     analysis = only(report.analyses)
     assert analysis.step1 == "skip"
     exclude = having(analysis.proposals, ("add", "company.x", Level.exclude))
@@ -279,7 +285,9 @@ def test_s13_consistent_label_with_contradicting_reason(world):
             "location.china.shanghai",
         ]
     )
-    report = world.day(DAY1, LabelInput(job=job, value="want", slot="recommended", reason_keys=["company_type.big_tech"]))
+    report = world.day(
+        DAY1, LabelInput(job=job, value="want", slot="recommended", reason_keys=["company_type.big_tech"])
+    )
     analysis = only(report.analyses)
     assert analysis.kind == "reason_conflict"
     assert analysis.step1 == "skip"
@@ -306,7 +314,9 @@ def test_s14_ambiguous_scope_is_asked_first(make_world):
 
 def test_s15_redundant_exception_is_removed_in_the_same_diff(make_world):
     spec = {
-        "company_type": {"big_tech": {"level": "avoid", "exceptions": [{"when": "work_mode.remote", "level": "prefer"}]}},
+        "company_type": {
+            "big_tech": {"level": "avoid", "exceptions": [{"when": "work_mode.remote", "level": "prefer"}]}
+        },
         "role": {"ml_engineering": {"level": "strong_prefer"}},
     }
     world = make_world(intent=spec)
@@ -320,7 +330,7 @@ def test_s15_redundant_exception_is_removed_in_the_same_diff(make_world):
     assert to_prefer
     assert ("remove_exception", "company_type.big_tech", "work_mode.remote") in ops(to_prefer[0])
     intent = world.engine.decide(analysis.id, to_prefer[0].id)
-    assert intent.entry("company_type.big_tech").exceptions == []
+    assert not intent.entry("company_type.big_tech").exceptions
 
 
 def test_s16_mismatches_with_a_common_cause_are_merged(world):

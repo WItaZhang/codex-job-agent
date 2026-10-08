@@ -1,0 +1,55 @@
+"""Settings loaded from configs/*.yaml. No parameter has a default in code."""
+
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import BaseModel, ConfigDict
+
+
+class _Section(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class Scoring(_Section):
+    level_points: dict[Literal["strong_avoid", "avoid", "prefer", "strong_prefer"], float]
+    recommend_threshold: float
+    salary_below_floor_penalty: float
+    salary_compare: Literal["max", "min"]
+
+
+class Daily(_Section):
+    recommended: int
+    exploration: int
+
+
+class Analysis(_Section):
+    max_causes: int
+    max_flipped_shown: int
+
+
+class HardReview(_Section):
+    every_days: int
+
+
+class LLM(_Section):
+    provider: Literal["fake", "anthropic", "openai_compatible"]
+    model: str | None
+    api_key_env: str | None
+
+
+class Storage(_Section):
+    db_path: str
+
+
+class Settings(_Section):
+    scoring: Scoring
+    daily: Daily
+    analysis: Analysis
+    hard_review: HardReview
+    llm: LLM
+    storage: Storage
+
+    @classmethod
+    def load(cls, path: str | Path) -> "Settings":
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))

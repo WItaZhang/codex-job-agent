@@ -55,7 +55,9 @@ def test_excluded_country_excludes_its_cities():
 
 def test_exception_replaces_default_level_when_condition_holds():
     spec = {
-        "company_type": {"big_tech": {"level": "avoid", "exceptions": [{"when": "work_mode.remote", "level": "prefer"}]}}
+        "company_type": {
+            "big_tech": {"level": "avoid", "exceptions": [{"when": "work_mode.remote", "level": "prefer"}]}
+        }
     }
     assert score(spec, ["company_type.big_tech", "work_mode.remote"]).score == 1
     assert score(spec, ["company_type.big_tech", "work_mode.onsite"]).score == -1

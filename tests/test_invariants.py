@@ -16,7 +16,9 @@ DAY1 = "2026-10-08"
 
 def _one_analysis(world):
     job = world.job(["role.ml_engineering", "company_type.big_tech", "work_mode.onsite"])
-    report = world.day(DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_keys=["company_type.big_tech"]))
+    report = world.day(
+        DAY1, LabelInput(job=job, value="reject", slot="recommended", reason_keys=["company_type.big_tech"])
+    )
     return report.analyses[0]
 
 
@@ -158,9 +160,7 @@ def test_replay_matches_independent_recomputation(tmp_path):
         intent = IntentModel.build(spec)
         result = evaluate(intent, world.store, world.settings)
         expected = {
-            label.id
-            for label, tags in labels
-            if independent_recommended(spec, tags) == (label.value == "want")
+            label.id for label, tags in labels if independent_recommended(spec, tags) == (label.value == "want")
         }
         assert result.agree == expected, (spec, trial)
 
@@ -200,6 +200,9 @@ def test_multi_day_simulation_keeps_all_guarantees(tmp_path):
             inputs.append(LabelInput(job=job, value=value, slot=slot, reason_keys=reasons))
         report = world.day(f"2026-11-{day + 1:02d}", *inputs)
         for analysis in report.analyses:
+            analysis = world.engine.refresh(analysis.id)  # an earlier choice today may have resolved it
+            if analysis.status != "open":
+                continue
             if analysis.step1 != "skip" and analysis.causes:
                 analysis = world.engine.choose_cause(analysis.id, analysis.causes[0].id)
             if analysis.proposals and rng.random() < 0.8:
@@ -240,3 +243,24 @@ def test_multi_day_simulation_keeps_all_guarantees(tmp_path):
     }
     assert result.agree == expected
     assert len(versions) > 1, "the simulation should have produced at least one accepted change"
+
+
+def test_other_analyses_of_the_day_are_refreshed_after_a_choice(world):
+    jobs = [world.job(["role.backend_engineering", "company_type.big_tech", "work_mode.hybrid"]) for _ in range(2)]
+    report = world.day(
+        DAY1,
+        *(LabelInput(job=j, value="reject", slot="recommended", reason_keys=["company_type.big_tech"]) for j in jobs),
+    )
+    first, second = report.analyses
+    stronger = next(p for p in first.proposals if p.changes[-1].summary()[2] == "strong_avoid")
+    world.engine.decide(first.id, stronger.id)
+    with pytest.raises(InvariantError):  # its options were built for the old version
+        world.engine.decide(second.id, second.proposals[0].id)
+    refreshed = world.engine.refresh(second.id)
+    assert refreshed.status == "resolved"  # the same change already explains this reject
+
+
+def test_job_tag_aliases_are_canonicalized(world):
+    job = world.job(["company_type.大厂", "work_mode.onsite", "role.ml_engineering"])
+    world.day(DAY1, LabelInput(job=job, value="reject", slot="exploration"))
+    assert world.store.effective_tags(job.id) == ["company_type.big_tech", "work_mode.onsite", "role.ml_engineering"]

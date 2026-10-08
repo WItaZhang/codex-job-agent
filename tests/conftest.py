@@ -48,7 +48,7 @@ class World:
 
     def __init__(self, tmp_path: Path, intent: dict | None = None, compensation=None, evidence=None, llm=None):
         self.settings = settings()
-        self.store = Store(tmp_path / "agent.sqlite")
+        self.store = Store(tmp_path / "agent.sqlite", self.settings)
         self.llm = llm or FakeClient()
         self.engine = Engine(self.store, self.settings, self.llm)
         self._intent = intent if intent is not None else BASE_INTENT

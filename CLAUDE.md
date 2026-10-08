@@ -35,3 +35,14 @@
 - 领域模型、纯逻辑（规范化、打分、回放）、持久化、模型适配、CLI 分别放在不同的模块。
 - 合成样例放在 `tests/fixtures/`，并明确标注为 synthetic。
 - 交互尽量设计成选择题。
+
+## 验证
+
+```text
+uv sync --locked
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run python -m pytest -q
+```
+
+包名 `intent_job_agent` 是暂定名（见 spec 未决问题）。

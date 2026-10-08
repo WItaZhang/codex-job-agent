@@ -68,7 +68,9 @@ def test_alias_of_existing_key_cannot_create_a_parallel_entry():
 def test_set_level_must_state_the_current_level():
     intent = IntentModel.build(BASE_INTENT)
     with pytest.raises(InvariantError):
-        apply_changes(intent, [SetLevel(ref="company_type.big_tech", from_level=Level.prefer, to_level=Level.avoid)], VOCAB)
+        apply_changes(
+            intent, [SetLevel(ref="company_type.big_tech", from_level=Level.prefer, to_level=Level.avoid)], VOCAB
+        )
 
 
 def test_exception_level_cannot_equal_default_level():
@@ -87,7 +89,9 @@ def test_exception_needs_one_known_condition_on_another_key():
     )
     assert ok.entry("company_type.big_tech").exceptions[0].when == "work_mode.remote"
     with pytest.raises(InvariantError):  # condition must be an existing vocabulary key
-        apply_changes(intent, [AddException(ref="company_type.big_tech", when="work_mode.moon", level=Level.prefer)], VOCAB)
+        apply_changes(
+            intent, [AddException(ref="company_type.big_tech", when="work_mode.moon", level=Level.prefer)], VOCAB
+        )
     with pytest.raises(InvariantError):  # condition must be another key
         apply_changes(
             intent, [AddException(ref="company_type.big_tech", when="company_type.big_tech", level=Level.prefer)], VOCAB
