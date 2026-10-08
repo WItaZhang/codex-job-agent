@@ -31,6 +31,7 @@ uv run applypilot-agent --help
 | `$applypilot-onboard` | 保存个人事实、方向、限制和自动投递边界 |
 | `$applypilot-discover` | 寻找公司与岗位，读取公开岗位板，做有证据的匹配判断 |
 | `$applypilot-prepare` | 准备材料、观察表单，按授权审核或提交支持的申请 |
+| `$idea-kickoff` | 开发用：把新的模糊想法经采访、样例和测试变成最小可用切片 |
 
 若已有会话尚未加载新技能，可以在同一个项目开启新会话，也可以明确让 Codex
 读取对应的 `.agents/skills/<技能名>/SKILL.md`。技能保存在仓库中；本项目没有

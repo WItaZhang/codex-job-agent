@@ -1,0 +1,4 @@
+interface:
+  display_name: "Idea Kickoff"
+  short_description: "Turn a vague idea into a spec, examples, tests and a first slice"
+  default_prompt: "Use $idea-kickoff to help me turn this new idea into a confirmed spec, examples and a minimal tested slice."
