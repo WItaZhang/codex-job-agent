@@ -110,12 +110,18 @@ def test_s03_misattributed_entry_is_a_candidate_cause(make_world):
     assert cause.type == "entry_wrong"
     assert cause.misattributed_by == ["work_mode.onsite"]
     analysis = world.engine.choose_cause(analysis.id, cause.id)
-    assert having(analysis.proposals, ("delete", "company_type.big_tech"))
-    # With this history a plain deletion explains everything an exception would, so no exception is offered.
-    assert not [p for p in analysis.proposals if any(s[0] == "add_exception" for s in ops(p))]
+    deletion = having(analysis.proposals, ("delete", "company_type.big_tech"))
+    exception = having(analysis.proposals, ("add_exception", "company_type.big_tech", "work_mode.remote", Level.prefer))
+    assert deletion and exception
+    # All options are offered; equal outcomes are ordered simplest first.
+    assert (deletion[0].replay.fixed, deletion[0].replay.broken) == (
+        exception[0].replay.fixed,
+        exception[0].replay.broken,
+    )
+    assert analysis.proposals.index(deletion[0]) < analysis.proposals.index(exception[0])
 
 
-def test_s03_exception_offered_only_when_a_level_change_cannot_explain_the_split(make_world):
+def test_s03_exception_only_when_labels_split_on_another_key(make_world):
     world, analysis = _s03_world(make_world, extra_history=True)
     cause = next(c for c in analysis.causes if c.refs == ["company_type.big_tech"])
     analysis = world.engine.choose_cause(analysis.id, cause.id)

@@ -344,7 +344,7 @@ def build_proposals(
     origin: str = "analysis",
     rejected: list[str] | None = None,
 ) -> list[Proposal]:
-    """Validate, replay, filter, de-duplicate and pair candidates into proposals."""
+    """Validate, replay, filter and pair candidates into proposals, simplest first."""
     before = evaluate(ctx.intent, ctx.store, ctx.settings)
     built: dict[frozenset, Built] = {}
     for candidate in candidates:
@@ -389,9 +389,6 @@ def build_proposals(
 
     # User-written feedback is offered as asked; analysis options must push today's labels the right way.
     kept = {key: item for key, item in built.items() if origin == "feedback" or moves_all(item)}
-    # No patches: an exception is not offered when a plain level change has the same replay outcome.
-    plain = {item.signature for item in kept.values() if item.change_class < 2}
-    kept = {key: item for key, item in kept.items() if item.change_class < 2 or item.signature not in plain}
     # Every hard option is shown next to its soft counterpart.
     for item in list(kept.values()):
         twin = item.candidate.twin
@@ -410,10 +407,6 @@ class Built:
     intent: IntentModel
     evaluation: Evaluation
     candidate: Candidate
-
-    @property
-    def signature(self) -> tuple:
-        return frozenset(self.evaluation.agree), self.proposal.is_hard
 
     @property
     def change_class(self) -> int:
