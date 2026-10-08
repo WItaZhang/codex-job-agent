@@ -2,48 +2,61 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-A personal job-search agent for **Codex**: expand your search, give strong matches more attention, and choose what it may submit automatically.
+**A runtime that lets an LLM agent take irreversible real-world actions safely, with job applications as the case study.**
 
-## How it works
+**[Replay a recorded run](https://witazhang.github.io/codex-job-agent/demo/)** (no install): three applications go through the same executor, and in one of them the confirmation never appears. The page is generated from a real demo run; the source is [`docs/demo/index.html`](docs/demo/index.html).
+
+## The problem
+
+Agents are good at judgement and bad at guarantees. An application, an email or a payment cannot be taken back once sent, and the failures that matter are mechanical: acting without permission, acting on materials that changed after review, acting twice, or reporting a success nobody observed.
+
+This project splits the work along that line.
+
+| | Codex (skills) | Runtime (Python) |
+| --- | --- | --- |
+| Owns | Fit judgement, which confirmed facts to use, answers and wording | Authorization, versions, state, browser execution, receipts, retry rules |
+| When it is wrong | Caught by sampled independent review | Not allowed to be: enforced in code and tested |
+
+A model saying "submitted" never counts. Only the executor can submit, and only an observed receipt marks success.
+
+## 1. Execution boundary
+
+- **Approval binds the whole packet.** Answers, attachment hashes, job and profile versions and the browser plan form one hash. If any of them changes, the approval stops applying.
+- **Policy decides the route, review is the default.** Automatic submission is limited to the fit tiers, domains and companies the user authorized, under a daily attempt budget.
+- **Dry run first.** The browser fills the form with every write request and cross-origin load blocked until the submission step.
+- **Job content is untrusted input.** It cannot authorize actions or change policy.
+
+## 2. Failure recovery
+
+- **Intent before action.** A submission intent is persisted before the click, under a per-job lease, so two executors cannot submit the same application.
+- **Unknown stays unknown.** A missing receipt or an interrupted process becomes `unknown`, which blocks automatic retry. Only a reconciliation with user-checked evidence moves it to `submitted` or `retryable`.
+- **Side processes cannot overwrite results.** A failure in quality sampling stays visible in the review queue and never changes a confirmed submission.
+
+## 3. Evaluation
+
+- **Sampled audits of what was actually sent.** Submitted materials are frozen. A configurable share (1 in 10 by default) goes to two fresh contexts: one judges hiring relevance, the other checks every claim against confirmed facts. Findings must cite source IDs and exact text.
+- **The evaluator is tested too.** Six synthetic cases, each judged in both A/B orders (12 decisions), check for padding preference, order bias, same-length degradation and useful expansion. That run showed 0/4 padding preference and 0/6 order inconsistency. In a planted-defect test, the factual reviewer flagged an unsupported 80% revenue claim nobody told it to look for.
+- **Design choices are measured.** Updating the user profile directly with Codex and with LangMem both scored 24/24 on synthetic multi-turn edits, so the simpler direct update stays. See the [experiment](docs/agent/PROFILE_MEMORY_EXPERIMENT.md).
+- **245 tests**, including real Chromium against a loopback ATS, run on Windows and Ubuntu CI.
+
+## What the replay shows
+
+| Run | Route | Employer received | Agent observed | Final state |
+| --- | --- | --- | --- | --- |
+| Review required | Submit refused before approval; dry run made 0 POSTs; approval bound to the packet hash | 1 POST | Receipt | `submitted` |
+| Inside automatic scope | Policy allowed automatic submission | 1 POST | Receipt | `submitted` |
+| Receipt never shown | Policy allowed automatic submission | 1 POST | Nothing | `unknown`, retry refused |
+
+In every run the resume hash the employer received matches the approved packet. The replay uses synthetic people and jobs, and no language model runs in it: it tests the runtime.
+
+## Case study: a personal job-search agent
 
 <picture>
   <source media="(max-width: 700px)" srcset="docs/assets/architecture.en.compact.svg">
   <img src="docs/assets/architecture.en.svg" alt="Your goals guide broad job discovery and tailored applications. Your submission rules choose automatic application or your review, with progress and feedback returning to you.">
 </picture>
 
-*Figure 1. Your goals guide the search; your rules control submission. Strong matches receive extra preparation.*
-
-**Start with you.** Confirm your experience, job preferences and constraints, then set the boundary between automatic applications and those you want to review. The agent reuses this context in later sessions.
-
-**Search broadly, prepare with care.** Codex researches opportunities and prepares applications from your confirmed experience, giving strong matches more attention. It can continue unfinished work and adjust priorities as new information arrives.
-
-**Stay in control.** Applications follow your saved rules. Questions and materials that need your input are collected together, alongside application progress. Your feedback helps refine future choices.
-
-See the [usage guide](docs/agent/USAGE.md) for the daily workflow and the [engineering design](docs/agent/ARCHITECTURE.md) for implementation details.
-
-## Get started
-
-You need [uv](https://docs.astral.sh/uv/) and Codex with access to a local project. `.python-version` selects Python; `uv.lock` fixes the dependency versions.
-
-```sh
-git clone https://github.com/WItaZhang/codex-job-agent.git
-cd codex-job-agent
-uv sync --locked --extra dev
-uv run playwright install chromium
-uv run applypilot-agent --help
-```
-
-Open this directory as a **Codex project**, then start with:
-
-> Use $applypilot-onboard to set up my job-search assistant. I'll provide my resume. Help me confirm my experience, job preferences and constraints, then agree with me on which applications can be automatic and which need review.
-
-For a later session:
-
-> Use $applypilot to continue my search today. Process up to 80 openings, prioritize preparation for strong matches, and follow my saved application policy. Bring me the questions that need my input together.
-
-The job count is a session budget for research, screening and preparation—not a measured throughput or a promise of that many submissions. Work runs in the active Codex session; there is no built-in background scheduler.
-
-### Four skills, one assistant
+The runtime drives a job search inside Codex. The user confirms their experience, preferences and which applications may go out automatically. Codex then finds openings on Greenhouse, Lever and Ashby boards, judges fit with cited evidence, prepares materials only from confirmed facts, and submits within the saved policy. Questions and reviews are collected for the user in one place.
 
 | Skill | Role |
 | --- | --- |
@@ -52,64 +65,57 @@ The job count is a session budget for research, screening and preparation—not 
 | `$applypilot-discover` | Find openings, research requirements and record supported fit judgments |
 | `$applypilot-prepare` | Prepare packets, inspect forms, dry-run and execute authorized submissions |
 
-Skills live in [`.agents/skills/`](.agents/skills/). If they are not visible in the current session, open a new session in this project or ask Codex to read the relevant `SKILL.md`.
+Skills live in [`.agents/skills/`](.agents/skills/). The `applypilot*` skill names, `applypilot-agent` CLI and `applypilot_agent` module keep their names for compatibility. The [usage guide](docs/agent/USAGE.md) covers the daily workflow.
 
-The project is named `codex-job-agent`; the `applypilot*` skill names, `applypilot-agent` CLI and `applypilot_agent` Python module remain for compatibility with existing usage.
+## Run it
 
-## Your configuration and data
-
-[`configs/agent.yaml`](configs/agent.yaml) controls workload, daily submission attempts, review policy, browser settings and quality sampling. **Review is required by default.** Onboarding sets the automatic submission boundary from your authorization. Configured paths resolve relative to the YAML file.
+You need [uv](https://docs.astral.sh/uv/). `uv.lock` pins every dependency.
 
 ```sh
-uv run applypilot-agent --config configs/agent.yaml status
-uv run applypilot-agent --config configs/agent.yaml inbox
-uv run applypilot-agent --config configs/agent.yaml dashboard
-```
+git clone https://github.com/WItaZhang/codex-job-agent.git
+cd codex-job-agent
+uv sync --locked --extra dev
+uv run playwright install chromium
 
-Personal state and application files stay in Git-ignored `data/local/`; experiment and demo outputs go to `logs/`. `dashboard` generates a local page. Keep resumes, contact details and browser login state out of Git. Content used for reasoning enters your Codex session; local storage does not mean offline inference.
+# Three scenarios against an isolated local mock ATS, then build the replay page
+uv run python -m applypilot_agent.demo --config configs/demo.yaml
+uv run python docs/demo/build_replay.py logs/<run_id>
 
-## Quality and current scope
-
-The executor freezes authorized materials before submission, and local tools sample confirmed submissions. The coordinating skill arranges independent Codex contexts to review relevance and factual support. Findings retain evidence and appear in the review queue. Evaluator bias checks and version comparisons support development.
-
-Model reviews are **proxy judgments**; synthetic labels are **engineering fixtures**. Neither establishes real interview or offer outcomes. See the [quality design](docs/agent/QUALITY.md) and [verification record](docs/agent/VERIFICATION.md) for evidence and coverage.
-
-- **Browser support:** observable native forms. Complex widgets, iframes, authentication, CAPTCHAs or uploads during form filling may require an adapter or human handoff; ATS support is not universal.
-- **Materials:** the built-in renderer formats confirmed facts. Source references and file hashes check provenance and integrity; they cannot prove every rewrite is factually correct.
-- **Execution boundaries:** tools check the supported execution path. They are not a security sandbox for an agent with full shell access.
-- **Validation:** the initial release passed 208 local tests and [CI on Windows and Ubuntu](https://github.com/WItaZhang/codex-job-agent/actions/runs/37535531580). Real hiring outcomes and cost improvements have not been established.
-
-<details>
-<summary><strong>Run the engineering checks</strong></summary>
-
-```sh
+# Engineering checks
 uv run ruff check src/applypilot_agent tests/agent
 uv run ruff format --check src/applypilot_agent tests/agent
 uv run python -m pytest tests/agent -q
-
-# Browser demo against an isolated local mock ATS
-uv run python -m applypilot_agent.demo --config configs/demo.yaml
-
-# Baseline and candidate comparison on synthetic engineering cases
 uv run python -m applypilot_agent.evaluation --config configs/evaluation.yaml
 ```
 
-Tests cover authorization and packet versions, concurrent execution, submission intent, interruption recovery, unknown outcomes, quality sampling and evaluation inputs. The demo submits only to the local mock ATS.
+If Playwright cannot download its browser, set `browser.executable_path` in the YAML config to an installed Chromium.
 
-</details>
+To use it for a real search, open the directory as a Codex project and start with:
+
+> Use $applypilot-onboard to set up my job-search assistant. I'll provide my resume. Help me confirm my experience, job preferences and constraints, then agree with me on which applications can be automatic and which need review.
+
+[`configs/agent.yaml`](configs/agent.yaml) holds budgets, policy and browser settings. Personal state stays in Git-ignored `data/local/`; run outputs go to `logs/`.
+
+## Scope and limits
+
+- **Browser support:** observable native forms. Logins, CAPTCHAs, iframes and complex widgets need an adapter or a human handoff; many large ATS platforms are not covered.
+- **Materials:** source references and file hashes check provenance and integrity. They cannot prove every rewrite is factually correct.
+- **Evidence:** model reviews are proxy judgements and synthetic labels are engineering fixtures. There are no measured interview, offer or cost results yet.
+- **Isolation:** the tools enforce the supported execution path. They are not a security sandbox against an agent with full shell access.
+- **Operation:** work runs while a Codex session is active; there is no background scheduler.
+
+Details: [quality design](docs/agent/QUALITY.md) · [verification record](docs/agent/VERIFICATION.md).
 
 ## Explore the project
 
 ```text
+src/applypilot_agent/   Runtime: contracts, policy, persistence, browser, execution, quality, evaluation
 .agents/skills/         Codex skills and operating references
-configs/               Runtime, demo and evaluation configuration
-src/applypilot_agent/   Modular runtime, quality and evaluation tools
 tests/agent/           Unit, integration and local browser tests
-evals/                 Evaluation fixtures with labelled provenance
-docs/agent/            Design, usage and verification documentation
+evals/                 Labelled synthetic evaluation fixtures
+configs/               Runtime, demo and evaluation configuration
+docs/                  Design, usage, verification and the demo replay
 ```
-
-Detailed guides are available in English and Chinese, as indicated below.
 
 | Guide | What it covers |
 | --- | --- |
@@ -122,4 +128,4 @@ Detailed guides are available in English and Chinese, as indicated below.
 
 ## License and acknowledgements
 
-Developed and maintained by **WItaZhang**. This independent repository contains the implementation designed for Codex. Project provenance and acknowledgements are recorded in [NOTICE.md](NOTICE.md). Licensed under [AGPL-3.0-only](LICENSE).
+Developed and maintained by **WItaZhang**. Project provenance and acknowledgements are recorded in [NOTICE.md](NOTICE.md). Licensed under [AGPL-3.0-only](LICENSE).
