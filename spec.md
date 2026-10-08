@@ -37,7 +37,7 @@ v1 包含以下 dimension：
 | `seniority` | new_grad, junior, mid, senior |
 | `company_type` | big_tech, startup_early, startup_growth, academia |
 | `company` | 具体公司 |
-| `location` | 城市或地区 |
+| `location` | 两级路径：国家.城市，如 us.seattle、china.beijing（见 3.1.1） |
 | `work_mode` | remote, hybrid, onsite |
 | `employment_type` | full_time, internship, contract |
 | `tech_stack` | python, go, pytorch |
@@ -62,6 +62,19 @@ company_type:
     evidence: [label-...]              # 支持该条目的 label
     exceptions: []                     # 默认为空，见 4.3
 ```
+
+### 3.1.1 location 的层级
+
+v1 中只有 location 有层级，其他维度不分层。
+
+- **key 是两级路径** `location.<国家>.<城市>`，例如 `location.us.seattle`、`location.china.beijing`。条目可以设在国家一级，也可以设在城市一级。岗位打最具体的那一级标签，代码自动推出它的国家。
+- "只看北美"这类跨国范围，用多条 require 表达，比如 `us: require` 加 `canada: require`（规则见下）。
+- **硬约束向下继承，下级不能与之冲突**：
+  - 国家被 `exclude`：该国所有城市都被排除。此时在这个国家下面写任何非排除的条目，代码都会拒绝。想要"不去中国，但上海可以"，必须先修改国家这一级（比如改成强烈回避），再给城市设偏好。根因分析的方案也必须遵守这个顺序。
+  - 国家被 `require`：只看该国的岗位。城市一级可以再细分偏好，也可以再排除，比如"必须美国，但不要西雅图"。这是在收窄范围，不算冲突。
+- **软等级之间不算冲突**：例如 `china: avoid` 加 `china.shanghai: prefer` 是允许的，下级覆盖上级。
+- **打分只算路径上最具体的那一条**，不重复计分。
+- **多条 require 的组合**：同一维度里的多条 require，满足其中一条即可；不同维度之间的 require 必须同时满足。
 
 **等级（level）**：每个条目只有一个等级，没有连续的 weight。用户看到的是文字，看不到分值。
 
