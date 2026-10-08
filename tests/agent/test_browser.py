@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from applypilot_agent.browser import BrowserError, BrowserField, BrowserPlan, BrowserSession
+from applypilot_agent.config import load_settings
 
 
 @pytest.fixture(scope="module")
@@ -361,3 +362,23 @@ def test_conflicting_radio_group_choices_rejected_before_filling(ats, resume, tm
         assert caught.value.code == "conflicting_radio_choices"
         assert browser.page.locator("#name").input_value() == ""
         assert state["posts"] == initial_posts
+
+
+def test_configured_executable_path_is_launched(tmp_path):
+    missing = tmp_path / "no-such-chromium"
+    with (
+        pytest.raises(Exception, match="no-such-chromium"),
+        BrowserSession(tmp_path / "evidence", executable_path=missing),
+    ):
+        pass
+
+
+def test_executable_path_resolves_relative_to_config(tmp_path):
+    config = tmp_path / "configs" / "agent.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "data_dir: ../data\nlogs_dir: ../logs\nbrowser:\n  executable_path: ../browsers/chrome\n", encoding="utf-8"
+    )
+    assert load_settings(config).browser.executable_path == (tmp_path / "browsers" / "chrome").resolve()
+    config.write_text("data_dir: ../data\nlogs_dir: ../logs\n", encoding="utf-8")
+    assert load_settings(config).browser.executable_path is None

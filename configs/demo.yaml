@@ -8,6 +8,7 @@ maximum_request_bytes: 10485760
 browser:
   headless: true
   timeout_ms: 2500
+  executable_path: null
 render_pdf: true
 daily_submission_limit: 3
 profile:

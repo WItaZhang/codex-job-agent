@@ -63,6 +63,8 @@ def load_demo_config(path: Path) -> DemoConfig:
     config = DemoConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8-sig")))
     config.logs_dir = (path.parent / config.logs_dir).resolve()
     config.state_dir = (path.parent / config.state_dir).resolve()
+    if config.browser.executable_path is not None:
+        config.browser.executable_path = (path.parent / config.browser.executable_path).resolve()
     return config
 
 

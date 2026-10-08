@@ -32,7 +32,13 @@ def validate_evidence(profile: Profile, packet: Packet) -> None:
 
 
 def render_resume(
-    profile: Profile, fact_ids: list[str], output: Path, *, pdf: bool = True, job_id: str | None = None
+    profile: Profile,
+    fact_ids: list[str],
+    output: Path,
+    *,
+    pdf: bool = True,
+    job_id: str | None = None,
+    executable_path: Path | None = None,
 ) -> dict:
     """Render selected confirmed facts verbatim; tailoring chooses evidence, never invents it."""
     facts = confirmed_evidence(profile, job_id)
@@ -68,7 +74,9 @@ def render_resume(
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(
+                headless=True, executable_path=str(executable_path) if executable_path is not None else None
+            )
             try:
                 page = browser.new_page()
                 page.set_content(document, wait_until="load")

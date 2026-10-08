@@ -18,6 +18,7 @@ browser:
   timeout_ms: 15000
   allowed_origins: []
   storage_state: null
+  executable_path: null
 policy:
   # Onboarding sets these from the user's actual authorization.
   auto_fit: []

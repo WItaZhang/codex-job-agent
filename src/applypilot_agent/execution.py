@@ -85,6 +85,7 @@ class Executor:
             evidence_dir=evidence_dir,
             allowed_origins=settings.allowed_origins or None,
             storage_state=settings.storage_state,
+            executable_path=settings.executable_path,
         )
 
     def inspect(self, job_id: str) -> dict:

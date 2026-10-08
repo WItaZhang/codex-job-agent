@@ -13,6 +13,8 @@ class BrowserSettings(Record):
     timeout_ms: int = Field(default=15000, gt=0)
     allowed_origins: list[str] = Field(default_factory=list)
     storage_state: Path | None = None
+    # Chromium binary to launch instead of Playwright's bundled browser.
+    executable_path: Path | None = None
 
 
 class MatchingSettings(Record):
@@ -49,6 +51,8 @@ def load_settings(path: Path) -> Settings:
         setattr(settings, key, (path.parent / value).resolve())
     if settings.browser.storage_state is not None:
         settings.browser.storage_state = (path.parent / settings.browser.storage_state).resolve()
+    if settings.browser.executable_path is not None:
+        settings.browser.executable_path = (path.parent / settings.browser.executable_path).resolve()
     if settings.high_fit_reserved > settings.daily_job_limit:
         raise ValueError("high_fit_reserved exceeds daily_job_limit")
     return settings

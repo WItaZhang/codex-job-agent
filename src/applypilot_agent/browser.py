@@ -82,6 +82,7 @@ class BrowserSession:
         timeout_ms: int = 10_000,
         allowed_origins: list[str] | tuple[str, ...] | None = None,
         storage_state: str | Path | None = None,
+        executable_path: str | Path | None = None,
     ) -> None:
         if timeout_ms <= 0:
             raise ValueError("timeout_ms must be positive")
@@ -90,6 +91,7 @@ class BrowserSession:
         self.timeout_ms = timeout_ms
         self.origins = {url_origin(url) for url in allowed_origins or ()}
         self.storage_state = str(storage_state) if storage_state is not None else None
+        self.executable_path = str(executable_path) if executable_path is not None else None
         self._runtime = self._browser = self._context = self._page = None
         self._prepared_digest: str | None = None
         self._prepared_url: str | None = None
@@ -101,7 +103,7 @@ class BrowserSession:
     def __enter__(self) -> Self:
         try:
             self._runtime = sync_playwright().start()
-            self._browser = self._runtime.chromium.launch(headless=self.headless)
+            self._browser = self._runtime.chromium.launch(headless=self.headless, executable_path=self.executable_path)
             self._context = self._browser.new_context(
                 storage_state=self.storage_state, service_workers="block", accept_downloads=False
             )

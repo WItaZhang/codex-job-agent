@@ -226,7 +226,9 @@ class AgentService:
             from .serialization import canonical
 
             manifest.write_text(canonical(identity), encoding="utf-8")
-        result = render_resume(profile, fact_ids, output, pdf=pdf, job_id=job_id)
+        result = render_resume(
+            profile, fact_ids, output, pdf=pdf, job_id=job_id, executable_path=self.settings.browser.executable_path
+        )
         with self.store.transaction() as db:
             self.store.put(
                 db,

@@ -151,6 +151,12 @@ uv run applypilot-agent --config configs/agent.yaml status
 `browser.storage_state` 使用。该文件含凭据，不应加入 Git，也不会让不支持的控件
 自动获得兼容性。助手不会复制你其他浏览器的个人资料来绕过登录。
 
+`browser.executable_path` 默认为 `null`，使用 `playwright install chromium`
+下载的匹配版本。若环境无法下载浏览器、只预装了另一份 Chromium（例如某些
+云端容器），可以填写该可执行文件路径；相对路径同样按 YAML 所在目录解析。
+它同时用于表单浏览器和 PDF 简历渲染。所填浏览器与 Playwright 版本不一致时
+可能无法启动或行为不同，此时应以 `playwright install` 的版本为准。
+
 ## 操作者命令
 
 普通使用交给技能即可。需要检查或调试时，可以在仓库根目录运行下列命令。
