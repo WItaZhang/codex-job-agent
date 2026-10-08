@@ -82,7 +82,7 @@ def describe(event: dict) -> tuple[str, str]:
         )
     if kind == "form_inspected":
         detail = f"{len(p['fields'])} fields · {p['iframes']} iframes · {len(p['blocked_requests'])} blocked"
-        return t("Form inspected with writes blocked", "观察表单，写入被拦截"), detail
+        return t("Form inspected (read-only)", "观察表单（只读）"), detail
     if kind == "material_rendered":
         return t("Resume rendered from confirmed facts", "用已确认事实生成简历"), (
             f"sha256 {short(p['attachment']['sha256'])}"
@@ -173,8 +173,8 @@ def scenario_section(scenario: dict, events: list[dict], entry: dict) -> str:
       </div>
       <div class="table-wrap">
         <table class="ledger">
-          <thead><tr><th></th><th>{t("Agent observed", "Agent 观察到")}</th>
-            <th>{t("Employer recorded", "招聘方记录")}</th></tr></thead>
+          <thead><tr><th></th><th>{t("Executor saw on the page", "执行器在页面上看到")}</th>
+            <th>{t("Mock employer recorded", "模拟招聘方记录")}</th></tr></thead>
           <tbody>
             <tr><th>{t("Submissions", "提交次数")}</th><td>1 {t("intent", "次意图")}</td>
               <td>{scenario["employer_posts"]} POST</td></tr>
@@ -334,26 +334,26 @@ RULES = [
         ("Approval binds the exact packet", "批准绑定整份申请包"),
         (
             (
-                "Answers, attachment hashes, job and profile versions and the browser plan form one hash. "
-                "Change any of them and the approval no longer applies."
+                "Answers, attachment hashes, job and profile versions and the browser plan form one hash, "
+                "and the approval is also tied to the current policy. Change any of them and it no longer applies."
             ),
-            "答案、附件哈希、岗位和档案版本、浏览器计划合成一个哈希；任何一项变化，批准都失效。",
+            "答案、附件哈希、岗位和档案版本、浏览器计划合成一个哈希，批准还绑定当前策略；任何一项变化都会失效。",
         ),
         "policy.py · execution.py",
     ),
     (
         ("Dry runs cannot write", "试填不能写入"),
         (
-            "The browser blocks every write request and cross-origin load until the submission step.",
-            "到提交那一步之前，浏览器拦截所有写请求和跨域加载。",
+            "Until the submission step the browser aborts non-GET requests to the form's origin and any request to another origin.",
+            "到提交那一步之前，浏览器中止发往表单来源的非 GET 请求和所有跨域请求。",
         ),
         "browser.py",
     ),
     (
         ("Intent is recorded before the click", "点击前先记录提交意图"),
         (
-            "A per-job lease prevents two executors from submitting the same application at once.",
-            "每个岗位一把租约锁，两个执行器不能同时提交同一份申请。",
+            "A per-job file lock stops two operations on the same application from running at once.",
+            "每个岗位一把文件锁，同一份申请不能同时运行两个操作。",
         ),
         "execution.py · lease.py",
     ),
@@ -366,18 +366,24 @@ RULES = [
         "browser.py · execution.py",
     ),
     (
-        ("Unknown blocks automatic retry", "不确定状态禁止自动重试"),
+        ("Unknown is a locked state", "不确定是锁定状态"),
         (
-            "Only a reconciliation with user-checked evidence can move it to submitted or retryable.",
-            "只有带用户核实证据的对账，才能把它改成已提交或可重试。",
+            (
+                "The runtime never retries on its own and refuses another submit. Only a reconciliation with "
+                "user-checked evidence can move it to submitted or retryable."
+            ),
+            "运行时从不自行重试，再次提交也会被拒绝；只有带用户核实证据的对账，才能改成已提交或可重试。",
         ),
         "execution.py",
     ),
     (
         ("Sent materials are frozen for audit", "已发送材料冻结待审"),
         (
-            "A sampled share goes to two independent reviewers, one for hiring relevance and one for factual support.",
-            "按比例抽样，交给两个独立评审：一个看招聘相关性，一个核对事实依据。",
+            (
+                "A sampled share goes to two fresh model contexts, one for hiring relevance and one for factual "
+                "support. Their findings are proxy judgements, not human review."
+            ),
+            "按比例抽样，交给两个全新的模型上下文：一个看招聘相关性，一个核对事实依据；这是代理判断，不是人工评审。",
         ),
         "quality/",
     ),
@@ -437,8 +443,8 @@ def build(run_dir: Path) -> tuple[str, str]:
   <section class="intro">
     <h1>{
             t(
-                "An agent that submits once, only with permission, and says when it isn't sure",
-                "只在获准时提交、只提交一次、不确定就如实记录的 Agent",
+                "An agent that submits at most once, only with permission, and says when it isn't sure",
+                "只在获准时提交、最多提交一次、不确定就如实记录的 Agent",
             )
         }</h1>
     <p class="lede">{
@@ -474,10 +480,10 @@ def build(run_dir: Path) -> tuple[str, str]:
     <div class="summary">{"".join(cards)}</div>
     <p class="callout">{
             t(
-                "In the third run the employer got the application, but the page never confirmed it. The agent "
-                "recorded unknown and refused to retry, so the application was not sent twice.",
-                "第三次运行中，招聘方其实收到了申请，但页面没有给出确认。Agent 把状态记为 unknown，"
-                "并拒绝自动重试，所以申请没有被重复发送。",
+                "In the third run the mock employer got the application, but the page never confirmed it. The "
+                "executor recorded unknown and refused a second submit, so the application was not sent twice.",
+                "第三次运行中，模拟招聘方其实收到了申请，但页面没有给出确认。执行器把状态记为 unknown，"
+                "并拒绝了再次提交，所以申请没有被重复发送。",
             )
         }</p>
   </section>

@@ -17,37 +17,37 @@ This project splits the work along that line.
 | Owns | Fit judgement, which confirmed facts to use, answers and wording | Authorization, versions, state, browser execution, receipts, retry rules |
 | When it is wrong | Caught by sampled independent review | Not allowed to be: enforced in code and tested |
 
-A model saying "submitted" never counts. Only the executor can submit, and only an observed receipt marks success.
+A model saying "submitted" never counts. Skills hand final submission to the executor, and only a confirmation observed on the page marks success.
 
 ## 1. Execution boundary
 
-- **Approval binds the whole packet.** Answers, attachment hashes, job and profile versions and the browser plan form one hash. If any of them changes, the approval stops applying.
+- **Approval binds the whole packet.** Answers, attachment hashes, job and profile versions and the browser plan form one hash, and the approval is also tied to the current policy. If any of them changes, the approval stops applying.
 - **Policy decides the route, review is the default.** Automatic submission is limited to the fit tiers, domains and companies the user authorized, under a daily attempt budget.
-- **Dry run first.** The browser fills the form with every write request and cross-origin load blocked until the submission step.
+- **Dry run first.** The executor fills the form without clicking submit. Until the submission step the browser aborts non-GET requests to the form's origin and every request to another origin, and a page that tries to write stops the dry run.
 - **Job content is untrusted input.** It cannot authorize actions or change policy.
 
 ## 2. Failure recovery
 
-- **Intent before action.** A submission intent is persisted before the click, under a per-job lease, so two executors cannot submit the same application.
-- **Unknown stays unknown.** A missing receipt or an interrupted process becomes `unknown`, which blocks automatic retry. Only a reconciliation with user-checked evidence moves it to `submitted` or `retryable`.
+- **Intent before action.** A submission intent is persisted before the click. A per-job file lock stops two operations on the same application from running at once in one data directory.
+- **Unknown stays unknown.** A missing receipt or an interrupted process becomes `unknown`, a locked state. The runtime never retries on its own and refuses another submit; only a reconciliation with user-checked evidence moves it to `submitted` or `retryable`.
 - **Side processes cannot overwrite results.** A failure in quality sampling stays visible in the review queue and never changes a confirmed submission.
 
 ## 3. Evaluation
 
-- **Sampled audits of what was actually sent.** Submitted materials are frozen. A configurable share (1 in 10 by default) goes to two fresh contexts: one judges hiring relevance, the other checks every claim against confirmed facts. Findings must cite source IDs and exact text.
-- **The evaluator is tested too.** Six synthetic cases, each judged in both A/B orders (12 decisions), check for padding preference, order bias, same-length degradation and useful expansion. That run showed 0/4 padding preference and 0/6 order inconsistency. In a planted-defect test, the factual reviewer flagged an unsupported 80% revenue claim nobody told it to look for.
+- **Sampled audits of what was actually sent.** Submitted materials are frozen. One random pick per 10 confirmed submissions (configurable) goes to two fresh model contexts: one judges hiring relevance, the other checks every claim against confirmed facts. These are proxy judgements, not human review. Findings must cite source IDs and exact text.
+- **The evaluator is tested too.** Six synthetic cases, each judged by a model in both A/B orders (12 decisions), check for padding preference, order bias, same-length degradation and useful expansion. That one small diagnostic run showed 0/4 padding preference and 0/6 order inconsistency. In a planted-defect test on one sampled synthetic submission, the factual reviewer flagged an unsupported 80% revenue claim nobody told it to look for.
 - **Design choices are measured.** Updating the user profile directly with Codex and with LangMem both scored 24/24 on synthetic multi-turn edits, so the simpler direct update stays. See the [experiment](docs/agent/PROFILE_MEMORY_EXPERIMENT.md).
-- **245 tests**, including real Chromium against a loopback ATS, run on Windows and Ubuntu CI.
+- **245 tests** (3 need an optional extra), including real Chromium against a loopback ATS. The CI workflow runs the suite on Windows and Ubuntu.
 
 ## What the replay shows
 
-| Run | Route | Employer received | Agent observed | Final state |
+| Run | Route | Mock employer recorded | Executor saw on the page | Final state |
 | --- | --- | --- | --- | --- |
 | Review required | Submit refused before approval; dry run made 0 POSTs; approval bound to the packet hash | 1 POST | Receipt | `submitted` |
 | Inside automatic scope | Policy allowed automatic submission | 1 POST | Receipt | `submitted` |
-| Receipt never shown | Policy allowed automatic submission | 1 POST | Nothing | `unknown`, retry refused |
+| Receipt never shown | Policy allowed automatic submission | 1 POST | Nothing | `unknown`; a second submit is refused |
 
-In every run the resume hash the employer received matches the approved packet. The replay uses synthetic people and jobs, and no language model runs in it: it tests the runtime.
+The ledger and resume-hash comparison are checks the demo makes against its local mock server; the runtime itself trusts only what the page shows. The replay uses synthetic people and jobs, the approval in the first run is a test fixture, and no language model runs in it: it tests the runtime.
 
 ## Case study: a personal job-search agent
 

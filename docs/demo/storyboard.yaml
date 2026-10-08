@@ -1,0 +1,175 @@
+# Demo video storyboard (docs/demo/build_video.py). Times are seconds of the final video.
+# Footage segments name a recorded browser session by step; offset/rate map video time to
+# recording time. {placeholders} are filled from the rendered run. Synthetic data only:
+# a local mock employer, a scripted approval, and no language model.
+poster_at: 51.0
+badge:
+  zh: "合成演示 · 本地模拟招聘方 · 未运行语言模型 · 画面已放慢"
+  en: "Synthetic demo · local mock employer · no LLM · slowed for visibility"
+rules:
+  - {zh: "没批准，不发", en: "No approval, no send"}
+  - {zh: "发出去的就是批准的那一版", en: "What's sent is the version approved"}
+  - {zh: "没看到确认：不算成功，也不重发", en: "No confirmation: not a success, no resend"}
+scenes:
+  - kind: coldopen
+    job: receipt-missing
+    start: 0
+    end: 9
+    footage:
+      - {step: submit, from: 0, to: 9, offset: 0.6}
+    captions:
+      - {from: 0, to: 4.6, zh: "执行器点了「提交」，页面没有出现确认", en: "The executor clicked Submit. No confirmation appeared."}
+      - {from: 4.6, to: 9, zh: "再点一次？可能投两份。不点？可能一份都没发出", en: "Click again: maybe two sent. Don't: maybe none."}
+
+  - kind: card
+    layout: title
+    start: 9
+    end: 15
+    items:
+      - {style: eyebrow, from: 9.2, zh: "Codex Job Agent", en: "Codex Job Agent"}
+      - style: headline
+        from: 9.4
+        zh: "求职 Agent 里真正点「提交」的那层代码"
+        en: "The code that actually clicks Submit in a job-search agent"
+      - style: sub
+        from: 10.4
+        zh: "模型负责判断，代码负责把关；只认页面上的回执"
+        en: "The model decides; the code enforces. Only an on-page receipt counts."
+
+  - kind: card
+    layout: rules
+    start: 15
+    end: 21
+    items:
+      - {style: eyebrow, from: 15.2, zh: "三条规则", en: "Three rules"}
+      - {style: rule, n: "1", from: 15.5, zh: "没批准，不发", en: "No approval, no send"}
+      - {style: rule, n: "2", from: 16.5, zh: "发出去的就是批准的那一版", en: "What's sent is the version approved"}
+      - {style: rule, n: "3", from: 17.5, zh: "没看到确认：不算成功，也不重发", en: "No confirmation: not a success, no resend"}
+
+  - kind: scenario
+    job: review-required
+    start: 21
+    end: 38
+    number: "1/3"
+    name_zh: "默认需要审核"
+    name_en: "Review by default"
+    route_zh: "策略：审核"
+    route_en: "policy: review"
+    states:
+      - {from: 21, state: review}
+      - {from: 33.9, state: submitted}
+    footage:
+      - {step: inspect, from: 21, to: 22.2}
+      - {step: dry_run, from: 22.2, to: 32}
+      - {step: submit, from: 32, to: 38, offset: 0.3}
+    rules:
+      - {n: 1, tick: 26.0}
+      - {n: 2, tick: 35.2}
+    ledger:
+      counts:
+        - {from: 21, count: 0}
+        - {from: 33.5, count: 1}
+      receipt_at: 33.9
+      sha_at: 35.2
+    events:
+      - {kind: assessed, at: 21.1}
+      - {kind: form_inspected, at: 21.7}
+      - {kind: material_rendered, at: 22.3}
+      - {kind: packet_saved, at: 22.9}
+      - {kind: dry_run_prepared, at: 24.6}
+      - {zh: "提交被拒绝：没有批准，浏览器没打开", en: "Submit refused: no approval, no browser opened", raw: "{refused}", at: 25.4, tone: warn}
+      - {kind: user_approved, at: 28.8}
+      - {kind: quality_snapshot_frozen, at: 31.4}
+      - {kind: submit_intent, at: 32.6}
+      - {kind: submission_observed, at: 33.9, tone: ok}
+    stamps:
+      - {from: 25.2, to: 28.4, tone: warn, zh: "没批准 → 拒绝", en: "No approval → refused"}
+    captions:
+      - {from: 21, to: 25.2, zh: "默认需要审核。先试填：只填写，不点提交", en: "Review is the default. Dry run: fill in, never submit"}
+      - {from: 25.2, to: 28.6, zh: "没批准就提交？拒绝，浏览器都没打开", en: "Submit without approval? Refused; no browser opened"}
+      - {from: 28.6, to: 33.4, zh: "批准只对这一版有效（演示里由脚本代替用户）", en: "Approval covers only this version (scripted for the demo)"}
+      - {from: 33.4, to: 38, zh: "看到回执才算成功；台账里的简历与批准的一致", en: "Receipt seen → submitted. Ledger: the approved file"}
+
+  - kind: scenario
+    job: auto-authorized
+    start: 38
+    end: 45
+    number: "2/3"
+    name_zh: "演示策略允许自动提交"
+    name_en: "Automatic by policy"
+    route_zh: "策略：自动"
+    route_en: "policy: automatic"
+    states:
+      - {from: 38, state: ready}
+      - {from: 40.1, state: submitted}
+    footage:
+      - {step: submit, from: 38, to: 45, offset: 0.3}
+    rules:
+      - {n: 2, tick: 40.8}
+    ledger:
+      counts:
+        - {from: 38, count: 0}
+        - {from: 39.7, count: 1}
+      receipt_at: 40.1
+      sha_at: 40.8
+    events:
+      - {kind: packet_saved, at: 38.1}
+      - {kind: submit_intent, at: 38.9}
+      - {kind: submission_observed, at: 40.1, tone: ok}
+    captions:
+      - {from: 38, to: 42.4, zh: "演示策略允许自动提交：不用审核", en: "The demo policy allows auto-submit: no review"}
+      - {from: 42.4, to: 45, zh: "同样要看到回执才算数", en: "Still counts only with a receipt"}
+
+  - kind: scenario
+    job: receipt-missing
+    start: 45
+    end: 63.5
+    number: "3/3"
+    name_zh: "回执没有出现（故障注入）"
+    name_en: "No receipt (injected fault)"
+    route_zh: "策略：自动"
+    route_en: "policy: automatic"
+    states:
+      - {from: 45, state: ready}
+      - {from: 50.0, state: unknown}
+    footage:
+      - {step: submit, from: 45, to: 63.5, offset: 0.3}
+    rules:
+      - {n: 3, tick: 56.0}
+    ledger:
+      flag: true
+      counts:
+        - {from: 45, count: 0}
+        - {from: 46.5, count: 1}
+      receipt_at: 46.8
+    events:
+      - {kind: packet_saved, at: 45.1}
+      - {kind: submit_intent, at: 45.8}
+      - {kind: submission_observed, at: 50.0, tone: warn}
+      - {zh: "再次提交被拒绝：结果未知，需要对账", en: "Second submit refused: unknown, needs reconciling", raw: "{refused}", at: 55.6, tone: warn}
+    stamps:
+      - {from: 55.4, to: 59.0, tone: warn, zh: "再次提交 → 拒绝", en: "Submit again → refused"}
+    captions:
+      - {from: 45, to: 50, zh: "故障注入：模拟招聘方收下申请，但页面不给确认", en: "Fault injected: accepted, but no confirmation shown"}
+      - {from: 50, to: 55.4, zh: "没看到确认 → 记为「结果未知」：不算成功也不算失败", en: "No confirmation → \"unknown\": not success, not failure"}
+      - {from: 55.4, to: 59.6, zh: "再提交一次？拒绝。模拟招聘方仍然只有 1 份", en: "Submit again? Refused. The mock employer still has 1."}
+      - {from: 59.6, to: 63.5, zh: "接下来由人核实，有证据才能改状态", en: "A person checks; only evidence changes the state"}
+
+  - kind: card
+    layout: end
+    start: 63.5
+    end: 72
+    items:
+      - {style: url, from: 63.7, zh: "github.com/WItaZhang/codex-job-agent", en: "github.com/WItaZhang/codex-job-agent"}
+      - style: small
+        from: 64.2
+        zh: "一条命令重跑这段演示；崩溃恢复、并发锁和对账流程都在仓库里"
+        en: "Re-run this demo with one command. Crash recovery, locking and reconciliation are in the repo."
+      - style: small
+        from: 65.2
+        zh: "换成下单、退款、发通知，是同一个问题"
+        en: "Swap in orders, refunds or notifications: same problem."
+      - style: footer
+        from: 66.0
+        zh: "合成数据 · 本地模拟招聘方 · 未运行语言模型 · 不代表真实求职结果"
+        en: "Synthetic data · local mock employer · no LLM ran · not real job-search outcomes"

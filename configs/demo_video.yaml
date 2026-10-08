@@ -1,0 +1,18 @@
+# Demo video build (docs/demo/build_video.py). Captures real browser footage from a
+# fresh run of the synthetic loopback demo, then renders captioned MP4s from that run's
+# own events, summary and employer ledger. Synthetic data only; no language model runs.
+# Paths resolve relative to this file.
+demo_config: demo.yaml
+output_dir: ../docs/demo
+capture:
+  # Playwright slow_mo so each executor action is visible in the recording.
+  slow_mo_ms: 300
+  width: 1280
+  height: 720
+render:
+  width: 1280
+  height: 720
+  fps: 25
+  # libx264 constant rate factor; lower is higher quality and larger.
+  crf: 23
+  languages: [zh, en]
