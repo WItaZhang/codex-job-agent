@@ -33,7 +33,8 @@ v1 包含以下 dimension：
 | dimension | key 示例 |
 | --- | --- |
 | `role` | backend_engineering, ml_engineering, data_science |
-| `domain` | ai_infra, fintech, healthcare |
+| `domain` | fintech, healthcare, ecommerce（行业） |
+| `specialty` | recsys, risk_control, search, nlp, cv, ai_infra（技术方向，与行业正交） |
 | `seniority` | new_grad, junior, mid, senior |
 | `company_type` | big_tech, startup_early, startup_growth, academia |
 | `company` | 具体公司 |
@@ -42,6 +43,8 @@ v1 包含以下 dimension：
 | `employment_type` | full_time, internship, contract |
 | `tech_stack` | python, go, pytorch |
 | `sponsorship` | sponsors, no_sponsorship |
+
+**运行时发现现有维度无法表达时**：根因分析不会把它硬塞进不合适的维度，而是记录一条"建议新增维度"并提示用户；真正的新增走开发流程。
 
 **key 在每个 dimension 内开放，但必须规范化。**
 
@@ -92,26 +95,22 @@ v1 中只有 location 有层级，其他维度不分层。
 - 进入或离开 `exclude`/`require` 受 4.5 限制。
 - 意图模型每次写入都生成一个**不可变的版本快照**，并关联到导致这次写入的用户决定。
 
-### 3.2 薪资（暂定）
+### 3.2 薪资
 
-薪资不使用 `dimension.key` 表达，单独作为一个**可选**的数值字段。
-
-**用户可以选择不考虑薪资**，此时 `compensation: null`：
-- 薪资不参与排除，也不参与打分，只在展示时显示；
-- 根因分析不会提出任何薪资相关的修改；
-- 只有用户的显式命令，或者用户在"提意见"中明确提出，才能重新启用薪资。
-
-启用时：
+薪资不使用 `dimension.key` 表达，单独作为一个**可选**的数值字段，**只设下限，而且是软条件**。
 
 ```yaml
-compensation: {currency: USD, period: year, floor: 150000, target: 190000}
+compensation: {currency: USD, period: year, floor: 150000}   # 或 null，表示不考虑薪资
 ```
 
-- 岗位薪资低于 floor：排除。
-- 在 floor 和 target 之间：轻微扣分。
-- 达到 target 及以上：不扣分。
-- 岗位没写薪资：记为 **unknown**，不扣分也不排除，只在展示时标出。
-- 每日反馈可以**提议**调整 floor 或 target，但需要同时满足：被拒岗位中有写明薪资的证据，并且其他维度解释不了这次拒绝。和其他修改一样，必须由用户选择后才生效。
+- 岗位薪资低于 floor：扣分（扣分幅度写在配置中），**不排除**。
+- 岗位没写薪资：记为 **unknown**，不扣分，只在展示时标出。
+- `compensation: null` 表示不考虑薪资：薪资只在展示时显示，不参与打分；根因分析不会主动提出薪资相关的修改。
+- 启用薪资或调整 floor，有三种途径：
+  1. 用户的显式命令；
+  2. 用户的"提意见"；
+  3. 用户在 label 的原因中**明确提到薪资**（如"工资太低"）。这时根因方案可以是"启用或调整薪资下限"，floor 的具体数值让用户选择或填写。
+- 和其他修改一样，必须由用户选择后才生效。
 
 ### 3.3 背景层（v1 最小化）
 
@@ -222,7 +221,7 @@ exception 默认为空。新增一个 exception 必须**同时满足**以下条�
 1. 用户提供自由描述和简历。简历先打码，再交给模型；模型**起草**意图模型，草稿中不包含硬约束。
 2. 按 dimension 逐个确认：草稿中的每个 key 可以选择"对 / 改等级 / 删"，另外提供"补充"多选，候选项来自词表。
 3. 单独一道"绝对不能接受"的多选题，答案生成硬约束。
-4. 薪资：填写范围，或者选择"不考虑薪资"。
+4. 薪资：填写下限，或者选择"不考虑薪资"。
 5. 背景层的精简结构也由用户确认。
 
 ### 4.8 不可信输入
@@ -295,9 +294,9 @@ exception 默认为空。新增一个 exception 必须**同时满足**以下条�
 
 ## 10. 未决问题
 
-- **打分公式**。暂定：对岗位命中的每个软等级条目，累加它的分值；命中 exception 条件时，用 exception 的等级代替默认等级；违反硬约束直接排除；薪资启用时按 3.2 扣分。还没定的是：同一个 dimension 命中多个 key 时（例如多个 tech_stack）取累加还是最大值；"推荐线"阈值（写在配置中）。
+- **打分公式**。暂定：对岗位命中的每个软等级条目，累加它的分值（同一维度命中多个 key 时也累加，已由样例 9 确认）；命中 exception 条件时，用 exception 的等级代替默认等级；location 只算路径上最具体的一条；违反硬约束直接排除；薪资启用时按 3.2 扣分。还没定的是"推荐线"阈值（写在配置中）。
 - **偏好漂移**：回放时旧 label 是否按时间衰减？v1 暂不衰减，翻转的历史岗位由用户判断。
 - **词表合并**：两个已存在的 key 被发现同义时，如何合并并迁移 evidence？
 - **探索位的具体抽样方法**（排名中段与命中回避条目的岗位各占多少）。
-- **薪资**（3.2，启用时）的扣分曲线，以及岗位薪资区间与用户范围怎样比较。
+- **薪资**（3.2）低于下限时的扣分方式（固定扣分还是按差距扣分），以及岗位给的是区间时取哪个值和下限比较。
 - 项目和包的名称。
