@@ -21,6 +21,7 @@ class Scoring(_Section):
 class Daily(_Section):
     recommended: int
     exploration: int
+    exploration_max_from_avoid: int
 
 
 class Analysis(_Section):
@@ -33,13 +34,14 @@ class HardReview(_Section):
 
 
 class LLM(_Section):
-    provider: Literal["fake", "anthropic", "openai_compatible"]
+    provider: Literal["host", "fake", "anthropic", "openai_compatible"]
     model: str | None
     api_key_env: str | None
 
 
 class Storage(_Section):
     db_path: str
+    data_dir: str
 
 
 class Settings(_Section):

@@ -48,7 +48,9 @@ def import_jobs(box, jobs: list[dict]) -> list[str]:
 
 
 def tagged(box, specs: list[tuple[str, list[str]]]) -> list[str]:
-    ids = import_jobs(box, [{"id": job_id, "title": f"Job {job_id}", "description": "SYNTHETIC"} for job_id, _ in specs])
+    ids = import_jobs(
+        box, [{"id": job_id, "title": f"Job {job_id}", "description": "SYNTHETIC"} for job_id, _ in specs]
+    )
     for job_id, tags in specs:
         box.submit_job_tags(job_id, tags)
     return ids
@@ -277,3 +279,25 @@ def test_misread_correction_is_a_commit_tool(box):
     tags = box.correct_tags(job_id, remove=["role.ml_engineering"], add=["role.backend_engineering"])
     assert "role.backend_engineering" in tags["tags"]
     assert box.get_intent()["version"] == 1
+
+
+def _call(server, name, **arguments):
+    return asyncio.run(server.call_tool(name, arguments))
+
+
+def test_tools_work_through_the_mcp_server_from_worker_threads(box):
+    server = build_server(box)
+    _call(server, "initialize_intent", path=write_init(box))
+    path = box.data_dir / "jobs.json"
+    path.write_text(json.dumps([{"id": "j1", "title": "T", "description": "SYNTHETIC"}]), encoding="utf-8")
+    _call(server, "import_jobs", path=str(path))
+    _call(server, "submit_job_tags", job_id="j1", tags=["role.ml_engineering"])
+    assert box.select_today(DAY1)["jobs"][0]["job_id"] == "j1"
+
+
+def test_rule_violations_reach_the_agent_with_their_reason(box):
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server = build_server(box)
+    with pytest.raises(ToolError, match="outside the data directory"):
+        _call(server, "import_jobs", path="/etc/passwd")

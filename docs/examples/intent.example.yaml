@@ -1,0 +1,22 @@
+# SYNTHETIC 示例：复制到 data/local/intent.yaml 后按自己的情况修改，再让 agent 调用 initialize_intent。
+# 只能初始化一次；之后的修改都通过每日反馈和你的确认完成。冷启动（切片 3）完成后，这个文件会被取代。
+synthetic: true
+intent:
+  role:
+    ml_engineering: {level: strong_prefer}
+    backend_engineering: {level: prefer}
+  specialty:
+    recsys: {level: prefer}
+  company_type:
+    big_tech: {level: avoid}
+  seniority:
+    senior: {level: exclude}
+  work_mode:
+    onsite: {level: avoid}
+  location:
+    china.shanghai: {level: prefer}
+compensation: null          # 或 {currency: CNY, period: month, floor: 30000}
+vocabulary:                 # 已知的 key 和别名；意图里出现的 key 会自动加入
+  company_type: {big_tech: [大厂]}
+  work_mode: {remote: [远程], hybrid: [混合], onsite: [坐班]}
+  employment_type: {contract: [外包]}

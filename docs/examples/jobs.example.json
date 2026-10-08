@@ -1,0 +1,9 @@
+[
+  {
+    "title": "SYNTHETIC — ML Engineer, Recommendation",
+    "company": "Example Co",
+    "url": "https://example.com/jobs/1",
+    "description": "SYNTHETIC posting text. Paste the full original description here.",
+    "salary": {"currency": "CNY", "period": "month", "min": 30000, "max": 45000}
+  }
+]

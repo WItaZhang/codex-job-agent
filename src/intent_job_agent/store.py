@@ -26,6 +26,9 @@ CREATE TABLE IF NOT EXISTS proposals (id TEXT PRIMARY KEY, analysis_id TEXT NOT 
                                       data TEXT NOT NULL, status TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS decisions (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL, analysis_id TEXT,
                                       kind TEXT NOT NULL, proposal_id TEXT, payload TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tagged (job_id TEXT PRIMARY KEY, tagged_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS selections (day TEXT NOT NULL, job_id TEXT NOT NULL, slot TEXT NOT NULL,
+                                       position INTEGER NOT NULL, PRIMARY KEY (day, job_id));
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
 """
@@ -43,7 +46,8 @@ class Store:
     def __init__(self, path: str | Path, settings: Settings):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.settings = settings
-        self.db = sqlite3.connect(path)
+        # Callers serialize access (the MCP server holds a lock); the SDK may call from worker threads.
+        self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
 
@@ -58,6 +62,44 @@ class Store:
         if row is None:
             raise InvariantError(f"Unknown job {job_id}")
         return Job.model_validate_json(row["data"])
+
+    def jobs(self) -> list[Job]:
+        return [Job.model_validate_json(row["data"]) for row in self.db.execute("SELECT data FROM jobs ORDER BY rowid")]
+
+    def has_job(self, job_id: str) -> bool:
+        return self.db.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone() is not None
+
+    def is_tagged(self, job_id: str) -> bool:
+        return self.db.execute("SELECT 1 FROM tagged WHERE job_id = ?", (job_id,)).fetchone() is not None
+
+    def set_job_tags(self, job_id: str, tags: list[str]) -> Job:
+        """Initial tags of a job not yet shown; later changes go through the misread correction."""
+        if job_id in self.shown_job_ids():
+            raise InvariantError(f"Job {job_id} was already shown; fix its tags through a misread correction")
+        job = self.job(job_id).model_copy(update={"tags": tags})
+        with self.db:
+            self.db.execute("UPDATE jobs SET data = ? WHERE id = ?", (job.model_dump_json(), job_id))
+            self.db.execute("INSERT OR REPLACE INTO tagged (job_id, tagged_at) VALUES (?, ?)", (job_id, _now()))
+        return job
+
+    def untagged_jobs(self) -> list[Job]:
+        return [job for job in self.jobs() if not self.is_tagged(job.id)]
+
+    def save_selection(self, day: str, items: list[tuple[str, str]]) -> None:
+        with self.db:
+            if self.db.execute("SELECT 1 FROM selections WHERE day = ?", (day,)).fetchone():
+                raise InvariantError(f"Jobs for {day} were already selected")
+            self.db.executemany(
+                "INSERT INTO selections (day, job_id, slot, position) VALUES (?, ?, ?, ?)",
+                [(day, job_id, slot, n) for n, (job_id, slot) in enumerate(items, start=1)],
+            )
+
+    def selection(self, day: str) -> list[tuple[str, str]]:
+        rows = self.db.execute("SELECT job_id, slot FROM selections WHERE day = ? ORDER BY position", (day,))
+        return [(row["job_id"], row["slot"]) for row in rows]
+
+    def shown_job_ids(self) -> set[str]:
+        return {row["job_id"] for row in self.db.execute("SELECT job_id FROM selections")}
 
     def effective_tags(self, job_id: str) -> list[str]:
         """Job tags after any user-confirmed misread correction."""
@@ -150,6 +192,9 @@ class Store:
                     (proposal.id, analysis.id, proposal.base_version, proposal.model_dump_json()),
                 )
 
+    def analyses(self) -> list[Analysis]:
+        return [Analysis.model_validate_json(row["data"]) for row in self.db.execute("SELECT data FROM analyses")]
+
     def analysis(self, analysis_id: str) -> Analysis:
         row = self.db.execute("SELECT data FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
         if row is None:
@@ -185,7 +230,7 @@ class Store:
     def decisions(self) -> list[dict]:
         return [dict(row) for row in self.db.execute("SELECT * FROM decisions ORDER BY seq")]
 
-    def apply_decision(self, proposal_id: str, inputs: dict | None = None) -> IntentModel:
+    def apply_decision(self, proposal_id: str, inputs: dict | None = None, approved_via: str = "direct") -> IntentModel:
         """The single write path: apply a pending proposal the user chose, on the version it was built for."""
         row = self.db.execute("SELECT * FROM proposals WHERE id = ?", (proposal_id,)).fetchone()
         if row is None:
@@ -206,7 +251,9 @@ class Store:
         result, _ = replay(evaluate(before, self, self.settings), after, self, self.settings)
 
         with self.db:
-            decision_id = self._decision(proposal.analysis_id, "accept", proposal_id, {"inputs": inputs or {}})
+            decision_id = self._decision(
+                proposal.analysis_id, "accept", proposal_id, {"inputs": inputs or {}, "approved_via": approved_via}
+            )
             self.db.execute(
                 "INSERT INTO intent_versions (version, data, decision_id, created_at) VALUES (?, ?, ?, ?)",
                 (current + 1, after.model_dump_json(), decision_id, _now()),

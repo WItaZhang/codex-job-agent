@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "ask": [
+      "mcp__intent-agent__correct_tags",
+      "mcp__intent-agent__decide",
+      "mcp__intent-agent__initialize_intent",
+      "mcp__intent-agent__record_labels"
+    ]
+  }
+}

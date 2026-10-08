@@ -4,9 +4,13 @@ version = "0.1.0"
 description = "Job discovery agent that maintains user intent from daily feedback"
 requires-python = ">=3.13"
 dependencies = [
+    "mcp>=2.3.0",
     "pydantic>=2.14.0",
     "pyyaml>=6.0.3",
 ]
+
+[project.scripts]
+intent-job-agent-mcp = "intent_job_agent.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]

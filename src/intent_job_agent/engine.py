@@ -44,6 +44,7 @@ class Engine:
     def process_day(self, day: str, inputs: list[LabelInput]) -> DayReport:
         ctx = self._ctx()
         labels = [self._record(ctx, day, item) for item in inputs]
+        understanding = {label.id: item.understanding for label, item in zip(labels, inputs, strict=True)}
         report = DayReport()
         implicit: dict[str, list[Label]] = {}
         for label in labels:
@@ -55,7 +56,7 @@ class Engine:
                 self.store.add_support(label.id, supporting_refs(ctx, label))
                 report.consistent.append(label.id)
             elif label.reason_keys or label.reason_text:
-                report.analyses.append(self._explained(ctx, day, label, kind))
+                report.analyses.append(self._explained(ctx, day, label, kind, understanding[label.id]))
             else:
                 implicit.setdefault(kind, []).append(label)
         for kind, group in implicit.items():
@@ -86,7 +87,9 @@ class Engine:
         self.store.add_label(label)
         return label
 
-    def _explained(self, ctx: Context, day: str, label: Label, kind: str) -> Analysis:
+    def _explained(
+        self, ctx: Context, day: str, label: Label, kind: str, mapping: ReasonMapping | None = None
+    ) -> Analysis:
         """Step 1 is skipped when the user's reason identifies the cause."""
         direction = label.direction
         causes: list[Cause] = []
@@ -94,7 +97,8 @@ class Engine:
         if label.reason_keys:
             causes = [cause_for(ctx, [ref], direction) for ref in label.reason_keys]
         else:
-            mapping = self.llm.structured(
+            # The host agent may pass its reading of the reason; otherwise ask the model client.
+            mapping = mapping or self.llm.structured(
                 reason_prompt(ctx.intent, label.value, ctx.tags(label), label.reason_text, DIMENSIONS), ReasonMapping
             )
             if mapping.unexpressible:
@@ -242,16 +246,29 @@ class Engine:
         self.store.save_analysis(analysis)
         return analysis
 
-    def feedback(self, analysis_id: str, text: str) -> Analysis:
-        """The user's own words become new options; they still need confirmation."""
+    def rank_causes(self, analysis_id: str, order: list[str]) -> Analysis:
+        """The host agent orders the candidate causes; unknown ids are ignored, none are dropped."""
+        analysis = self._open(analysis_id)
+        by_id = {cause.id: cause for cause in analysis.causes}
+        ranked = [i for i in dict.fromkeys(order) if i in by_id]
+        analysis.causes = [by_id[i] for i in ranked] + [c for c in analysis.causes if c.id not in ranked]
+        self.store.save_analysis(analysis)
+        return analysis
+
+    def feedback(self, analysis_id: str, text: str, changes: list[dict] | None = None) -> Analysis:
+        """The user's own words become new options; they still need confirmation.
+
+        `changes` is the host agent's translation of `text`; without it the model client is asked.
+        """
         self.refresh(analysis_id)
         analysis = self._open(analysis_id)
         ctx = self._ctx()
         targets = [self.store.label(i) for i in analysis.label_ids]
-        prompt = feedback_prompt(ctx.intent, targets[0].value, [ctx.tags(label) for label in targets], text)
-        suggestion = self.llm.structured(prompt, FeedbackChanges)
-        changes, rejected = [], []
-        for raw in suggestion.changes:
+        if changes is None:
+            prompt = feedback_prompt(ctx.intent, targets[0].value, [ctx.tags(label) for label in targets], text)
+            changes = self.llm.structured(prompt, FeedbackChanges).changes
+        raw_changes, changes, rejected = changes, [], []
+        for raw in raw_changes:
             try:
                 changes.append(self._suggested_change(ctx.intent, raw))
             except InvariantError as error:
@@ -281,11 +298,13 @@ class Engine:
             raise InvariantError(f"{change.ref} has no entry to change")
         return change
 
-    def decide(self, analysis_id: str, proposal_id: str, inputs: dict | None = None) -> IntentModel:
+    def decide(
+        self, analysis_id: str, proposal_id: str, inputs: dict | None = None, approved_via: str = "direct"
+    ) -> IntentModel:
         analysis = self._open(analysis_id)
         if proposal_id not in {p.id for p in analysis.proposals}:
             raise InvariantError(f"Proposal {proposal_id} was not offered in analysis {analysis_id}")
-        intent = self.store.apply_decision(proposal_id, inputs)
+        intent = self.store.apply_decision(proposal_id, inputs, approved_via)
         analysis.status = "accepted"
         self.store.save_analysis(analysis)
         return intent

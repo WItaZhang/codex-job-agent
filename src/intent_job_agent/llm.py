@@ -31,7 +31,16 @@ class FakeClient:
         return schema.model_validate(raw.model_dump() if isinstance(raw, BaseModel) else raw)
 
 
+class NoModelClient:
+    """Tool mode: the host agent passes understanding as tool arguments, so nothing is asked here."""
+
+    def structured(self, prompt: str, schema: type[T]) -> T:
+        return schema()
+
+
 def make_client(settings: Settings) -> LLMClient:
     if settings.llm.provider == "fake":
         return FakeClient()
+    if settings.llm.provider == "host":
+        return NoModelClient()
     raise NotImplementedError(f"Provider {settings.llm.provider!r} arrives in a later slice")

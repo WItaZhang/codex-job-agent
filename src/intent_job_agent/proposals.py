@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .changes import Change, SetCompensation
 from .domain import InvariantError, Job
+from .prompts import ReasonMapping
 from .replay import ReplayResult
 
 FIXED_CHOICES = ("feedback", "no_change")
@@ -90,4 +91,5 @@ class LabelInput(_Model):
     slot: Literal["recommended", "exploration"]
     reason_keys: list[str] = Field(default_factory=list)
     reason_text: str | None = None
+    understanding: ReasonMapping | None = None  # the host agent's reading of reason_text, if it provides one
     label_id: str | None = None

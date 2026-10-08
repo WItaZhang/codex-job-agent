@@ -278,6 +278,7 @@ class Job(Record):
     id: str
     title: str = ""
     company: str = ""
+    url: str = ""
     tags: list[Ref]
     salary: Salary | None = None
     description: str = ""

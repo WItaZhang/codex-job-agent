@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "intent-agent": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "intent-job-agent-mcp",
+        "--config",
+        "configs/default.yaml"
+      ]
+    }
+  }
+}

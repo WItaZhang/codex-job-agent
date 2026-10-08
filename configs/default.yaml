@@ -7,14 +7,16 @@ scoring:
 daily:
   recommended: 7
   exploration: 3
+  exploration_max_from_avoid: 3  # 探索位中最多几个取自"命中回避条目"的岗位，其余从排名中段补齐
 analysis:
   max_causes: 6                   # 第一步最多展示几个候选原因
   max_flipped_shown: 3            # 每个方案最多列出几个被翻转的历史岗位
 hard_review:
   every_days: 7
 llm:
-  provider: fake                  # fake | anthropic | openai_compatible（后两者在后续切片实现）
+  provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null
   api_key_env: null
 storage:
   db_path: data/local/agent.sqlite
+  data_dir: data/local            # 导入岗位、初始化意图时只读取这个目录下的文件
