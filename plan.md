@@ -197,3 +197,51 @@ src/intent_job_agent/
 - `title_include` 过滤生效；`boards.yaml` 只能放在数据目录下。
 - 定时任务模式包含 `check_board` 和 `fetch_boards`。
 - 之前全部 75 个测试继续通过。
+
+---
+
+# 切片 2c 计划：复刻 ApplyPilot 的岗位发现（待用户确认）
+
+用户 2026-10-09 决定：完整复刻 ApplyPilot（https://github.com/Pickle-Pixel/ApplyPilot ，AGPL-3.0）的岗位发现与补全，并在 NOTICE 中致谢。
+因此 spec §7 的"不抓取服务条款禁止抓取的平台"一条改为：**用户知情选择**接入 JobSpy 等抓取来源，仅供个人使用，风险见第 3 节。
+**用户确认本计划之前，不写实现代码。**
+
+## 1. 移植范围
+
+| ApplyPilot 模块 | 在本项目中 | 配置（个人文件，位于 data/local/） |
+| --- | --- | --- |
+| `discovery/jobspy.py` | 按关键词 × 地点搜索 Indeed / LinkedIn / Glassdoor / ZipRecruiter / Google Jobs；重试、地点接受/排除、标题排除词、按 URL 去重 | `searches.yaml`，格式与 ApplyPilot 相同 |
+| `discovery/workday.py` | Workday 雇主搜索与详情 | `employers.yaml`（可选） |
+| `discovery/smartextract.py` | 任意招聘页面的智能提取（JSON-LD / 接口响应 / CSS 选择器，由 LLM 选择策略） | `sites.yaml`（可选） |
+| `enrichment/detail.py` | 补全原文和申请链接：结构化数据 → CSS 规则 → LLM | 无 |
+
+切片 2b 的 Greenhouse / Lever / Ashby 招聘板保留为额外来源：`boards.yaml` 改为可选，没有就跳过。
+
+## 2. 接入本项目的方式
+
+- 新工具（准备级，定时任务可用）：
+  - `discover_jobs()`：依次运行 JobSpy、Workday、smartextract、招聘板，新岗位以"未打标签"入库，按 URL 去重，逐个来源报告新增数和错误。
+  - `enrich_jobs(limit)`：为描述过短的岗位补全原文。
+- 待打标签队列优先列出已有完整原文的岗位。
+- **`searches.yaml` 的初始版本由 agent 根据你的意图生成**（相当于 ApplyPilot 的初始化向导），你可以修改。搜索词、地点、标题排除词属于"从哪里找"的来源范围，不属于意图模型，校准不会修改它们。
+- 抓到的所有字段仍是不可信内容，只用于打标签；JobSpy 给出的薪资区间会解析成 `salary`。
+- 搜索来源的岗位不做"下架"判断（ApplyPilot 也没有），视为在架。
+- 需要 LLM 的部分（smartextract 选择提取策略、补全的第三步）：在 `configs/default.yaml` 中配置 provider、模型名和存放 API key 的环境变量，通过 `structured()` 接口调用（Anthropic 或 OpenAI 兼容接口）。**没有配置 key 时自动跳过这些步骤**，其余部分照常工作。
+- 代理：与 ApplyPilot 一样支持 `host:port[:user:pass]`，从环境变量读取。
+
+## 3. 风险（用户已知情）
+
+- LinkedIn、Indeed、Glassdoor 等的服务条款禁止自动抓取；可能被限流或封 IP，网站改版后可能失效。ApplyPilot 自身也把 Glassdoor 和 Google 列入详情补全的跳过名单。
+- 只用于个人求职，不做大规模抓取，默认参数沿用 ApplyPilot（每站每个搜索词最多 100 条，只取 72 小时内发布的）。
+
+## 4. 依赖
+
+`python-jobspy`（它在元数据里锁死了某个 numpy 版本，ApplyPilot 用 `--no-deps` 绕开；这里用 uv 的依赖覆盖解决）、`pandas`、`playwright`（首次使用需 `uv run playwright install chromium`）。
+
+## 5. 测试（先写，离线）
+
+- JobSpy：用伪造的 `scrape_jobs` 返回合成 DataFrame，覆盖去重、地点过滤、标题排除、薪资解析、重试只针对临时错误。
+- Workday：用合成接口响应回放搜索和详情。
+- smartextract 和补全：用本地合成 HTML 页面（本机 Chromium，回环地址）测试 JSON-LD 和 CSS 路径；LLM 路径用 fake client；未配置 key 时跳过。
+- `discover_jobs` 某个来源失败时，其他来源照常入库并报告错误。
+- 之前的 93 个测试继续通过；云端无法访问真实网站，真实抓取需要你在本地验证。
