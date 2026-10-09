@@ -71,7 +71,14 @@ def test_commit_tier_is_what_spec_5_1_lists():
 
 def test_scheduled_runs_get_reads_and_user_independent_preparation_only():
     reads = {name for name, tier in TOOL_TIERS.items() if tier == "read"}
-    assert SCHEDULED_TOOLS == reads | {"import_jobs", "list_untagged_jobs", "submit_job_tags", "select_today"}
+    assert SCHEDULED_TOOLS == reads | {
+        "import_jobs",
+        "check_board",
+        "fetch_boards",
+        "list_untagged_jobs",
+        "submit_job_tags",
+        "select_today",
+    }
     assert not SCHEDULED_TOOLS & COMMIT_TOOLS
 
 
