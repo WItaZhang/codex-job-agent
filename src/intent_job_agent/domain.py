@@ -273,12 +273,16 @@ class Vocabulary(Record):
 
 
 class Job(Record):
-    """A posting. `description` is untrusted text kept for display; it never reaches analysis."""
+    """A posting. Its text fields are untrusted: shown for tagging and display, never used in analysis."""
 
     id: str
+    source: Literal["manual", "greenhouse", "lever", "ashby"] = "manual"
+    board: str = ""
     title: str = ""
     company: str = ""
     url: str = ""
+    location: str = ""
+    attributes: dict[str, str] = Field(default_factory=dict)
     tags: list[Ref]
     salary: Salary | None = None
     description: str = ""

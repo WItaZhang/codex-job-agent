@@ -3,7 +3,11 @@ name = "intent-job-agent"
 version = "0.1.0"
 description = "Job discovery agent that maintains user intent from daily feedback"
 requires-python = ">=3.13"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE.md"]
 dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "httpx>=0.28.1",
     "mcp>=2.3.0",
     "pydantic>=2.14.0",
     "pyyaml>=6.0.3",

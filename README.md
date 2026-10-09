@@ -10,11 +10,15 @@ agent 分析哪里没对上，给出几个修改选项；你选了，系统才�
 1. 安装依赖：`uv sync`
 2. 把个人文件放进 `data/local/`（已被 git 忽略）：
    - 意图初始文件：参照 [docs/examples/intent.example.yaml](docs/examples/intent.example.yaml)，存为 `data/local/intent.yaml`
-   - 岗位：参照 [docs/examples/jobs.example.json](docs/examples/jobs.example.json)，存为 `data/local/jobs.json`
+   - 关注的公司：参照 [docs/examples/boards.example.yaml](docs/examples/boards.example.yaml)，存为 `data/local/boards.yaml`
+     （Greenhouse / Lever / Ashby 的公开招聘板，主要覆盖美国公司）
+   - 其他来源的岗位：参照 [docs/examples/jobs.example.json](docs/examples/jobs.example.json)，存为 `data/local/jobs.json` 后导入
 3. 在仓库目录启动 Claude Code。第一次会询问是否启用项目里的 `intent-agent` MCP 服务，选择启用。
 4. 对 agent 说，例如：
    - "用 data/local/intent.yaml 初始化我的意图"
-   - "导入 data/local/jobs.json，给岗位打标签，然后选出今天的岗位"
+   - "帮我找 Stripe 在哪个招聘板上，用 check_board 确认后加进 boards.yaml"
+   - "抓取 boards.yaml 里的公司，给新岗位打标签，然后选出今天的岗位"
+   - "导入 data/local/jobs.json"
    - "第 3 个不要，因为要坐班；第 5 个想投"
    - "选 2"
 
@@ -25,6 +29,14 @@ agent 分析哪里没对上，给出几个修改选项；你选了，系统才�
 - 项目的 `.claude/settings.json` 把它们设为"每次询问"；服务端也给它们加了"每次都需要用户操作"的标记。
 - 请不要为这几个工具添加"总是允许"的规则，也不要在 dontAsk 模式下使用（该模式会直接拒绝它们）。
 - 确认修改时，弹窗里会显示选项编号和修改内容原文，例如 `option=2, summary="company_type.big_tech：回避 → 强烈回避"`。内容和你看到的不一致时，代码会拒绝。
+
+## 升级
+
+`git pull` 只更新代码，`data/local/` 里的意图、label 和历史不受影响。pull 之后运行 `uv sync`，并在 Claude Code 里用 `/mcp` 重连服务（或重启）。
+
+## 许可证
+
+AGPL-3.0-only，来源说明见 [NOTICE.md](NOTICE.md)。
 
 ## 开发
 

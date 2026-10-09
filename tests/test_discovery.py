@@ -102,7 +102,12 @@ def test_greenhouse_jobs_are_parsed_into_untagged_jobs():
     fake = FakeBoards()
     fake.greenhouse["acme"] = [greenhouse_job(1)]
     (job,) = fetch_board("greenhouse", "acme", company="Acme", timeout_seconds=5, client=fake.client())
-    assert (job.title, job.company, job.source, job.board) == ("Machine Learning Engineer", "Acme", "greenhouse", "acme")
+    assert (job.title, job.company, job.source, job.board) == (
+        "Machine Learning Engineer",
+        "Acme",
+        "greenhouse",
+        "acme",
+    )
     assert job.url == "https://boards.greenhouse.io/acme/jobs/1"
     assert job.location == "San Francisco, CA"
     assert job.description == "SYNTHETIC: build & ship models"

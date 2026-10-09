@@ -29,6 +29,12 @@ class Analysis(_Section):
     max_flipped_shown: int
 
 
+class Discovery(_Section):
+    timeout_seconds: float
+    boards_file: str
+    untagged_batch: int
+
+
 class HardReview(_Section):
     every_days: int
 
@@ -48,6 +54,7 @@ class Settings(_Section):
     scoring: Scoring
     daily: Daily
     analysis: Analysis
+    discovery: Discovery
     hard_review: HardReview
     llm: LLM
     storage: Storage

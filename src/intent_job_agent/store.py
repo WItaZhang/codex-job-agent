@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS decisions (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NO
 CREATE TABLE IF NOT EXISTS tagged (job_id TEXT PRIMARY KEY, tagged_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS selections (day TEXT NOT NULL, job_id TEXT NOT NULL, slot TEXT NOT NULL,
                                        position INTEGER NOT NULL, PRIMARY KEY (day, job_id));
+CREATE TABLE IF NOT EXISTS board_snapshots (seq INTEGER PRIMARY KEY, source TEXT NOT NULL, board TEXT NOT NULL,
+                                            job_ids TEXT NOT NULL, fetched_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
 """
@@ -83,7 +85,26 @@ class Store:
         return job
 
     def untagged_jobs(self) -> list[Job]:
-        return [job for job in self.jobs() if not self.is_tagged(job.id)]
+        """Open jobs still waiting for tags, most recently stored first."""
+        return [job for job in reversed(self.jobs()) if not self.is_tagged(job.id) and self.is_open(job)]
+
+    def record_board_snapshot(self, source: str, board: str, job_ids: list[str]) -> None:
+        """The complete set of postings a successful fetch saw; only successful fetches are recorded."""
+        with self.db:
+            self.db.execute(
+                "INSERT INTO board_snapshots (source, board, job_ids, fetched_at) VALUES (?, ?, ?, ?)",
+                (source, board, json.dumps(sorted(job_ids)), _now()),
+            )
+
+    def is_open(self, job: Job) -> bool:
+        """Manually imported jobs stay open; board jobs are open while their board's latest fetch lists them."""
+        if job.source == "manual":
+            return True
+        row = self.db.execute(
+            "SELECT job_ids FROM board_snapshots WHERE source = ? AND board = ? ORDER BY seq DESC LIMIT 1",
+            (job.source, job.board),
+        ).fetchone()
+        return row is not None and job.id in json.loads(row["job_ids"])
 
     def save_selection(self, day: str, items: list[tuple[str, str]]) -> None:
         with self.db:

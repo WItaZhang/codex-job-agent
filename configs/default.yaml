@@ -11,6 +11,10 @@ daily:
 analysis:
   max_causes: 6                   # 第一步最多展示几个候选原因
   max_flipped_shown: 3            # 每个方案最多列出几个被翻转的历史岗位
+discovery:
+  timeout_seconds: 20             # 单个招聘板接口的超时
+  boards_file: boards.yaml        # 关注的公司列表，位于 storage.data_dir 下
+  untagged_batch: 20              # 每次最多列出多少个待打标签的岗位（最新抓到的在前）
 hard_review:
   every_days: 7
 llm:

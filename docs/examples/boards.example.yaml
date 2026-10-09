@@ -1,0 +1,12 @@
+# 示例：复制到 data/local/boards.yaml 后填写你关注的公司。
+# board token 是公司在招聘板上的标识，例如 https://boards.greenhouse.io/<token>、
+# https://jobs.lever.co/<token>、https://jobs.ashbyhq.com/<token>。
+# 填之前先让 agent 用 check_board 试抓一次，确认 token 正确。
+boards:
+  - provider: greenhouse        # greenhouse | lever | ashby
+    board: example-token
+    company: Example Co
+    title_include: [engineer, scientist]   # 可选：只保留标题含这些词的岗位（来源范围，不属于意图）
+  - provider: ashby
+    board: another-token
+    company: Another Co
