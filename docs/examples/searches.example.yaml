@@ -1,0 +1,22 @@
+# 示例：复制到 data/local/searches.yaml 后修改（第一次也可以让 agent 根据你的意图生成）。
+# 格式与 ApplyPilot 的 searches.yaml 相同。这些是"从哪里找"的来源设置，不属于意图模型，校准不会修改它们。
+queries:                       # 搜索词；tier 越小越优先，Workday 只搜 tier ≤ workday_max_tier 的词
+  - query: "machine learning engineer"
+    tier: 1
+  - query: "ml engineer"
+    tier: 2
+locations:
+  - location: "San Francisco, CA"
+    remote: false
+  - location: "Remote"
+    remote: true
+sites: [indeed, linkedin, zip_recruiter]   # JobSpy 来源，可选：indeed linkedin glassdoor zip_recruiter google
+location:                      # 可选：地点文字过滤。不写 accept_patterns 表示不过滤
+  accept_patterns: ["CA", "California", "United States", "Remote"]
+  reject_patterns: ["India"]
+exclude_titles: ["intern", "director"]     # 可选：标题含这些词的岗位不导入
+defaults:
+  results_per_site: 100        # 每个站点每个搜索词最多取多少条（ApplyPilot 默认）
+  hours_old: 72                # 只取多少小时内发布的
+  country_indeed: usa
+workday_max_tier: 2

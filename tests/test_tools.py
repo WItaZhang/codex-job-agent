@@ -75,6 +75,8 @@ def test_scheduled_runs_get_reads_and_user_independent_preparation_only():
         "import_jobs",
         "check_board",
         "fetch_boards",
+        "discover_jobs",
+        "discovery_status",
         "list_untagged_jobs",
         "submit_job_tags",
         "select_today",

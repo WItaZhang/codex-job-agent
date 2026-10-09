@@ -14,7 +14,11 @@ analysis:
 discovery:
   timeout_seconds: 20             # 单个招聘板接口的超时
   boards_file: boards.yaml        # 关注的公司列表，位于 storage.data_dir 下
-  untagged_batch: 20              # 每次最多列出多少个待打标签的岗位（最新抓到的在前）
+  untagged_batch: 20              # 每次最多列出多少个待打标签的岗位（有完整原文的在前，再按最新）
+  full_text_chars: 200            # 描述达到这个长度才算"完整原文"（沿用 ApplyPilot 的阈值）
+  applypilot_dir: applypilot      # ApplyPilot 工作库与配置的目录，位于 storage.data_dir 下
+  enrich_limit: 100               # 补全原文时每个站点最多处理多少个岗位（ApplyPilot 默认值）
+  proxy_env: INTENT_AGENT_PROXY   # 代理所在的环境变量，格式 host:port 或 host:port:user:pass
 hard_review:
   every_days: 7
 llm:

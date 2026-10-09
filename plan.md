@@ -200,7 +200,7 @@ src/intent_job_agent/
 
 ---
 
-# 切片 2c 计划：复刻 ApplyPilot 的岗位发现（待用户确认）
+# 切片 2c 计划：复刻 ApplyPilot 的岗位发现（用户已确认；已实现，补充见 spec §10 第 17–26 条）
 
 用户 2026-10-09 决定：完整复刻 ApplyPilot（https://github.com/Pickle-Pixel/ApplyPilot ，AGPL-3.0）的岗位发现与补全，并在 NOTICE 中致谢。
 因此 spec §7 的"不抓取服务条款禁止抓取的平台"一条改为：**用户知情选择**接入 JobSpy 等抓取来源，仅供个人使用，风险见第 3 节。

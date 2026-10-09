@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS selections (day TEXT NOT NULL, job_id TEXT NOT NULL, 
                                        position INTEGER NOT NULL, PRIMARY KEY (day, job_id));
 CREATE TABLE IF NOT EXISTS board_snapshots (seq INTEGER PRIMARY KEY, source TEXT NOT NULL, board TEXT NOT NULL,
                                             job_ids TEXT NOT NULL, fetched_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS external_rows (url TEXT PRIMARY KEY, job_id TEXT, status TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
 """
@@ -85,8 +86,21 @@ class Store:
         return job
 
     def untagged_jobs(self) -> list[Job]:
-        """Open jobs still waiting for tags, most recently stored first."""
-        return [job for job in reversed(self.jobs()) if not self.is_tagged(job.id) and self.is_open(job)]
+        """Open jobs still waiting for tags: those with full text first, then most recently stored first."""
+        waiting = [job for job in reversed(self.jobs()) if not self.is_tagged(job.id) and self.is_open(job)]
+        full = self.settings.discovery.full_text_chars
+        return sorted(waiting, key=lambda job: len(job.description) < full)
+
+    def external_row(self, url: str) -> dict | None:
+        """Whether a posting from ApplyPilot's working DB was already imported or excluded."""
+        row = self.db.execute("SELECT job_id, status FROM external_rows WHERE url = ?", (url,)).fetchone()
+        return dict(row) if row else None
+
+    def mark_external(self, url: str, job_id: str | None, status: str) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO external_rows (url, job_id, status) VALUES (?, ?, ?)", (url, job_id, status)
+            )
 
     def record_board_snapshot(self, source: str, board: str, job_ids: list[str]) -> None:
         """The complete set of postings a successful fetch saw; only successful fetches are recorded."""
@@ -97,8 +111,9 @@ class Store:
             )
 
     def is_open(self, job: Job) -> bool:
-        """Manually imported jobs stay open; board jobs are open while their board's latest fetch lists them."""
-        if job.source == "manual":
+        """Board jobs are open while their board's latest fetch lists them; other sources stay open
+        (search results are not complete listings, so absence says nothing)."""
+        if job.source not in ("greenhouse", "lever", "ashby"):
             return True
         row = self.db.execute(
             "SELECT job_ids FROM board_snapshots WHERE source = ? AND board = ? ORDER BY seq DESC LIMIT 1",

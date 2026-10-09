@@ -8,12 +8,14 @@
 Job descriptions are untrusted; they are returned wrapped in a marker and never reach analysis.
 """
 
+import threading
 from pathlib import Path
 
 import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from . import applypilot_bridge
 from .boards import load_boards
 from .changes import (
     AddEntry,
@@ -111,6 +113,7 @@ class Toolbox:
         self.store = store
         self.data_dir = Path(data_dir or settings.storage.data_dir)
         self.http_client = http_client  # None: each fetch opens its own client
+        self._discovery: dict | None = None  # the current or last ApplyPilot discovery run
         self.engine = Engine(store, settings, NoModelClient())
 
     # --- views --------------------------------------------------------------------------------
@@ -216,6 +219,12 @@ class Toolbox:
         }
 
     @_tool("read")
+    def get_discovery_setup(self) -> dict:
+        """What job discovery is configured with: search file, employer/site lists, LLM provider, proxy.
+        Never returns keys."""
+        return applypilot_bridge.setup_status(self.data_dir, self.settings)
+
+    @_tool("read")
     def list_open_analyses(self) -> list[dict]:
         """Analyses waiting for the user, with numbered causes and options."""
         return [self._analysis_view(a) for a in self.store.analyses() if a.status == "open"]
@@ -262,6 +271,46 @@ class Toolbox:
             self.store.record_board_snapshot(spec.provider, spec.board, [job.id for job in kept])
             reports.append({**report, "fetched": len(jobs), "filtered_out": len(jobs) - len(kept), "new": len(new)})
         return {"boards": reports}
+
+    @_tool("prepare")
+    def discover_jobs(self, sources: list[str] | None = None, enrich: bool = True, wait: bool = False) -> dict:
+        """Search for jobs the ApplyPilot way (JobSpy, Workday, smartextract; then fill in full text).
+
+        Runs in the background unless `wait`; check progress and import results with discovery_status.
+        `sources` defaults to all of jobspy, workday and smartextract (the last only with an LLM key).
+        """
+        if self._discovery and self._discovery["status"] == "running":
+            raise InvariantError("A discovery run is already in progress; check discovery_status")
+        sources = list(sources or applypilot_bridge.SOURCES)
+        unknown = set(sources) - set(applypilot_bridge.SOURCES)
+        if unknown:
+            raise InvariantError(f"Unknown sources {sorted(unknown)}; choose from {list(applypilot_bridge.SOURCES)}")
+        run = {"status": "running", "sources": {}, "enrich": enrich, "error": None, "synced": None}
+        self._discovery = run
+
+        def work():
+            try:
+                run["sources"] = applypilot_bridge.run_sources(self.data_dir, self.settings, sources, enrich)
+                run["status"] = "done"
+            except Exception as error:
+                run["error"] = f"{type(error).__name__}: {error}"
+                run["status"] = "failed"
+
+        if wait:
+            work()
+            return self.discovery_status()
+        threading.Thread(target=work, name="intent-agent-discovery", daemon=True).start()
+        return {"status": "running", "sources": sources, "enrich": enrich}
+
+    @_tool("prepare")
+    def discovery_status(self) -> dict:
+        """Progress of the last discovery run; once it is done, imports the new jobs (untagged)."""
+        run = self._discovery
+        if run is None:
+            return {"status": "idle"}
+        if run["status"] == "done" and run["synced"] is None:
+            run["synced"] = applypilot_bridge.sync(self.store, self.data_dir, self.settings)
+        return {key: run[key] for key in ("status", "sources", "enrich", "error", "synced")}
 
     def _fetch(self, provider: str, board: str, company: str) -> list[Job]:
         try:
@@ -416,6 +465,8 @@ SCHEDULED_TOOLS = {name for name, tier in TOOL_TIERS.items() if tier == "read"} 
     "import_jobs",
     "check_board",
     "fetch_boards",
+    "discover_jobs",
+    "discovery_status",
     "list_untagged_jobs",
     "submit_job_tags",
     "select_today",

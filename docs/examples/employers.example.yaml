@@ -1,0 +1,8 @@
+# 可选：复制到 data/local/employers.yaml，替换 ApplyPilot 自带的 Workday 雇主列表（自带的以加拿大公司为主）。
+# 写成 `employers: {}` 表示不搜 Workday。雇主的 Workday 地址形如 https://<tenant>.wd<N>.myworkdayjobs.com/<site_id>
+employers:
+  example:
+    name: "Example Corp"
+    tenant: "example"
+    site_id: "External"
+    base_url: "https://example.wd1.myworkdayjobs.com"

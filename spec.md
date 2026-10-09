@@ -301,7 +301,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
 - 用 label 修改背景层
 - 除薪资之外的数值维度
 - exception 的组合条件（AND/OR）
-- 爬取有反爬限制或服务条款禁止抓取的平台（如 LinkedIn、Boss 直聘）
+- ~~爬取有反爬限制或服务条款禁止抓取的平台~~：用户 2026-10-09 知情决定复刻 ApplyPilot 的岗位发现（含 JobSpy 抓取 Indeed / LinkedIn / Glassdoor / ZipRecruiter / Google Jobs），仅供个人使用；风险见 §10 切片 2c。
 
 ## 8. 开发顺序（切片）
 
@@ -309,6 +309,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
 2. **工具层和每日闭环**：MCP 工具（读 / 准备 / 提交三级）、提交级工具的权限配置、"待理解请求"的往返、JSON 导入岗位、提交岗位标签、选出每日 7+3。完成后，用户可以在 Claude Code 里用真实岗位试用。
 3. 冷启动：自由描述加简历 → 意图草稿 → 用户确认。
    - 2b. ✅ 接入公开招聘板（Greenhouse / Lever / Ashby），由用户在 `data/local/boards.yaml` 指定关注的公司（用户 2026-10-09 确认提前，主要找美国岗位）。
+   - 2c. ✅ 复刻 ApplyPilot 的岗位发现与原文补全（JobSpy、Workday、smartextract、详情补全），按关键词和地点搜索，不需要公司列表（用户 2026-10-09 决定）。
 4. 定时任务；硬约束体检。
 
 ## 9. v1 完成标准
@@ -346,6 +347,22 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
 14. 岗位是否在架：以该招聘板最近一次**成功**抓取的结果为准；抓取失败时保持原状。手动导入的岗位始终视为在架。已下架的岗位不进入每日推荐，也不再列入待打标签。
 15. 待打标签的岗位每次最多列出若干个（配置项 `discovery.untagged_batch`），最新抓到的在前。
 16. Lever 的 `salaryRange` 和 Ashby 的薪资结构会解析成 `salary`；解析不了时视为未知。
+
+### 切片 2c 的补充
+
+17. ApplyPilot（https://github.com/Pickle-Pixel/ApplyPilot ，提交 4a8d521，AGPL-3.0）的 `discovery/jobspy.py`、`discovery/workday.py`、`discovery/smartextract.py`、`enrichment/detail.py`、`database.py`、`llm.py` 原样放在 `src/intent_job_agent/vendor/applypilot/`，**只改了 import**。它们原本依赖的配置模块由本项目重写为一个薄适配层。
+18. ApplyPilot 的代码在自己的工作库（`data/local/applypilot/applypilot.db`）里工作；完成后把新岗位以"未打标签"导入本项目，并刷新尚未打标签、尚未展示的岗位的原文。已打标签的岗位原文不再变化。
+19. 对 ApplyPilot 的几处修正（不改它的代码，在适配层完成）：
+    - 它的示例配置用 `boards`、`location.accept_patterns/reject_patterns`、`exclude_titles`，代码却读 `sites`、`location_accept`、`location_reject_non_remote`，且从不使用 `exclude_titles`。两种写法都接受，`exclude_titles` 在导入时生效。
+    - 它的地点过滤在没有任何接受规则时会丢掉所有非远程岗位；这里改为"不写就不过滤"。
+    - 它存 JobSpy 结果时丢了公司名；这里在旁边另记公司名。
+20. 没有 `data/local/employers.yaml` 和 `sites.yaml` 时，沿用 ApplyPilot 自带的列表（与 ApplyPilot 行为一致；自带列表以加拿大雇主和站点为主，可用自己的文件替换或清空）。
+21. LLM key 可选：ApplyPilot 的环境变量（`GEMINI_API_KEY` / `OPENAI_API_KEY` / `LLM_URL`、`LLM_MODEL`），可放在 `data/local/.env`。没有 key 时跳过 smartextract 和补全原文的第 3 步。首次设置时由 agent 以选择题询问；key 由用户自己写入文件，不在对话中传递。
+22. 代理：环境变量 `INTENT_AGENT_PROXY`（`host:port` 或 `host:port:user:pass`），传给 JobSpy、Workday 和补全时的浏览器。
+23. 搜索来的岗位不做"下架"判断，视为在架；待打标签队列先列出原文完整（≥ 200 字符）的岗位。
+24. 抓取和补全可能耗时较长，`discover_jobs` 在后台运行，`discovery_status` 查看进度并在完成后导入。
+25. 风险（用户知情）：LinkedIn、Indeed、Glassdoor 等的服务条款禁止自动抓取，可能被限流或封 IP，网站改版后可能失效。
+26. Playwright 固定为 1.56（与开发环境预装的 Chromium 匹配）；本地首次使用前运行 `uv run playwright install chromium`。
 
 ## 11. 未决问题
 

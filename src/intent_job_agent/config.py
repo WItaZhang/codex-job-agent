@@ -33,6 +33,10 @@ class Discovery(_Section):
     timeout_seconds: float
     boards_file: str
     untagged_batch: int
+    full_text_chars: int
+    applypilot_dir: str
+    enrich_limit: int
+    proxy_env: str
 
 
 class HardReview(_Section):

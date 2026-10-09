@@ -276,7 +276,7 @@ class Job(Record):
     """A posting. Its text fields are untrusted: shown for tagging and display, never used in analysis."""
 
     id: str
-    source: Literal["manual", "greenhouse", "lever", "ashby"] = "manual"
+    source: Literal["manual", "greenhouse", "lever", "ashby", "jobspy", "workday", "smartextract"] = "manual"
     board: str = ""
     title: str = ""
     company: str = ""
