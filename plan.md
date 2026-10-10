@@ -245,3 +245,57 @@ src/intent_job_agent/
 - smartextract 和补全：用本地合成 HTML 页面（本机 Chromium，回环地址）测试 JSON-LD 和 CSS 路径；LLM 路径用 fake client；未配置 key 时跳过。
 - `discover_jobs` 某个来源失败时，其他来源照常入库并报告错误。
 - 之前的 93 个测试继续通过；云端无法访问真实网站，真实抓取需要你在本地验证。
+
+---
+
+# 切片 2e 计划：显式修改意图 + 学历要求维度（用户 2026-10-10 确认）
+
+来源：2026-10-09 第一天打 label 时用户提出两条要求，现有系统做不到：
+1. "工作地点中国也可以"：需要显式修改意图（加 `location.china: require`），但系统只有根因分析一个写入路径，没有显式命令的入口（spec §5.1 写了，未实现）。
+2. "新加学历字段，phd 的 exclude"：维度是封闭集合，按 spec §3.1 走开发流程新增 `degree_requirement`。
+
+spec 改动见 §3.1 维度表、§3.1.2、§5.1、§8、§10 第 27–29 条。
+**用户确认本计划之前，不写实现代码。**
+
+## 1. 做什么，不做什么
+
+| 做 | 不做 |
+| --- | --- |
+| 准备级工具 `propose_intent_edit(text, changes)`：把显式命令整理成"命令分析"，给出编号方案（含硬约束对应的软等级、回放、提意见、这次不改） | 新的写入入口：确认仍然只走现有的 `decide` |
+| `degree_requirement` 维度、词表 aliases、打标签规则写进工具返回的 rules | 用户自己的学历（背景层）参与打分 |
+| 回填：`list_backfill_jobs(dimension)` 列出缺这一维度的已打标签岗位，`backfill_tags(job_id, tags)` 只允许新增该维度的标签 | 回填时改动其他维度的标签（仍然只能走 misread） |
+| 回填改变已打 label 岗位后，当天未处理的分析标为需要刷新 | 岗位发现加中国地点（见第 4 节第 3 问，由你选） |
+
+## 2. 实际会怎么用
+
+1. 实现后，agent 先回填：读已打标签的 100 个岗位，只补 `degree_requirement` 标签。
+2. 刷新 Roblox 那条还开着的分析：候选原因里会出现"意图里还没有 `degree_requirement.phd`"，你选它，再在 强烈回避 / 排除 之间选（附回放）。
+3. "中国也可以"：`propose_intent_edit` 给出 `location.china：未设置 → 必须`（与 `location.us` 是"或"），旁边列出 `强烈偏好` 并说明在 `location.us` 仍是"必须"时，软等级不会让中国岗位出现；你选一个，宿主弹窗批准后写入。
+
+## 3. 模块
+
+- `domain.py`：`DIMENSIONS` 加 `degree_requirement`。
+- `engine.py`：`propose_edit(text, changes)` 生成 kind 为 `command` 的分析（没有 label，不做方向筛选）；`decide` 记录 `approved_via` 和来源"显式命令"。
+- `proposals.py`：硬约束方案自动附上对应软等级（复用现有逻辑）；`command` 分析跳过"往正确方向推动"的筛选。
+- `store.py`：`add_backfill_tags(job_id, tags)`，只追加、不删除；记录回填日志；把当天未处理的分析标为 stale。
+- `tools.py` / `mcp_server.py`：三个新工具（都是准备级；`propose_intent_edit` 依赖用户，不进定时任务）和使用说明。
+- `configs/default.yaml`：`tagging.backfill_dimensions: [degree_requirement]`。
+
+## 4. 取舍（用户 2026-10-10 的选择记在每条末尾）
+
+1. **维度名和 key**：`degree_requirement.{phd, masters, bachelors}`，只打满足要求的最低学历（推荐）；还是分成 required / preferred 两套 key？**→ 选择：只打最低学历。**
+2. **回填已打 label 的岗位**要不要你批准：按普通打标签处理（准备级，推荐，因为它只补岗位原文里写明的事实，而且你之后选的修改都要再确认）；还是作为提交级，每批弹窗批准？**→ 选择：按普通打标签处理（准备级）。**
+3. **岗位发现加不加中国**：ApplyPilot 的 Indeed 国家是全局设置，一次只能搜一个国家；LinkedIn 可以按地点搜 "China" / "Shanghai, China" 等；国内招聘网站（Boss 直聘、猎聘等）不在 ApplyPilot 的支持范围。选项：(a) `searches.yaml` 加 LinkedIn 的中国地点（推荐）；(b) 暂时只靠 Workday 里本来就有的中国岗位；(c) 先不加。**→ 选择：先不加，只改意图。**
+
+## 5. 测试（先写，离线，合成数据）
+
+- 显式命令：加 `location.china: require` 返回"必须"和对应"强烈偏好"两个方案、提意见、这次不改；意图版本不变，直到 `decide`。
+- `decide` 命令方案：写入新版本，决定日志标明显式命令；方案原文不一致时拒绝；基于旧版本的方案拒绝。
+- 命令方案不受方向筛选：回放"修好 0 条"的方案也展示。
+- 违反层级规则的命令（如国家已排除时给城市设偏好）被拒绝并说明原因，不生成方案。
+- 两个国家 `require` 时，美国或中国的岗位都不被排除，其他国家被排除。
+- `degree_requirement` 在维度集合中；aliases 规范化（"博士" → `degree_requirement.phd`）。
+- 回填：列出缺该维度的已打标签岗位（含已展示、已打 label）；只接受该维度的标签，其他维度拒绝；不删除已有标签；已展示状态不变。
+- 回填已打 label 的岗位后，当天未处理的分析变为 stale；刷新后新 key 作为候选原因出现，选它后方案包含"强烈回避"和"排除"。
+- 定时任务不能调用 `propose_intent_edit`。
+- 现有 109 个测试继续通过。
