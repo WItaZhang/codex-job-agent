@@ -299,3 +299,113 @@ spec 改动见 §3.1 维度表、§3.1.2、§5.1、§8、§10 第 27–29 条。
 - 回填已打 label 的岗位后，当天未处理的分析变为 stale；刷新后新 key 作为候选原因出现，选它后方案包含"强烈回避"和"排除"。
 - 定时任务不能调用 `propose_intent_edit`。
 - 现有 109 个测试继续通过。
+
+---
+
+# 切片 2f 计划：Avature 招聘站点（草案，待用户确认）
+
+目标：把联想（`jobs.lenovo.com`）这类用 Avature 搭建的公司招聘站点写进 `boards.yaml`，由 `fetch_boards` 持续更新，不再靠一次性脚本。
+spec 改动见 §8 的 2f 和 §10 第 30–37 条。
+编号说明：未合并的切片 2d 草案（分支 `claude/slice-2d-discovery-fixes`）也用了 §10 第 27–30 条，后合并的一方要重新编号。
+**用户确认本计划之前，不写实现代码。**
+
+## 1. 做什么，不做什么
+
+| 做 | 不做 |
+| --- | --- |
+| `provider: avature` 招聘板：逐页读列表，严格判断是否读全（spec 第 31 条） | 用站点的筛选参数在服务器端按国家过滤：参数是各站点自己的数字字段号（联想页面上是 `13036[]`、`13037[]` 这样的名字），取值由页面脚本加载，不通用 |
+| 只为新的、通过过滤的岗位读详情页 | RSS（`SearchJobs/feed/`）：每页只有 20 条，没有地点、职能和原文；sitemap 只有链接 |
+| `country_include` 国家过滤（只用于 Avature） | 浏览器、登录、申请 |
+| 所有招聘板按链接与已有岗位去重 | 修改已手动导入的 42 个联想岗位 |
+| `check_board` 对 Avature 只读第一页 | 把 `fetch_boards` 改成后台运行（实际太慢再说） |
+| 手动导入的 JSON 格式加可选 `location` | 联想的 Workday：它的 Req # 大多以 WD 开头，但没有找到公开的 Workday 站点 |
+
+## 2. 实际会怎么用
+
+1. 在 `data/local/boards.yaml` 加一项（标题关键词由你定，下面只是示例）：
+
+   ```yaml
+   - provider: avature
+     board: https://jobs.lenovo.com/en_US/careers
+     company: Lenovo
+     title_include: [engineer, scientist, developer, researcher, data, machine learning, software]
+     country_include: [United States of America]
+   ```
+
+2. agent 先运行 `check_board("avature", "https://jobs.lenovo.com/en_US/careers")`。它返回 "999+"、前几个标题和地点，用来核对国家名的写法。
+3. 运行 `fetch_boards`：联想约 103 页列表，美国岗位约 250 个，标题过滤后剩下一部分。之前手动导入的 42 个计入 `already_known`，其余的读详情后以"未打标签"入库。每个招聘板的结果例如：
+   `{"provider": "avature", "fetched": 1027, "filtered_out": …, "already_known": 42, "new": …, "detail_errors": 0}`
+4. 以后每次 `fetch_boards` 只为新岗位读详情。从站点消失的联想岗位不再进入每日推荐。手动导入的 42 个仍按手动导入处理，始终在架，见第 4 节第 2 问。
+
+## 3. 模块
+
+```
+src/intent_job_agent/
+  avature.py     新增。解析是纯函数：列表页 → 卡片、下一页 offset、总数；详情页 → attributes 和描述。
+                 读取部分负责逐页读列表和读单个详情页，输出本项目的 Job。
+  discovery.py   PROVIDERS 加 avature，fetch_board 把 avature 交给 avature.py；复用 _url、stable_job_id、_html_to_text
+  boards.py      provider 加 avature；加 country_include；avature 的 board 必须是站点地址，其他招聘板仍是 token；
+                 keeps() 同时检查 country_include
+  domain.py      Job.source 加 avature
+  store.py       is_open 改用招聘板列表（含 avature）；按链接查找已有岗位
+  tools.py       fetch_boards：过滤 → 按 ID 和链接去重 → （avature）读详情 → 入库 → 记录快照；
+                 check_board 对 avature 只读第一页
+  importing.py   RawJob 加可选 location
+configs/default.yaml   discovery.avature: {request_delay_seconds: 0.5, max_pages: 300}
+docs/examples/boards.example.yaml、README、mcp_server.py 的说明：加 avature
+CLAUDE.md      "岗位来源"一行加 Avature（确认后再改）
+```
+
+不加新依赖，httpx 和 beautifulsoup4 已经在用。
+
+## 4. 取舍（需要你选，推荐项排第一）
+
+1. **国家过滤**
+   (a) `country_include`：按站点自己的国家写法整段匹配（推荐）。规则简单，可以预测；写错国家名会过滤掉所有岗位，但 `check_board` 的样例地点和 `filtered_out` 计数能看出来。
+   (b) 不按国家过滤，只用 `title_include`：联想的详情请求约多 4 倍，非美国岗位也进入待打标签队列，最后靠 location 硬约束排除。
+   (c) 等切片 2d 的国家别名规则（`workday_countries`，能认州名和缩写）合并后共用：更宽松，但 2d 还没确认。
+2. **按链接去重的范围**
+   (a) 所有招聘板（推荐）。规则统一，也能避免 ApplyPilot 搜索和招聘板抓到同一链接时重复入库。
+   (b) 只用于 Avature。
+   两种选择下，42 个手动导入的联想岗位都始终在架，不受站点下架影响。要让它们跟着站点下架，就得把它们改成 avature 来源，不在本切片做。
+3. **导入格式加 `location`**
+   (a) 这次一起加（推荐）。改动只有几行，以后手动导入不用再把地点塞进描述。
+   (b) 不加。
+4. **单个详情页失败**
+   (a) 这个岗位本次不入库，下次重试，其他岗位照常入库（推荐）。
+   (b) 整个站点算失败。
+
+## 5. 测试（先写，全部离线）
+
+合成 HTML 放在 `tests/fixtures/avature/`，每个文件标注 `<!-- SYNTHETIC -->`。页面结构仿照 Avature 模板的 class 名（`article--result`、`list-controls__pagination`、`paginationNextLink`、`article--details`、`article__content__view__field__label/value`、`visibility--hidden`），公司和域名都是虚构的（`*.example.com`）。准备两种布局：A 是"国家, 州, 城市"，带职能、Req # 和发布日期，每页 3 个；B 是"城市, 州, 国家"，只有地点，每页 4 个。页面用 httpx 的 MockTransport 回放，测试中请求间隔为 0。
+
+列表与分页：
+- 两种布局的卡片都能解析出标题、链接、地点和 attributes。副标题第一项是 "Req #: …" 时地点为空；"No jobs found" 卡片不算岗位。
+- 每页 3 个和每页 4 个都能按 offset 翻页，在没有"下一页"的结果页停止；最后一页的确切总数与去重后的数量一致。
+- 以下每种情况都报错，不入库，不记录快照，原有岗位的在架状态不变：
+  - 中途出现 "Oops" 错误页。
+  - 中途出现 "No jobs found"，并且"下一页"跳回 offset 10。
+  - "下一页"的 offset 与计算不符。
+  - 总数对不上。
+  - 超过页数上限。
+  - 卡片缺少 JobDetail 链接。
+  - JobDetail 链接指向其他域名或其他路径前缀。
+- 第一页就是"没有岗位"：抓取成功，0 个岗位，记录空快照。
+- 同一岗位换了标题 slug 或语言路径，岗位 ID 不变。
+
+详情：
+- 带标签的字段进 attributes；不带标签的段落连同小节标题组成描述；隐藏字段跳过；重复段落只保留一次。描述里写给 AI 的指令原样作为文本保存，不影响任何行为。
+- 只为通过过滤的新岗位请求详情页（用 MockTransport 统计请求数）：被 `title_include` 或 `country_include` 过滤掉的、已入库的、按链接去重的岗位，都不请求。
+- 某个详情页返回 500：该岗位不入库，计入 `detail_errors`；其他岗位照常入库，快照包含它；下一次抓取会重试它。
+
+过滤、去重和配置：
+- `country_include` 按整段匹配：国家在开头或结尾都能匹配，忽略大小写；"United States" 不匹配 "United States of America"；没有地点的岗位保留。
+- 以下写法让 `boards.yaml` 无效：`country_include` 写在非 Avature 招聘板上；Avature 的 `board` 不是 HTTPS 站点地址，或者带查询参数、IP 地址、非默认端口。其他招聘板的 token 规则不变。
+- 手动导入的岗位与抓到的岗位链接相同：不重复入库，计入 `already_known`，手动导入的岗位不变且仍在架。第 4 节第 2 问选 (a) 时，Greenhouse 同样适用。
+- `check_board("avature", …)` 只发一个请求，返回计数文字、样例标题和样例地点，不入库。
+- 从站点消失的 Avature 岗位不再进入每日推荐；抓取失败时保持原状。
+- 导入的 JSON 带 `location` 时写入 `Job.location`，不带时为空（第 3 问选 (a) 时）。
+- 定时任务模式仍然包含 `check_board` 和 `fetch_boards`。
+- 现有 121 个测试继续通过。
+
+实现后的真实核对需要你同意，在本机运行，只读：先 `check_board` 联想站点，再 `fetch_boards`，核对 42 个手动导入的岗位都计入 `already_known`，新增数量符合标题和国家过滤的预期。
