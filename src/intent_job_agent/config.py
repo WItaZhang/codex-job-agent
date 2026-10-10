@@ -39,6 +39,10 @@ class Discovery(_Section):
     proxy_env: str
 
 
+class Tagging(_Section):
+    backfill_dimensions: list[str]
+
+
 class HardReview(_Section):
     every_days: int
 
@@ -59,6 +63,7 @@ class Settings(_Section):
     daily: Daily
     analysis: Analysis
     discovery: Discovery
+    tagging: Tagging
     hard_review: HardReview
     llm: LLM
     storage: Storage

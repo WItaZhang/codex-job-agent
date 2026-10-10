@@ -28,8 +28,17 @@ DIMENSIONS = (
     "employment_type",
     "tech_stack",
     "sponsorship",
+    "degree_requirement",
 )
 _DEPTH = {"location": 2}
+# Keys every vocabulary knows, for dimensions added after a user's vocabulary was initialized (spec 3.1.2).
+BUILTIN_KEYS: dict[str, dict[str, tuple[str, ...]]] = {
+    "degree_requirement": {
+        "phd": ("doctorate", "博士"),
+        "masters": ("ms", "master", "硕士"),
+        "bachelors": ("bs", "ba", "bachelor", "本科"),
+    },
+}
 _SEGMENT = re.compile(r"^[a-z0-9_\-\u0080-\U0010ffff]+$")
 
 
@@ -261,6 +270,14 @@ class Vocabulary(Record):
 
     def canonical(self, ref: str) -> str:
         return self.alias_of(ref) or parse_ref(ref).ref
+
+    def with_builtin(self) -> "Vocabulary":
+        """This vocabulary plus the built-in keys it does not have yet (its own aliases win)."""
+        keys = {d: dict(k) for d, k in self.keys.items()}
+        for dimension, builtin in BUILTIN_KEYS.items():
+            for key, aliases in builtin.items():
+                keys.setdefault(dimension, {}).setdefault(key, aliases)
+        return Vocabulary(keys=keys)
 
     def with_key(self, ref: str) -> "Vocabulary":
         parsed = parse_ref(ref)

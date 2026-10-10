@@ -267,6 +267,25 @@ def _soft_version(ctx: Context, changes: list[Change]) -> Candidate | None:
     return Candidate(soft) if soft else None
 
 
+def command_candidates(ctx: Context, changes: list[Change]) -> list[Candidate]:
+    """An explicit command as asked, plus its soft counterpart when it sets a hard level (spec 4.5)."""
+    asked = Candidate(list(changes))
+    if not any(_is_hard(change) for change in changes):
+        return [asked]
+    soft = []
+    for change in changes:
+        if _is_hard(change):
+            level = change.to_level if isinstance(change, SetLevel) else change.level
+            soft.extend(move(ctx.intent, change.ref, SOFT_TWIN[level]))
+        else:
+            soft.append(change)
+    if not soft:
+        return [asked]
+    twin = Candidate(soft)
+    asked.twin = twin.key
+    return [asked, twin]
+
+
 def exception_candidates(ctx: Context, ref: str) -> list[Candidate]:
     """An exception is possible only when labels on this key split cleanly on another known key."""
     entry = ctx.intent.entry(ref)
@@ -387,8 +406,9 @@ def build_proposals(
     def moves_all(item: Built) -> bool:
         return all(_moved(ctx, before, item, label, kind, reason_refs) for label in targets)
 
-    # User-written feedback is offered as asked; analysis options must push today's labels the right way.
-    kept = {key: item for key, item in built.items() if origin == "feedback" or moves_all(item)}
+    # User-written feedback and commands are offered as asked; analysis options must push today's labels
+    # the right way.
+    kept = {key: item for key, item in built.items() if origin in ("feedback", "command") or moves_all(item)}
     # Every hard option is shown next to its soft counterpart.
     for item in list(kept.values()):
         twin = item.candidate.twin

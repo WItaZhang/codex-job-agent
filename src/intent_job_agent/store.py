@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS selections (day TEXT NOT NULL, job_id TEXT NOT NULL, 
 CREATE TABLE IF NOT EXISTS board_snapshots (seq INTEGER PRIMARY KEY, source TEXT NOT NULL, board TEXT NOT NULL,
                                             job_ids TEXT NOT NULL, fetched_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS external_rows (url TEXT PRIMARY KEY, job_id TEXT, status TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS backfills (job_id TEXT NOT NULL, dimension TEXT NOT NULL, tags TEXT NOT NULL,
+                                      labelled INTEGER NOT NULL, created_at TEXT NOT NULL,
+                                      PRIMARY KEY (job_id, dimension));
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
 """
@@ -83,7 +86,50 @@ class Store:
         with self.db:
             self.db.execute("UPDATE jobs SET data = ? WHERE id = ?", (job.model_dump_json(), job_id))
             self.db.execute("INSERT OR REPLACE INTO tagged (job_id, tagged_at) VALUES (?, ?)", (job_id, _now()))
+            # Tagged now, so the dimensions that need backfill for older jobs are already covered.
+            for dimension in self.settings.tagging.backfill_dimensions:
+                own = [tag for tag in tags if tag.startswith(dimension + ".")]
+                self.db.execute(
+                    "INSERT OR IGNORE INTO backfills (job_id, dimension, tags, labelled, created_at) "
+                    "VALUES (?, ?, ?, 0, ?)",
+                    (job_id, dimension, json.dumps(own), _now()),
+                )
         return job
+
+    def backfilled(self, job_id: str, dimension: str) -> bool:
+        row = self.db.execute("SELECT 1 FROM backfills WHERE job_id = ? AND dimension = ?", (job_id, dimension))
+        return row.fetchone() is not None
+
+    def backfill(self, job_id: str, dimension: str, tags: list[str]) -> list[str]:
+        """Add tags of a newly added dimension to a tagged job (shown or not). Other tags never change."""
+        if not self.is_tagged(job_id):
+            raise InvariantError(f"Job {job_id} is not tagged yet; tag it with submit_job_tags")
+        if self.backfilled(job_id, dimension):
+            raise InvariantError(f"Job {job_id} was already backfilled for {dimension}; fix tags through misread")
+        current = self.effective_tags(job_id)
+        added = [tag for tag in dict.fromkeys(tags) if tag not in current]
+        labelled = self.db.execute(
+            "SELECT 1 FROM labels WHERE json_extract(data, '$.job_id') = ?", (job_id,)
+        ).fetchone()
+        with self.db:
+            if added:
+                row = self.db.execute("SELECT 1 FROM tag_overrides WHERE job_id = ?", (job_id,)).fetchone()
+                if row:
+                    self.db.execute(
+                        "UPDATE tag_overrides SET tags = ? WHERE job_id = ?", (json.dumps(current + added), job_id)
+                    )
+                else:
+                    job = self.job(job_id).model_copy(update={"tags": current + added})
+                    self.db.execute("UPDATE jobs SET data = ? WHERE id = ?", (job.model_dump_json(), job_id))
+            self.db.execute(
+                "INSERT INTO backfills (job_id, dimension, tags, labelled, created_at) VALUES (?, ?, ?, ?, ?)",
+                (job_id, dimension, json.dumps(added), int(bool(labelled and added)), _now()),
+            )
+        return current + added
+
+    def tag_revision(self) -> int:
+        """Changes analyses depend on besides the intent version: backfilled tags of labelled jobs."""
+        return self.db.execute("SELECT COUNT(*) FROM backfills WHERE labelled = 1").fetchone()[0]
 
     def untagged_jobs(self) -> list[Job]:
         """Open jobs still waiting for tags: those with full text first, then most recently stored first."""
@@ -212,7 +258,7 @@ class Store:
 
     def vocabulary(self) -> Vocabulary:
         row = self.db.execute("SELECT data FROM vocabulary ORDER BY seq DESC LIMIT 1").fetchone()
-        return Vocabulary.model_validate_json(row["data"])
+        return Vocabulary.model_validate_json(row["data"]).with_builtin()
 
     # --- analyses, proposals and decisions --------------------------------------------
 
@@ -288,7 +334,10 @@ class Store:
 
         with self.db:
             decision_id = self._decision(
-                proposal.analysis_id, "accept", proposal_id, {"inputs": inputs or {}, "approved_via": approved_via}
+                proposal.analysis_id,
+                "accept",
+                proposal_id,
+                {"inputs": inputs or {}, "approved_via": approved_via, "origin": proposal.origin},
             )
             self.db.execute(
                 "INSERT INTO intent_versions (version, data, decision_id, created_at) VALUES (?, ?, ?, ?)",

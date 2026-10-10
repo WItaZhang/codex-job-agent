@@ -7,6 +7,7 @@ from .analysis import (
     candidate_refs,
     cause_for,
     classify,
+    command_candidates,
     common_groups,
     enumerate_causes,
     exception_candidates,
@@ -122,6 +123,7 @@ class Engine:
             kind=kind,
             direction=direction,
             base_version=ctx.intent.version,
+            tag_revision=self.store.tag_revision(),
             label_ids=[label.id],
             step1=step1,
             causes=causes,
@@ -148,6 +150,7 @@ class Engine:
             kind=kind,
             direction=direction,
             base_version=ctx.intent.version,
+            tag_revision=self.store.tag_revision(),
             label_ids=[label.id for label in labels],
             step1=step1,
             causes=causes,
@@ -202,6 +205,8 @@ class Engine:
             raise InvariantError(f"Analysis {analysis_id} is already {analysis.status}")
         if analysis.base_version != self.store.current_version():
             raise InvariantError(f"The intent changed since analysis {analysis_id}; refresh it first")
+        if analysis.tag_revision != self.store.tag_revision():
+            raise InvariantError(f"Job tags were backfilled since analysis {analysis_id}; refresh it first")
         return analysis
 
     def refresh(self, analysis_id: str) -> Analysis:
@@ -209,25 +214,51 @@ class Engine:
         otherwise rebuild its causes and options on the current version."""
         analysis = self.store.analysis(analysis_id)
         ctx = self._ctx()
-        if analysis.status != "open" or analysis.base_version == ctx.intent.version:
+        revision = self.store.tag_revision()
+        if analysis.status != "open" or (
+            analysis.base_version == ctx.intent.version and analysis.tag_revision == revision
+        ):
+            return analysis
+        self.store.close_pending(analysis.id)
+        if analysis.kind == "command":  # no label to resolve: rebuild the same request on the new version
+            analysis.base_version, analysis.tag_revision = ctx.intent.version, revision
+            rejected: list[str] = []
+            analysis.proposals = self._command_proposals(ctx, analysis, rejected)
+            analysis.rejected_suggestions.extend(rejected)
+            self.store.save_analysis(analysis)
             return analysis
         targets = [self.store.label(i) for i in analysis.label_ids]
-        self.store.close_pending(analysis.id)
         if all(target_resolved(ctx, analysis.kind, label) for label in targets):
             analysis.status = "resolved"
             analysis.proposals = []
             self.store.save_analysis(analysis)
             return analysis
-        causes = []
-        for cause in analysis.causes:
-            if cause.type == "salary":
-                causes.append(cause)
-                continue
-            fresh = cause_for(ctx, cause.refs, analysis.direction)
-            label = cause.label if cause.type == "scope" else fresh.label
-            causes.append(fresh.model_copy(update={"id": cause.id, "label": label}))
+        if analysis.tag_revision != revision and analysis.step1 == "ask":
+            # Backfilled tags can add candidate causes; known causes keep their ids.
+            if len(targets) > 1:
+                common = sorted(set.intersection(*(set(ctx.tags(label)) for label in targets)))
+                fresh_causes = [cause_for(ctx, [ref], analysis.direction) for ref in candidate_refs(ctx, common)]
+            else:
+                fresh_causes = enumerate_causes(ctx, ctx.tags(targets[0]), analysis.direction)
+            known = {tuple(cause.refs): cause.id for cause in analysis.causes}
+            causes = [
+                cause.model_copy(update={"id": known.get(tuple(cause.refs), cause.id)})
+                for cause in self._rank(ctx, targets, fresh_causes)
+            ]
+            if analysis.chosen_cause not in {cause.id for cause in causes}:
+                analysis.chosen_cause = None
+        else:
+            causes = []
+            for cause in analysis.causes:
+                if cause.type == "salary":
+                    causes.append(cause)
+                    continue
+                fresh = cause_for(ctx, cause.refs, analysis.direction)
+                label = cause.label if cause.type == "scope" else fresh.label
+                causes.append(fresh.model_copy(update={"id": cause.id, "label": label}))
         analysis.causes = causes
         analysis.base_version = ctx.intent.version
+        analysis.tag_revision = revision
         chosen = [c for c in causes if c.id == analysis.chosen_cause] or (causes if analysis.step1 == "skip" else [])
         analysis.proposals = [p for cause in chosen for p in self._proposals(ctx, analysis, cause, targets)]
         self.store.save_analysis(analysis)
@@ -264,6 +295,8 @@ class Engine:
         analysis = self._open(analysis_id)
         ctx = self._ctx()
         targets = [self.store.label(i) for i in analysis.label_ids]
+        if changes is None and not targets:
+            raise InvariantError("Feedback on an explicit command needs the changes it asks for")
         if changes is None:
             prompt = feedback_prompt(ctx.intent, targets[0].value, [ctx.tags(label) for label in targets], text)
             changes = self.llm.structured(prompt, FeedbackChanges).changes
@@ -284,6 +317,51 @@ class Engine:
         analysis.rejected_suggestions.extend(rejected)
         self.store.save_analysis(analysis)
         return analysis
+
+    # --- explicit commands (spec §10 item 27) ------------------------------------------------
+
+    def propose_edit(self, day: str, text: str, changes: list[dict]) -> Analysis:
+        """The user's explicit command, read by the agent as changes: options to confirm, nothing written."""
+        ctx = self._ctx()
+        analysis = Analysis(
+            id=new_id("analysis"),
+            day=day,
+            kind="command",
+            direction=0,
+            base_version=ctx.intent.version,
+            tag_revision=self.store.tag_revision(),
+            request=text,
+            request_changes=[dict(raw) for raw in changes],
+            label_ids=[],
+            step1="skip",
+            causes=[],
+        )
+        rejected: list[str] = []
+        analysis.proposals = self._command_proposals(ctx, analysis, rejected)
+        if not analysis.proposals:
+            raise InvariantError("The command cannot be applied: " + ("; ".join(rejected) or "no change given"))
+        self.store.save_analysis(analysis)
+        self.store.record_decision(analysis.id, "command", {"text": text, "changes": analysis.request_changes})
+        return analysis
+
+    def _command_proposals(self, ctx, analysis: Analysis, rejected: list[str]) -> list[Proposal]:
+        """The command as asked (it must apply cleanly) and, for a hard level, its soft counterpart."""
+        changes = []
+        for raw in analysis.request_changes:
+            try:
+                changes.append(self._suggested_change(ctx.intent, raw))
+            except InvariantError as error:
+                rejected.append(f"{raw}: {error}")
+        if rejected or not changes:
+            return []
+        candidates = command_candidates(ctx, changes)
+        errors: list[str] = []
+        proposals = build_proposals(ctx, analysis.id, None, candidates, [], "command", [], "command", errors)
+        asked = candidates[0].key
+        if not any(frozenset(change.summary() for change in p.changes) == asked for p in proposals):
+            rejected.extend(errors or ["the requested change is not valid"])
+            return []
+        return proposals
 
     @staticmethod
     def _suggested_change(intent: IntentModel, raw: dict):

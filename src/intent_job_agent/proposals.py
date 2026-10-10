@@ -29,7 +29,7 @@ class Proposal(_Model):
     analysis_id: str
     base_version: int
     cause_id: str | None
-    origin: Literal["analysis", "feedback"]
+    origin: Literal["analysis", "feedback", "command"]
     changes: list[Change]
     evidence: list[str]
     new_keys: list[str] = Field(default_factory=list)
@@ -55,9 +55,12 @@ class Proposal(_Model):
 class Analysis(_Model):
     id: str
     day: str
-    kind: Literal["false_positive", "false_negative", "reason_conflict"]
+    kind: Literal["false_positive", "false_negative", "reason_conflict", "command"]
     direction: int
     base_version: int
+    tag_revision: int = 0  # backfilled tags of labelled jobs seen when this analysis was built
+    request: str | None = None  # an explicit command: the user's words
+    request_changes: list[dict] = Field(default_factory=list)  # and the agent's reading of them
     label_ids: list[str]
     step1: Literal["skip", "ask", "ask_scope"]
     causes: list[Cause]

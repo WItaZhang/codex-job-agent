@@ -19,6 +19,8 @@ discovery:
   applypilot_dir: applypilot      # ApplyPilot 工作库与配置的目录，位于 storage.data_dir 下
   enrich_limit: 100               # 补全原文时每个站点最多处理多少个岗位（ApplyPilot 默认值）
   proxy_env: INTENT_AGENT_PROXY   # 代理所在的环境变量，格式 host:port 或 host:port:user:pass
+tagging:
+  backfill_dimensions: [degree_requirement]   # 新增维度后，已打标签岗位要回填的维度（spec §10 第 28 条）
 hard_review:
   every_days: 7
 llm:
