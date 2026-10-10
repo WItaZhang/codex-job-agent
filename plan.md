@@ -302,10 +302,15 @@ spec 改动见 §3.1 维度表、§3.1.2、§5.1、§8、§10 第 27–29 条。
 
 ---
 
-# 切片 2f 计划：Avature 招聘站点（草案，待用户确认）
+# 切片 2f 计划：接入 Avature（草案，待用户确认）
 
-目标：把联想（`jobs.lenovo.com`）这类用 Avature 搭建的公司招聘站点写进 `boards.yaml`，由 `fetch_boards` 持续更新，不再靠一次性脚本。
-spec 改动见 §8 的 2f 和 §10 第 30–37 条。
+目标：用 Avature 搭建招聘站点的公司都能写进 `boards.yaml`，由 `fetch_boards` 持续更新。agent 按你的意图找候选公司，你来挑，联想是其中一家。不再靠一次性脚本。
+spec 改动见 §8 的 2f 和 §10 第 30–39 条。
+
+已定（2026-10-10 你的选择）：
+- 抓取方式：每家读全站（能判断下架），不按搜索词搜。
+- 公司名单：agent 搜索候选，用 `check_board` 验证，你挑选。
+
 编号说明：未合并的切片 2d 草案（分支 `claude/slice-2d-discovery-fixes`）也用了 §10 第 27–30 条，后合并的一方要重新编号。
 **用户确认本计划之前，不写实现代码。**
 
@@ -317,12 +322,23 @@ spec 改动见 §8 的 2f 和 §10 第 30–37 条。
 | 只为新的、通过过滤的岗位读详情页 | RSS（`SearchJobs/feed/`）：每页只有 20 条，没有地点、职能和原文；sitemap 只有链接 |
 | `country_include` 国家过滤（只用于 Avature） | 浏览器、登录、申请 |
 | 所有招聘板按链接与已有岗位去重 | 修改已手动导入的 42 个联想岗位 |
-| `check_board` 对 Avature 只读第一页 | 把 `fetch_boards` 改成后台运行（实际太慢再说） |
+| `check_board` 对 Avature 只读第一页 | 按搜索词搜（像 Workday 那样） |
+| agent 找候选公司：网页搜索，`check_board` 验证，你挑选后写入 `boards.yaml` | 代码自动发现公司；项目自带公司名单 |
+| `fetch_boards` 后台运行，`boards_status` 查进度（决定 5） | 为个别站点写特殊解析（如 IBM、McKinsey） |
 | 手动导入的 JSON 格式加可选 `location` | 联想的 Workday：它的 Req # 大多以 WD 开头，但没有找到公开的 Workday 站点 |
 
 ## 2. 实际会怎么用
 
-1. 在 `data/local/boards.yaml` 加一项（标题关键词由你定，下面只是示例）：
+1. 你说"帮我找用 Avature 的公司"。agent 按你的意图用网页搜索找候选，逐个运行 `check_board`，再列成编号选项让你挑：
+
+   ```
+   1) Lenovo     https://jobs.lenovo.com/en_US/careers    999+ 个岗位   例：Junior Data and AI-ML Engineer（United States of America, North Carolina, Morrisville）
+   2) Bloomberg  https://bloomberg.avature.net/careers    329 个岗位    例：Buy-Side OMS (AIM) Sales Specialist, Dubai, Financial Solutions（Dubai, Dubai, United Arab Emirates）
+   …
+   ```
+
+   验证失败的站点不列出，会说明原因。
+2. 你选中的公司由 agent 写进 `data/local/boards.yaml`，每家一项。标题关键词和国家名由你定，国家名照 `check_board` 显示的写法填：
 
    ```yaml
    - provider: avature
@@ -332,8 +348,7 @@ spec 改动见 §8 的 2f 和 §10 第 30–37 条。
      country_include: [United States of America]
    ```
 
-2. agent 先运行 `check_board("avature", "https://jobs.lenovo.com/en_US/careers")`。它返回 "999+"、前几个标题和地点，用来核对国家名的写法。
-3. 运行 `fetch_boards`：联想约 103 页列表，美国岗位约 250 个，标题过滤后剩下一部分。之前手动导入的 42 个计入 `already_known`，其余的读详情后以"未打标签"入库。每个招聘板的结果例如：
+3. 运行 `fetch_boards`，它在后台跑，用 `boards_status` 查进度。以联想为例：约 103 页列表，美国岗位约 250 个，标题过滤后剩下一部分。之前手动导入的 42 个计入 `already_known`，其余的读详情后以"未打标签"入库。每个招聘板的结果例如：
    `{"provider": "avature", "fetched": 1027, "filtered_out": …, "already_known": 42, "new": …, "detail_errors": 0}`
 4. 以后每次 `fetch_boards` 只为新岗位读详情。从站点消失的联想岗位不再进入每日推荐。手动导入的 42 个仍按手动导入处理，始终在架，见第 4 节第 2 问。
 
@@ -349,10 +364,12 @@ src/intent_job_agent/
   domain.py      Job.source 加 avature
   store.py       is_open 改用招聘板列表（含 avature）；按链接查找已有岗位
   tools.py       fetch_boards：过滤 → 按 ID 和链接去重 → （avature）读详情 → 入库 → 记录快照；
-                 check_board 对 avature 只读第一页
+                 后台运行，新工具 boards_status 查进度（准备级，定时任务可用）；
+                 check_board 对 avature 只读第一页，返回样例标题和地点
+  mcp_server.py  说明里加"怎么找用 Avature 的公司"：搜索 → check_board → 编号选项 → 用户选中后写入 boards.yaml
   importing.py   RawJob 加可选 location
 configs/default.yaml   discovery.avature: {request_delay_seconds: 0.5, max_pages: 300}
-docs/examples/boards.example.yaml、README、mcp_server.py 的说明：加 avature
+docs/examples/boards.example.yaml、README：加 avature
 CLAUDE.md      "岗位来源"一行加 Avature（确认后再改）
 ```
 
@@ -374,6 +391,9 @@ CLAUDE.md      "岗位来源"一行加 Avature（确认后再改）
 4. **单个详情页失败**
    (a) 这个岗位本次不入库，下次重试，其他岗位照常入库（推荐）。
    (b) 整个站点算失败。
+5. **`fetch_boards` 后台运行**
+   (a) 改成后台运行，和 `discover_jobs` 一样用状态工具查进度（推荐）。名单一长，读全站要十几分钟，一次工具调用等这么久，宿主可能超时。
+   (b) 保持同步，先用几家公司试试，太慢再改。
 
 ## 5. 测试（先写，全部离线）
 
@@ -406,6 +426,9 @@ CLAUDE.md      "岗位来源"一行加 Avature（确认后再改）
 - 从站点消失的 Avature 岗位不再进入每日推荐；抓取失败时保持原状。
 - 导入的 JSON 带 `location` 时写入 `Job.location`，不带时为空（第 3 问选 (a) 时）。
 - 定时任务模式仍然包含 `check_board` 和 `fetch_boards`。
+- 后台运行（第 5 问选 (a) 时）：`fetch_boards` 立即返回"运行中"；`boards_status` 在完成后给出每个招聘板的结果；运行期间再次调用被拒绝；`wait=true` 时同步返回结果；定时任务模式包含 `boards_status`。现有的 `fetch_boards` 测试改用 `wait=true`。
 - 现有 121 个测试继续通过。
 
-实现后的真实核对需要你同意，在本机运行，只读：先 `check_board` 联想站点，再 `fetch_boards`，核对 42 个手动导入的岗位都计入 `already_known`，新增数量符合标题和国家过滤的预期。
+实现后的真实核对需要你同意，在本机运行，只读：
+1. 按第 2 节第 1 步找候选公司，你挑选。
+2. 运行 `fetch_boards`，核对 42 个手动导入的联想岗位都计入 `already_known`，各家的新增数量符合标题和国家过滤的预期。
