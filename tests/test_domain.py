@@ -19,7 +19,8 @@ from .conftest import BASE_INTENT, BASE_VOCAB
 VOCAB = Vocabulary.build(BASE_VOCAB)
 
 
-def test_dimensions_are_the_fixed_eleven():
+def test_dimensions_are_the_fixed_twelve():
+    # degree_requirement was added in slice 2e through the development flow (spec 3.1.2).
     assert DIMENSIONS == (
         "role",
         "domain",
@@ -32,6 +33,7 @@ def test_dimensions_are_the_fixed_eleven():
         "employment_type",
         "tech_stack",
         "sponsorship",
+        "degree_requirement",
     )
 
 
