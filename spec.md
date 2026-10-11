@@ -321,7 +321,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
    - 2b. ✅ 接入公开招聘板（Greenhouse / Lever / Ashby），由用户在 `data/local/boards.yaml` 指定关注的公司（用户 2026-10-09 确认提前，主要找美国岗位）。
    - 2c. ✅ 复刻 ApplyPilot 的岗位发现与原文补全（JobSpy、Workday、smartextract、详情补全），按关键词和地点搜索，不需要公司列表（用户 2026-10-09 决定）。
    - 2e. 显式修改意图（"中国也可以"）和新增 `degree_requirement` 维度（"phd 的 exclude"），用户 2026-10-09 提出，用户 2026-10-10 确认计划，见 §10 切片 2e。
-   - 2f. （草案，待用户确认）接入 Avature：用 Avature 搭建招聘站点的公司（如联想 `jobs.lenovo.com`、Bloomberg）都可以作为可选招聘板，和 Greenhouse / Lever / Ashby 一样写在 `boards.yaml` 里。公司候选由 agent 按意图搜索、验证，用户挑选。2026-10-10 用户要找联想的岗位时发现现有来源都覆盖不到，并希望借此多找到一些公司。见 §10 第 30–39 条。
+   - 2f. 接入 Avature（用户 2026-10-10 确认计划）：用 Avature 搭建招聘站点的公司（如联想 `jobs.lenovo.com`、Bloomberg）都可以作为可选招聘板，和 Greenhouse / Lever / Ashby 一样写在 `boards.yaml` 里。公司候选由 agent 按意图搜索、验证，用户挑选。2026-10-10 用户要找联想的岗位时发现现有来源都覆盖不到，并希望借此多找到一些公司。见 §10 第 30–39 条。
 4. 定时任务；硬约束体检。
 
 ## 9. v1 完成标准
@@ -389,9 +389,9 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - 回填改变了已打 label 岗位的标签后，当天未处理的分析标为需要刷新；刷新后，新维度的 key 可以作为候选原因出现。
 29. 地点"中国也可以"在意图里表达为 `location.china: require`，和 `location.us: require` 是"或"的关系（3.1.1）。岗位发现（`searches.yaml`）是否加中国的搜索地点，属于来源范围，不属于意图；用户 2026-10-10 选择暂不加。
 
-### 切片 2f 的补充（草案，待用户确认）
+### 切片 2f 的补充（2026-10-10 用户提出并确认）
 
-来源：2026-10-10 用户要找联想的岗位。联想的招聘站点用 Avature，JobSpy、Workday、smartextract、Greenhouse、Lever、Ashby 都覆盖不到。当时用一次性脚本抓取，按标题和地点筛出 42 个美国技术岗位，用 `import_jobs` 手动导入。下面的页面结构已在 2026-10-10 用只读请求核对过两个站点：`jobs.lenovo.com` 和 `bloomberg.avature.net`。标注"决定 N"的地方等用户在 plan.md 切片 2f 第 4 节选择，正文写的是推荐选项。
+来源：2026-10-10 用户要找联想的岗位。联想的招聘站点用 Avature，JobSpy、Workday、smartextract、Greenhouse、Lever、Ashby 都覆盖不到。当时用一次性脚本抓取，按标题和地点筛出 42 个美国技术岗位，用 `import_jobs` 手动导入。下面的页面结构已在 2026-10-10 用只读请求核对过两个站点：`jobs.lenovo.com` 和 `bloomberg.avature.net`。标注"决定 N"的地方，用户 2026-10-10 在 plan.md 切片 2f 第 4 节都选了推荐选项，正文写的就是所选。
 
 30. **Avature 站点是一种招聘板。** `boards.yaml` 写 `provider: avature`，`board` 写站点根地址（例如 `https://jobs.lenovo.com/en_US/careers`），要求 HTTPS、公共域名、默认端口、不带查询参数。只读公开页面，不登录，不用浏览器（服务器直接返回 HTML，用 httpx 读取）。`title_include`、在架判断（第 14 条）、准备级权限和定时任务可用，都与其他招聘板相同。每家读完整个站点，而不是像 Workday 那样按搜索词搜：这样能判断下架，代价是每家都要读完整列表（2026-10-10 用户选择）。
 
