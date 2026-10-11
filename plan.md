@@ -402,7 +402,7 @@ CLAUDE.md      "岗位来源"一行加 Avature（已改）
 
 ## 5. 测试（先写，全部离线）
 
-合成 HTML 放在 `tests/fixtures/avature/`，每个文件标注 `<!-- SYNTHETIC -->`。页面结构仿照 Avature 模板的 class 名（`article--result`、`list-controls__pagination`、`paginationNextLink`、`article--details`、`article__content__view__field__label/value`、`visibility--hidden`），公司和域名都是虚构的（`*.example.com`）。准备两种布局：A 是"国家, 州, 城市"，带职能、Req # 和发布日期，每页 3 个；B 是"城市, 州, 国家"，只有地点，每页 4 个。页面用 httpx 的 MockTransport 回放，测试中请求间隔为 0。
+合成的详情页和错误页放在 `tests/fixtures/avature/`，列表页由测试代码按模板生成，每个页面都标注 `<!-- SYNTHETIC -->`。页面结构仿照 Avature 模板的 class 名（`article--result`、`list-controls__pagination`、`paginationNextLink`、`article--details`、`article__content__view__field__label/value`、`visibility--hidden`），公司和域名都是虚构的（`*.example.com`）。准备两种布局：A 是"国家, 州, 城市"，带职能、Req # 和发布日期，每页 3 个；B 是"城市, 州, 国家"，只有地点，每页 4 个。页面用 httpx 的 MockTransport 回放，测试中请求间隔为 0。
 
 列表与分页：
 - 两种布局的卡片都能解析出标题、链接、地点和 attributes。副标题第一项是 "Req #: …" 时地点为空；"No jobs found" 卡片不算岗位。

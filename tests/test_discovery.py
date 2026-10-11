@@ -200,12 +200,12 @@ def test_fetch_boards_stores_new_untagged_jobs_and_reports_each_board(box, fake)
             {"provider": "ashby", "board": "broken", "company": "Broken"},
         ],
     )
-    result = {(b["provider"], b["board"]): b for b in box.fetch_boards()["boards"]}
+    result = {(b["provider"], b["board"]): b for b in box.fetch_boards(wait=True)["boards"]}
     assert result[("greenhouse", "acme")]["new"] == 2
     assert result[("lever", "beta")]["new"] == 1
     assert result[("ashby", "broken")]["error"]
     assert len(box.list_untagged_jobs()["jobs"]) == 3
-    again = {(b["provider"], b["board"]): b for b in box.fetch_boards()["boards"]}
+    again = {(b["provider"], b["board"]): b for b in box.fetch_boards(wait=True)["boards"]}
     assert again[("greenhouse", "acme")]["new"] == 0  # no duplicates
     assert len(box.store.jobs()) == 3
 
@@ -220,7 +220,7 @@ def test_title_include_filters_before_storing(box, fake):
         box,
         [{"provider": "greenhouse", "board": "acme", "company": "Acme", "title_include": ["engineer", "scientist"]}],
     )
-    (report,) = box.fetch_boards()["boards"]
+    (report,) = box.fetch_boards(wait=True)["boards"]
     assert (report["new"], report["filtered_out"]) == (2, 1)
     assert sorted(j["title"] for j in box.list_untagged_jobs()["jobs"]) == [
         "Machine Learning Engineer",
@@ -236,21 +236,21 @@ def _tag_all(box):
 def test_jobs_gone_from_their_board_are_not_recommended(box, fake):
     fake.greenhouse["acme"] = [greenhouse_job(1), greenhouse_job(2)]
     write_boards(box, [{"provider": "greenhouse", "board": "acme", "company": "Acme"}])
-    box.fetch_boards()
+    box.fetch_boards(wait=True)
     _tag_all(box)
     gone = next(j.id for j in box.store.jobs() if j.url.endswith("/2"))
     fake.greenhouse["acme"] = [greenhouse_job(1)]
-    box.fetch_boards()
+    box.fetch_boards(wait=True)
     assert gone not in {j["job_id"] for j in box.select_today(DAY1)["jobs"]}
 
 
 def test_a_failed_refetch_keeps_jobs_open(box, fake):
     fake.greenhouse["acme"] = [greenhouse_job(1)]
     write_boards(box, [{"provider": "greenhouse", "board": "acme", "company": "Acme"}])
-    box.fetch_boards()
+    box.fetch_boards(wait=True)
     _tag_all(box)
     fake.failing.add("acme")
-    (report,) = box.fetch_boards()["boards"]
+    (report,) = box.fetch_boards(wait=True)["boards"]
     assert report["error"]
     assert len(box.select_today(DAY1)["jobs"]) == 1
 
@@ -262,10 +262,22 @@ def test_manually_imported_jobs_stay_open(box):
     assert [j["job_id"] for j in box.select_today(DAY1)["jobs"]] == ["m1"]
 
 
+def test_jobs_already_known_by_url_are_skipped_on_every_board(box, fake):
+    """Slice 2f: a posting whose URL a stored job already has is not stored again, whatever the source."""
+    fake.greenhouse["acme"] = [greenhouse_job(1), greenhouse_job(2)]
+    hand = {"id": "m1", "title": "T", "url": "https://boards.greenhouse.io/acme/jobs/1", "description": "SYNTHETIC"}
+    (box.data_dir / "jobs.json").write_text(json.dumps([hand]))
+    box.import_jobs(str(box.data_dir / "jobs.json"))
+    write_boards(box, [{"provider": "greenhouse", "board": "acme", "company": "Acme"}])
+    (report,) = box.fetch_boards(wait=True)["boards"]
+    assert (report["already_known"], report["new"]) == (1, 1)
+    assert len(box.store.jobs()) == 2
+
+
 def test_untagged_jobs_are_listed_newest_first_in_configured_batches(box, fake):
     fake.greenhouse["acme"] = [greenhouse_job(n) for n in range(50)]
     write_boards(box, [{"provider": "greenhouse", "board": "acme", "company": "Acme"}])
-    box.fetch_boards()
+    box.fetch_boards(wait=True)
     listed = box.list_untagged_jobs()["jobs"]
     assert len(listed) == box.settings.discovery.untagged_batch
     stored = [j.id for j in box.store.jobs()]
