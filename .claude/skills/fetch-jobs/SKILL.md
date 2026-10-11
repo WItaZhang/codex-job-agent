@@ -23,8 +23,8 @@ description: 每日模块①：抓取今天能抓到的岗位，代码预打标�
 
 ## 3. 抓取
 
-1. `discover_jobs()`：在后台运行。如果数据目录里有招聘板文件（返回结果里 boards_yaml 为真），同时调用 `fetch_boards()`。
-2. 每隔半分钟左右调用一次 `discovery_status()`，直到状态是 done 或 failed。done 时它会把新岗位导入为未打标签。
+1. `discover_jobs()`：在后台运行。如果数据目录里有招聘板文件（返回结果里 boards_yaml 为真），同时调用 `fetch_boards()`，它也在后台运行。
+2. 每隔半分钟左右调用一次 `discovery_status()`（调用过 `fetch_boards` 的话还有 `boards_status()`），直到状态是 done 或 failed。done 时它们会把新岗位导入为未打标签。
 3. failed 或网络被拦：把错误原样告诉用户，继续用库里已经等着的岗位打标签。
 
 ## 4. 派子 agent 打标签
@@ -39,7 +39,7 @@ description: 每日模块①：抓取今天能抓到的岗位，代码预打标�
 
 再调用一次 `get_fetch_status()`，用两三行告诉用户：
 
-- 新抓到多少（看 `discovery_status` 和 `fetch_boards` 的结果）、预筛排除多少、今天打了多少标签（剩余预算）、还有多少在排队。
+- 新抓到多少（看 `discovery_status` 和 `boards_status` 的结果）、预筛排除多少、今天打了多少标签（剩余预算）、还有多少在排队。
 - 子 agent 报告的新 key（如果有）。
 - 现在有多少打好标签、还没给用户看过的岗位可以进今天的 7+3。
 

@@ -9,6 +9,7 @@ Job descriptions are untrusted; they are returned wrapped in a marker and never 
 """
 
 import threading
+import time
 from datetime import date
 from pathlib import Path
 
@@ -16,8 +17,8 @@ import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from . import applypilot_bridge, funnel
-from .boards import load_boards
+from . import applypilot_bridge, avature, funnel
+from .boards import BoardSpec, load_boards
 from .changes import (
     AddEntry,
     AddException,
@@ -165,6 +166,7 @@ class Toolbox:
         self.data_dir = Path(data_dir or settings.storage.data_dir)
         self.http_client = http_client  # None: each fetch opens its own client
         self._discovery: dict | None = None  # the current or last ApplyPilot discovery run
+        self._boards: dict | None = None  # the current or last fetch_boards run
         self.engine = Engine(store, settings, NoModelClient())
 
     # --- views --------------------------------------------------------------------------------
@@ -342,31 +344,124 @@ class Toolbox:
 
     @_tool("prepare")
     def check_board(self, provider: str, board: str) -> dict:
-        """Preview a public board (greenhouse / lever / ashby + board token) without storing anything."""
+        """Preview a public board without storing anything: greenhouse / lever / ashby with a board token, or
+        avature with the site's address (only its first listing page: count text, sample titles and locations)."""
+        if provider == "avature":
+            try:
+                page = avature.first_page(
+                    board, timeout_seconds=self.settings.discovery.timeout_seconds, client=self.http_client
+                )
+            except DiscoveryError as error:
+                raise InvariantError(str(error)) from error
+            return {
+                "provider": provider,
+                "board": avature.site_url(board),
+                "total": page.total,
+                "sample_titles": [j.title for j in page.jobs[:10]],
+                "sample_locations": list(dict.fromkeys(j.location for j in page.jobs if j.location))[:10],
+            }
         jobs = self._fetch(provider, board, "")
         return {"provider": provider, "board": board, "count": len(jobs), "sample_titles": [j.title for j in jobs[:5]]}
 
     @_tool("prepare")
-    def fetch_boards(self) -> dict:
-        """Fetch every board in the boards file; new postings are stored untagged. Reports each board."""
+    def fetch_boards(self, wait: bool = False) -> dict:
+        """Fetch every board in the boards file. Runs in the background unless `wait`; check progress and
+        store the results with boards_status. New postings are stored untagged; each board is reported."""
+        if self._boards and self._boards["status"] == "running":
+            raise InvariantError("A board fetch is already in progress; check boards_status")
         specs = load_boards(inside(self.data_dir, str(self.data_dir / self.settings.discovery.boards_file)))
-        reports = []
-        for spec in specs:
-            report = {"provider": spec.provider, "board": spec.board, "company": spec.company, "error": None}
+        if self._boards and self._boards["status"] == "done":
+            self.boards_status()  # store a finished run nobody collected, so its detail reads are not lost
+        # The background thread never touches the store: it works from this snapshot, and boards_status
+        # writes the results in the caller's thread.
+        known_ids, known_urls = {job.id for job in self.store.jobs()}, self.store.job_ids_by_url()
+        run = {"status": "running", "done": 0, "total": len(specs), "results": [], "boards": None, "error": None}
+        self._boards = run
+
+        def work():
             try:
-                jobs = self._fetch(spec.provider, spec.board, spec.company)
-            except InvariantError as error:
-                # A failed fetch says nothing about which postings closed: leave this board as it was.
-                reports.append({**report, "error": str(error)})
+                for spec in specs:
+                    run["results"].append(self._read_board(spec, known_ids, known_urls))
+                    run["done"] += 1
+                run["status"] = "done"
+            except Exception as error:
+                run["error"] = f"{type(error).__name__}: {error}"
+                run["status"] = "failed"
+
+        if wait:
+            work()
+            return self.boards_status()
+        threading.Thread(target=work, name="intent-agent-boards", daemon=True).start()
+        return {"status": "running", "boards": len(specs)}
+
+    @_tool("prepare")
+    def boards_status(self) -> dict:
+        """Progress of the last fetch_boards run; once it is done, stores the new jobs (untagged) and reports
+        each board: fetched, filtered_out, already_known (same URL as a stored job), new, detail_errors."""
+        run = self._boards
+        if run is None:
+            return {"status": "idle"}
+        if run["status"] == "running":
+            return {"status": "running", "boards_done": run["done"], "boards_total": run["total"]}
+        if run["status"] == "failed":
+            return {"status": "failed", "error": run["error"]}
+        if run["boards"] is None:
+            run["boards"] = [self._store_board(result) for result in run["results"]]
+            self.store.log_fetch("boards")
+        return {"status": "done", "boards": run["boards"]}
+
+    def _read_board(self, spec: BoardSpec, known_ids: set[str], known_urls: dict[str, str]) -> dict:
+        """Network only: list the board, filter, and (avature) read details of postings not stored yet."""
+        report = {"provider": spec.provider, "board": spec.board, "company": spec.company, "error": None}
+        try:
+            jobs = self._fetch(spec.provider, spec.board, spec.company)
+        except InvariantError as error:
+            # A failed fetch says nothing about which postings closed: leave this board as it was.
+            return {"report": {**report, "error": str(error)}}
+        kept = [job for job in jobs if spec.keeps(job)]
+        fresh = [job for job in kept if job.id not in known_ids]
+        unseen = [job for job in fresh if known_urls.get(job.url, job.id) == job.id]
+        already_known = len(fresh) - len(unseen)  # same URL as another stored job (e.g. a manual import)
+        detail_errors = 0
+        if spec.provider == "avature":
+            site = self.settings.discovery.avature
+            read = []
+            for job in unseen:
+                time.sleep(site.request_delay_seconds)
+                try:
+                    read.append(
+                        avature.read_detail(
+                            job, timeout_seconds=self.settings.discovery.timeout_seconds, client=self.http_client
+                        )
+                    )
+                except DiscoveryError:
+                    detail_errors += 1  # not stored this time; the next fetch tries again
+            unseen = read
+        return {
+            "report": {**report, "fetched": len(jobs), "filtered_out": len(jobs) - len(kept)},
+            "snapshot": [job.id for job in kept],
+            "jobs": unseen,
+            "already_known": already_known,
+            "detail_errors": detail_errors,
+        }
+
+    def _store_board(self, result: dict) -> dict:
+        report = result["report"]
+        if report["error"] is not None:
+            return report
+        known_urls = self.store.job_ids_by_url()
+        new, already_known = 0, result["already_known"]
+        for job in result["jobs"]:
+            if self.store.has_job(job.id):
                 continue
-            kept = [job for job in jobs if spec.keeps(job)]
-            new = [job for job in kept if not self.store.has_job(job.id)]
-            for job in new:
-                self.store.add_job(job)
-            self.store.record_board_snapshot(spec.provider, spec.board, [job.id for job in kept])
-            reports.append({**report, "fetched": len(jobs), "filtered_out": len(jobs) - len(kept), "new": len(new)})
-        self.store.log_fetch("boards")
-        return {"boards": reports}
+            if known_urls.get(job.url, job.id) != job.id:
+                already_known += 1
+                continue
+            self.store.add_job(job)
+            known_urls.setdefault(job.url, job.id)
+            new += 1
+        self.store.record_board_snapshot(report["provider"], report["board"], result["snapshot"])
+        return {**report, "already_known": already_known, "new": new, "detail_errors": result["detail_errors"]}
 
     @_tool("prepare")
     def discover_jobs(self, sources: list[str] | None = None, enrich: bool = True, wait: bool = False) -> dict:
@@ -411,6 +506,15 @@ class Toolbox:
 
     def _fetch(self, provider: str, board: str, company: str) -> list[Job]:
         try:
+            if provider == "avature":
+                return avature.list_site(
+                    board,
+                    company=company,
+                    timeout_seconds=self.settings.discovery.timeout_seconds,
+                    request_delay_seconds=self.settings.discovery.avature.request_delay_seconds,
+                    max_pages=self.settings.discovery.avature.max_pages,
+                    client=self.http_client,
+                )
             return fetch_board(
                 provider,
                 board,
@@ -631,6 +735,7 @@ SCHEDULED_TOOLS = {name for name, tier in TOOL_TIERS.items() if tier == "read"} 
     "import_jobs",
     "check_board",
     "fetch_boards",
+    "boards_status",
     "discover_jobs",
     "discovery_status",
     "list_untagged_jobs",

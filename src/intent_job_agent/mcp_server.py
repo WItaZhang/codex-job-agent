@@ -39,6 +39,14 @@ Discovery setup (check get_discovery_setup first):
   full-text enrichment are skipped) 2) Gemini 3) OpenAI 4) a local model. The user writes the key into
   the .env file themselves (GEMINI_API_KEY / OPENAI_API_KEY / LLM_URL); never ask them to paste it in chat.
 - discover_jobs runs in the background; poll discovery_status until it is done, then tag the new jobs.
+- fetch_boards (boards.yaml) also runs in the background; poll boards_status until it is done (that call stores
+  the new jobs).
+Avature career sites (provider: avature, board: the site's HTTPS address such as https://jobs.example.com/careers):
+- To find companies, web-search for career sites fitting the user's intent (*.avature.net, or /careers/SearchJobs
+  on a company domain), check each with check_board, and list the ones that work as numbered options (company,
+  address, total, sample titles and locations). Write only the ones the user picks into boards.yaml.
+- country_include must use the site's own wording of the country, as check_board's sample locations show it.
+- A site check_board cannot read is left out; never add site-specific parsing at runtime.
 Daily flow (project skills /fetch-jobs and /today):
 - Tagging has a daily budget. list_untagged_jobs ranks untagged jobs by the current intent and holds back those
   whose confidently read fields break a hard constraint; they come back when the intent changes.

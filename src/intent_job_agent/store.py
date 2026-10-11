@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .changes import apply_changes
 from .config import Settings
-from .domain import IntentModel, InvariantError, Job, Label, Vocabulary
+from .domain import BOARD_SOURCES, IntentModel, InvariantError, Job, Label, Vocabulary
 from .proposals import Analysis, Proposal
 from .replay import evaluate, replay
 
@@ -75,6 +75,14 @@ class Store:
 
     def has_job(self, job_id: str) -> bool:
         return self.db.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone() is not None
+
+    def job_ids_by_url(self) -> dict[str, str]:
+        """Stored jobs by their posting URL (the first stored job wins), for deduplicating fetched postings."""
+        urls: dict[str, str] = {}
+        for job in self.jobs():
+            if job.url:
+                urls.setdefault(job.url, job.id)
+        return urls
 
     def is_tagged(self, job_id: str) -> bool:
         return self.db.execute("SELECT 1 FROM tagged WHERE job_id = ?", (job_id,)).fetchone() is not None
@@ -175,7 +183,7 @@ class Store:
     def is_open(self, job: Job) -> bool:
         """Board jobs are open while their board's latest fetch lists them; other sources stay open
         (search results are not complete listings, so absence says nothing)."""
-        if job.source not in ("greenhouse", "lever", "ashby"):
+        if job.source not in BOARD_SOURCES:
             return True
         row = self.db.execute(
             "SELECT job_ids FROM board_snapshots WHERE source = ? AND board = ? ORDER BY seq DESC LIMIT 1",

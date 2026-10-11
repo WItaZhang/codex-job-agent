@@ -29,6 +29,11 @@ class Analysis(_Section):
     max_flipped_shown: int
 
 
+class AvatureDiscovery(_Section):
+    request_delay_seconds: float
+    max_pages: int
+
+
 class Discovery(_Section):
     timeout_seconds: float
     boards_file: str
@@ -37,6 +42,7 @@ class Discovery(_Section):
     applypilot_dir: str
     enrich_limit: int
     proxy_env: str
+    avature: AvatureDiscovery
 
 
 class Tagging(_Section):

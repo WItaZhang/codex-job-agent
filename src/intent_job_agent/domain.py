@@ -289,11 +289,15 @@ class Vocabulary(Record):
         return Vocabulary(keys=keys)
 
 
+# Sources that list a board completely, so a posting missing from the latest fetch has closed.
+BOARD_SOURCES = ("greenhouse", "lever", "ashby", "avature")
+
+
 class Job(Record):
     """A posting. Its text fields are untrusted: shown for tagging and display, never used in analysis."""
 
     id: str
-    source: Literal["manual", "greenhouse", "lever", "ashby", "jobspy", "workday", "smartextract"] = "manual"
+    source: Literal["manual", "greenhouse", "lever", "ashby", "avature", "jobspy", "workday", "smartextract"] = "manual"
     board: str = ""
     title: str = ""
     company: str = ""

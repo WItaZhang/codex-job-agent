@@ -13,7 +13,7 @@ agent 分析哪里没对上，给出几个修改选项；你选了，系统才�
    - 搜索设置：参照 [docs/examples/searches.example.yaml](docs/examples/searches.example.yaml)，存为 `data/local/searches.yaml`
      （按关键词 × 地点搜索，与 ApplyPilot 相同；也可以让 agent 根据你的意图生成）
    - 可选：`employers.yaml`（Workday 雇主，见 [示例](docs/examples/employers.example.yaml)）、`sites.yaml`（smartextract 站点）、
-     `boards.yaml`（Greenhouse / Lever / Ashby，见 [示例](docs/examples/boards.example.yaml)）
+     `boards.yaml`（Greenhouse / Lever / Ashby / Avature，见 [示例](docs/examples/boards.example.yaml)）
    - 其他来源的岗位：参照 [docs/examples/jobs.example.json](docs/examples/jobs.example.json)，存为 `data/local/jobs.json` 后导入
 3. 在仓库目录启动 Claude Code。第一次会询问是否启用项目里的 `intent-agent` MCP 服务，选择启用。
 4. 第一次：对 agent 说"用 data/local/intent.yaml 初始化我的意图"。
@@ -33,6 +33,10 @@ agent 分析哪里没对上，给出几个修改选项；你选了，系统才�
 
 岗位发现复刻自 [ApplyPilot](https://github.com/Pickle-Pixel/ApplyPilot)：用 JobSpy 按关键词和地点搜索 Indeed、LinkedIn、
 Glassdoor、ZipRecruiter、Google Jobs，另有 Workday 雇主搜索和 smartextract（解析招聘页面），最后打开岗位页面补全原文。
+
+另有可选的公司招聘板，写在 `boards.yaml` 里：Greenhouse、Lever、Ashby，以及用 Avature 搭建招聘站点的公司（如联想）。
+Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avature 的公司"：它按你的意图搜索候选站点，逐个试读第一页，
+列成编号选项给你挑，选中的才写进 `boards.yaml`。招聘板抓取在后台运行，每家读完整个站点，只为新岗位打开详情页。
 
 - **LLM key（可选）**：只有 smartextract 和补全原文的最后一步需要。要用的话，自己在 `data/local/.env` 写一行
   `GEMINI_API_KEY=...`（或 `OPENAI_API_KEY=...`、`LLM_URL=...`），不要把 key 贴进对话。不写也能用，这两步会跳过。

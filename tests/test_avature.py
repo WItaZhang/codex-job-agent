@@ -558,6 +558,21 @@ def test_fetch_boards_runs_in_the_background_one_run_at_a_time(box, fake):
     assert report["new"] == 2 and len(box.store.jobs()) == 2
 
 
+def test_a_finished_run_nobody_collected_is_stored_before_the_next_one(box, fake):
+    site = Site(SITE_A, [us(1)])
+    fake.sites.append(site)
+    write_boards(box)
+    box.fetch_boards()
+    for _ in range(100):  # wait for the background run without collecting it through boards_status
+        if box._boards["status"] != "running":
+            break
+        time.sleep(0.05)
+    site.postings = [us(1), us(2)]
+    assert fetch(box)["new"] == 1
+    assert sorted(posting_ids(box.store.jobs())) == ["1", "2"]
+    assert sorted(fake.detail_ids()) == ["1", "2"]  # the first run's detail read was kept, not repeated
+
+
 def test_an_invalid_boards_file_is_reported_before_starting(box):
     (box.data_dir / "boards.yaml").write_text(yaml.safe_dump({"boards": [{"provider": "avature"}]}), encoding="utf-8")
     with pytest.raises(InvariantError):
