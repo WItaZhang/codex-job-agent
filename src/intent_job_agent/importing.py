@@ -25,6 +25,7 @@ class RawJob(BaseModel):
     title: str
     company: str = ""
     url: str = ""
+    location: str = ""
     description: str = ""
     salary: Salary | None = None
 

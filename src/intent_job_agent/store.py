@@ -3,7 +3,7 @@
 import json
 import sqlite3
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .changes import apply_changes
@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS external_rows (url TEXT PRIMARY KEY, job_id TEXT, sta
 CREATE TABLE IF NOT EXISTS backfills (job_id TEXT NOT NULL, dimension TEXT NOT NULL, tags TEXT NOT NULL,
                                       labelled INTEGER NOT NULL, created_at TEXT NOT NULL,
                                       PRIMARY KEY (job_id, dimension));
+CREATE TABLE IF NOT EXISTS fetch_log (seq INTEGER PRIMARY KEY, day TEXT NOT NULL, kind TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
 """
@@ -130,6 +131,21 @@ class Store:
     def tag_revision(self) -> int:
         """Changes analyses depend on besides the intent version: backfilled tags of labelled jobs."""
         return self.db.execute("SELECT COUNT(*) FROM backfills WHERE labelled = 1").fetchone()[0]
+
+    def log_fetch(self, kind: str) -> None:
+        """Jobs were fetched or imported today (the user's local date)."""
+        with self.db:
+            self.db.execute(
+                "INSERT INTO fetch_log (day, kind, at) VALUES (?, ?, ?)", (date.today().isoformat(), kind, _now())
+            )
+
+    def fetched_on(self, day: str) -> bool:
+        return self.db.execute("SELECT 1 FROM fetch_log WHERE day = ?", (day,)).fetchone() is not None
+
+    def tagged_on(self, day: str) -> int:
+        """Jobs fully tagged on `day` (local date), for the daily tagging budget."""
+        rows = self.db.execute("SELECT tagged_at FROM tagged").fetchall()
+        return sum(1 for row in rows if datetime.fromisoformat(row["tagged_at"]).astimezone().date().isoformat() == day)
 
     def untagged_jobs(self) -> list[Job]:
         """Open jobs still waiting for tags: those with full text first, then most recently stored first."""

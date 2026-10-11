@@ -113,9 +113,7 @@ def test_jobs_violating_confident_hard_constraints_are_held_back(box):
 def test_held_back_jobs_return_when_the_intent_changes(box):
     add_jobs(box, [{"id": "london", "title": "ML Engineer", "location": "London, UK"}])
     assert box.list_untagged_jobs()["jobs"] == []
-    analysis = box.propose_intent_edit(
-        "UK is fine too", [{"op": "add", "ref": "location.uk", "level": "require"}]
-    )
+    analysis = box.propose_intent_edit("UK is fine too", [{"op": "add", "ref": "location.uk", "level": "require"}])
     option = next(o for o in analysis["options"] if "proposal_id" in o and "必须" in o["summary"])
     box.decide(analysis["id"], option["n"], summary=option["summary"])
     assert [j["job_id"] for j in box.list_untagged_jobs()["jobs"]] == ["london"]
@@ -164,7 +162,7 @@ def test_fetch_status_reports_the_day(box):
     status = box.get_fetch_status(TODAY)
     assert status["fetched"] is False and status["selected"] is False
     add_jobs(box, [{"id": "a", "title": "ML Engineer", "location": "Austin, TX"}])
-    box.submit_job_tags("a", ["role.ml_engineering"])
+    box.submit_job_tags("a", ["role.ml_engineering", "location.us.austin"])
     status = box.get_fetch_status(TODAY)
     assert status["fetched"] is True  # importing counts as fetching for the day
     assert status["tagged_today"] == 1 and status["tagged_open"] == 1
@@ -198,14 +196,40 @@ def test_tagger_subagent_is_cheap_and_cannot_commit():
     assert not {f"mcp__intent-agent__{name}" for name in COMMIT_TOOLS} & tools
 
 
-@pytest.mark.parametrize("skill", ["fetch-jobs", "today"])
+SKILL_TOOLS = {
+    "fetch-jobs": {
+        "get_fetch_status",
+        "get_discovery_setup",
+        "discover_jobs",
+        "discovery_status",
+        "list_untagged_jobs",
+    },
+    "today": {
+        "get_fetch_status",
+        "select_today",
+        "record_labels",
+        "choose_cause",
+        "decide",
+        "decline",
+        "correct_tags",
+    },
+}
+
+
+@pytest.mark.parametrize("skill", sorted(SKILL_TOOLS))
 def test_skills_only_reference_existing_tools(skill):
     meta, text = frontmatter(ROOT / ".claude/skills" / skill / "SKILL.md")
     assert meta["name"] == skill and meta["description"]
-    referenced = set(re.findall(r"`([a-z_]+)`", text)) & (set(TOOL_TIERS) | {"job-tagger"} | _TOOLISH(text))
-    unknown = {name for name in referenced if name not in TOOL_TIERS and name != "job-tagger"}
-    assert not unknown, unknown
+    called = set(re.findall(r"`([a-z_]+)\(", text))  # tool calls are written as `name(...)`
+    assert called <= set(TOOL_TIERS), called - set(TOOL_TIERS)
+    assert SKILL_TOOLS[skill] <= called
+    # A skill must never pre-approve a commit tool: those always go through the host's permission prompt.
+    allowed = str(meta.get("allowed-tools", ""))
+    assert not [name for name in COMMIT_TOOLS if name in allowed]
 
 
-def _TOOLISH(text):  # noqa: N802 - names in backticks that look like tool calls (snake_case with an underscore)
-    return {name for name in re.findall(r"`([a-z]+_[a-z_]+)\(`", text)}
+def test_fetch_jobs_hands_out_ids_without_job_text(box):
+    add_jobs(box, [{"id": "a", "title": "ML Engineer", "location": "Austin, TX"}])
+    brief = box.list_untagged_jobs(day=TODAY, brief=True)
+    assert brief["jobs"] == [{"job_id": "a", "title": "ML Engineer", "company": ""}]
+    assert "rules" not in brief and brief["budget"]["remaining"] == box.settings.tagging.daily_budget
