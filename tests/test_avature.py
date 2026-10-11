@@ -1,4 +1,4 @@
-"""Slice 2f: Avature career sites as boards. Every page here is SYNTHETIC and served offline via httpx.MockTransport.
+"""Slice 2g: Avature career sites as boards. Every page here is SYNTHETIC and served offline via httpx.MockTransport.
 
 Search pages are generated below in the markup of Avature's standard template (checked read-only on
 jobs.lenovo.com and bloomberg.avature.net on 2026-10-10); detail and error pages are in tests/fixtures/avature/.

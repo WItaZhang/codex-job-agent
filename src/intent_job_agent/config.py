@@ -40,6 +40,7 @@ class Discovery(_Section):
 
 
 class Tagging(_Section):
+    daily_budget: int
     backfill_dimensions: list[str]
 
 

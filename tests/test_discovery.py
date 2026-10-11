@@ -263,7 +263,7 @@ def test_manually_imported_jobs_stay_open(box):
 
 
 def test_jobs_already_known_by_url_are_skipped_on_every_board(box, fake):
-    """Slice 2f: a posting whose URL a stored job already has is not stored again, whatever the source."""
+    """Slice 2g: a posting whose URL a stored job already has is not stored again, whatever the source."""
     fake.greenhouse["acme"] = [greenhouse_job(1), greenhouse_job(2)]
     hand = {"id": "m1", "title": "T", "url": "https://boards.greenhouse.io/acme/jobs/1", "description": "SYNTHETIC"}
     (box.data_dir / "jobs.json").write_text(json.dumps([hand]))

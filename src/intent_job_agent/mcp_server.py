@@ -38,7 +38,13 @@ Discovery setup (check get_discovery_setup first):
 - Ask, as numbered options, whether to use an LLM key: 1) none (smartextract and the last step of
   full-text enrichment are skipped) 2) Gemini 3) OpenAI 4) a local model. The user writes the key into
   the .env file themselves (GEMINI_API_KEY / OPENAI_API_KEY / LLM_URL); never ask them to paste it in chat.
-- discover_jobs runs in the background; poll discovery_status until it is done, then tag the new jobs."""
+- discover_jobs runs in the background; poll discovery_status until it is done, then tag the new jobs.
+Daily flow (project skills /fetch-jobs and /today):
+- Tagging has a daily budget. list_untagged_jobs ranks untagged jobs by the current intent and holds back those
+  whose confidently read fields break a hard constraint; they come back when the intent changes.
+- Tag through job-tagger subagents: list_untagged_jobs with brief=true, about 10 ids per subagent, each id once.
+  Taggers follow get_tagging_rules and start from the suggested tags.
+- get_fetch_status tells whether today was fetched, how much budget is left and what is ready for select_today."""
 
 
 def _guarded(fn, lock: threading.Lock):

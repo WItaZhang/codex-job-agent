@@ -16,13 +16,18 @@ agent 分析哪里没对上，给出几个修改选项；你选了，系统才�
      `boards.yaml`（Greenhouse / Lever / Ashby，见 [示例](docs/examples/boards.example.yaml)）
    - 其他来源的岗位：参照 [docs/examples/jobs.example.json](docs/examples/jobs.example.json)，存为 `data/local/jobs.json` 后导入
 3. 在仓库目录启动 Claude Code。第一次会询问是否启用项目里的 `intent-agent` MCP 服务，选择启用。
-4. 对 agent 说，例如：
-   - "用 data/local/intent.yaml 初始化我的意图"
-   - "检查一下岗位发现的设置"（agent 会问你要不要配 LLM key，并帮你生成 searches.yaml）
-   - "开始找岗位，找完给新岗位打标签，然后选出今天的岗位"
-   - "导入 data/local/jobs.json"
-   - "第 3 个不要，因为要坐班；第 5 个想投"
-   - "选 2"
+4. 第一次：对 agent 说"用 data/local/intent.yaml 初始化我的意图"。
+5. 每天两条命令（项目里的 skill）：
+   - `/fetch-jobs`：抓今天能抓到的岗位，打标签。不管当天校不校准都可以跑。第一次会帮你检查岗位发现的设置
+     （生成 searches.yaml、问你要不要配 LLM key）。
+   - `/today`：今天还没抓就先抓，然后列出 7 个推荐 + 3 个探索。一行回完，例如 `1+ 2-坐班 3- 5+ 6?地点不对`
+     （`+` 想投，`-` 不要，`?` 标签读错了，原因可写可不写），再按编号选原因、选怎么改。
+   - 其他时候也可以直接说："中国也可以"、"导入 data/local/jobs.json"、"选 2"。
+
+打标签怎么省钱：代码先从地点、远程、雇佣类型、职级等字段读出预标签；明确违反硬约束的岗位（例如你只要美国，
+它在伦敦）先放一边，意图变了会重新判断；其余按当前意图粗排，每天只给排在前面的 50 个（`configs/default.yaml`
+里的 `tagging.daily_budget`）打完整标签。完整标签由便宜模型（haiku）的子 agent 并行完成，不需要 API key，
+子 agent 碰不到任何提交级工具。
 
 ## 岗位从哪里来
 
