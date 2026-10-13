@@ -416,7 +416,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
 31. **预打标签**（`pretag.py`，代码，不用模型）：从地点、`workplace_type` / `is_remote`、`employment_type` 字段和标题读出 location、work_mode、employment_type、seniority；标题里出现词表别名的 role / specialty / domain / tech_stack 只作建议。只有读得没有歧义的维度算"有把握"（例如 "New York, NY" → `location.us.new_york`；"Somewhere Nice" 读不出就不打）。
 32. **硬约束预筛**只看有把握的维度：命中 exclude，或某个有 require 的维度在有把握读出的标签里一个都不满足，就先放一边。没把握的维度一律放行。预筛不写库，每次按当前意图重新计算，所以意图改了，被放一边的岗位会回来。
 33. **粗排**用和每日推荐同一个打分函数，对预标签打分，决定打标签的先后；分数相同时沿用原来的顺序（原文完整的优先，见第 23 条）。
-34. **每日打标签预算** `tagging.daily_budget`（默认 50）按本地日期计算当天提交的标签数；用完后当天不再列出待打标签的岗位，没轮到的留在库里。
+34. **每日打标签预算** `tagging.daily_budget`（默认 2000）按本地日期计算当天提交的标签数；用完后当天不再列出待打标签的岗位，没轮到的留在库里。预算要盖住每天新进的量：粗排只看标题和字段，分不开大部分岗位，校准过的意图只有在岗位打完完整标签后才能把它召回（用户 2026-10-13 选择，原为 50）。
 35. **完整打标签**由对话里的 agent 派子 agent 完成：`.claude/agents/job-tagger.md`，`model: haiku`，只能用 `get_tagging_rules`、`show_job`、`submit_job_tags`。主 agent 用 `list_untagged_jobs(brief=true)` 只拿编号，每 10 个一批分给子 agent，每个编号只给一个。详细规则写在代码里（`get_tagging_rules`，逐维度），子 agent 从预标签开始补齐、修正。
 36. `get_fetch_status(day)`（读级）：今天抓过没有（导入、招聘板、岗位发现都记一次，按本地日期）、排队和预筛的数量、预算余量、可进今天 7+3 的数量、是否已选、已打几个 label。
 37. 两个命令是项目 skill：`.claude/skills/fetch-jobs/`、`.claude/skills/today/`，只编排现有工具，不新增写入路径；skill 不得预先批准提交级工具。

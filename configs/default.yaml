@@ -23,7 +23,7 @@ discovery:
     request_delay_seconds: 0.5    # 同一次抓取中两次请求之间的间隔
     max_pages: 300                # 每个站点最多读多少页列表，超过就算抓取失败
 tagging:
-  daily_budget: 50                # 每天最多给多少个岗位打完整标签（漏斗第 5 层）
+  daily_budget: 2000              # 每天最多给多少个岗位打完整标签（漏斗第 5 层）
   backfill_dimensions: [degree_requirement]   # 新增维度后，已打标签岗位要回填的维度（spec §10 第 28 条）
 hard_review:
   every_days: 7

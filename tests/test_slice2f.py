@@ -132,15 +132,16 @@ def test_untagged_jobs_are_ordered_by_rough_score(box):
 
 
 def test_daily_tagging_budget(box):
-    add_jobs(box, [{"id": f"j{n}", "title": "ML Engineer", "location": "Austin, TX"} for n in range(60)])
     budget = box.settings.tagging.daily_budget
-    listed = box.list_untagged_jobs(limit=1000, day=TODAY)
+    jobs = budget + 10
+    add_jobs(box, [{"id": f"j{n}", "title": "ML Engineer", "location": "Austin, TX"} for n in range(jobs)])
+    listed = box.list_untagged_jobs(limit=jobs, day=TODAY)
     assert len(listed["jobs"]) == budget and listed["budget"]["remaining"] == budget
     for item in listed["jobs"][:5]:
         box.submit_job_tags(item["job_id"], ["role.ml_engineering"])
-    after = box.list_untagged_jobs(limit=1000, day=TODAY)
+    after = box.list_untagged_jobs(limit=jobs, day=TODAY)
     assert after["budget"]["tagged_today"] == 5 and len(after["jobs"]) == budget - 5
-    assert len(box.list_untagged_jobs(limit=1000, day="2099-01-01")["jobs"]) == budget  # another day
+    assert len(box.list_untagged_jobs(limit=jobs, day="2099-01-01")["jobs"]) == budget  # another day
 
 
 def test_show_job_offers_pre_tags_for_untagged_jobs(box):
