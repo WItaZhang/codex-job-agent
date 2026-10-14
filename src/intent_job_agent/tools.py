@@ -75,7 +75,10 @@ DIMENSION_TAG_RULES = {
         "Technical area of the work, independent of industry (recsys, ai_infra, nlp, cv, search, risk_control)."
     ),
     "seniority": (
-        "From the title first (Senior/Staff/Principal -> senior, Junior -> junior, New Grad/Entry -> new_grad), "
+        "From the title first (Senior/Staff/Principal -> senior, Junior -> junior, New Grad/Entry -> new_grad); "
+        "a title with no such level but with the word Manager -> senior, except PM titles where Manager names the "
+        "role (Product Manager, Program Manager, Project Manager, Product Marketing Manager, also Technical "
+        "Product/Program Manager), so 'Manager, Product Management' is still senior; "
         "else from required years: 0-1 new_grad, 1-3 junior, 3-6 mid, 6+ senior."
     ),
     "company_type": (
