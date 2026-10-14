@@ -570,3 +570,102 @@ configs/default.yaml   apply_list: {agreement_window_days: 7, shown: 20, dir: ap
 - 工具分级：两个新工具都是准备级；`mark_applications` 不在定时任务的工具里；状态值只接受三种。
 - `/apply-list` skill 里调用的工具都存在，并且不预先批准提交级工具。
 - 已有的测试继续通过。
+
+---
+
+# 切片 6 计划：投递（模块④，借用 ApplyPilot 的 apply/）（用户 2026-10-14 选定规则；计划待确认）
+
+规则见 spec 4.10。**用户确认本计划之前，不写实现代码。**
+
+## 1. 做什么，不做什么
+
+- 做：
+  - 把 ApplyPilot 的 `apply/`（`launcher.py`、`prompt.py`、`chrome.py`、`dashboard.py`）原样放进 `vendor/applypilot/apply/`，只改 import，修正放在适配层，和切片 2c 一样。
+  - 通用的 cover-letter skill，可以换成用户自己的。
+  - 求职信校验；"停在提交前"的公司名单；仲裁协议拦截；批量批准；`/apply` 命令。
+- 不做：按岗位改写简历；定时自动投递；投递后的跟进邮件。
+
+## 2. 实际会怎么用
+
+```
+你：/apply
+agent：今天清单里待投 20 个。这一批：
+       自动提交（15）：1 ML Engineer — Acme · us.seattle …
+       停在提交前（5，在你的公司名单里）：16 Applied Scientist — Stripe …
+       每个岗位都先写求职信。开始吗？
+你：开始 → 弹窗（start_applying，显示这一批的摘要）→ 你批准
+agent：（派子 agent 写 20 封求职信，代码校验，生成 PDF；不合格的退回重写）
+       （后台逐个投递；你可以随时问进度）
+       Stripe 停在提交前了，Chrome 窗口开着。你检查后自己点提交，然后说"16 已投"或"16 不投"。
+       …
+       结果：已投 12；等你提交 5；没投成 3（验证码 1、已下架 1、要求接受仲裁协议 1：Acme，条款原文 …）
+```
+
+## 3. 第一次设置（通用：别人也这样用）
+
+`data/local/applicant/`（git 忽略）：
+
+| 文件 | 内容 |
+| --- | --- |
+| `profile.json` | ApplyPilot 的格式（`docs/examples/applicant/profile.example.json`，即 ApplyPilot 的 `profile.example.json`）：联系方式、密码、工作许可、薪资、经历年限、技能范围、平等就业调查的默认答案 |
+| `resumes/` | 一份或几份简历的 PDF 和文本（`.md`/`.txt`），文本给求职信核对数字用 |
+| `careful_companies.yaml` | "停在提交前"的公司名单 |
+| `plugins.yaml`（可选） | 接入自己的东西：`cover_letter_skill`（skill 目录）、`resume_selection`（选简历的规则文件）、`rules`（投递时要遵守的个人规则文件） |
+
+你的接法：`plugins.yaml` 指向你本机的 qianqian-agent-kb：cover-letter skill、`resumes/README.md`（选简历规则）、`AGENTS.md`。`profile.json` 可以从知识库里的 `sources/profile/applypilot-profile-excerpts.json` 和 `profile/facts.json` 补全，由你确认后写入。
+
+另外需要：Node.js（`npx` 跑 Playwright MCP）、Chrome、Claude Code 命令行（ApplyPilot 每个岗位启动一次 `claude -p`，用你的 Claude 额度）；可选 CapSolver key 和 Gmail MCP，写进 `data/local/.env` 和 Gmail 授权，不在对话里传。
+
+## 4. 模块
+
+```
+src/intent_job_agent/
+  vendor/applypilot/apply/   ApplyPilot 原文件，只改 import
+  apply_bridge.py            适配层：
+                               - 把批准的这一批写进 ApplyPilot 的工作库（简历路径、求职信路径、申请链接）
+                               - 每个岗位：公司在名单里 → ApplyPilot 的 dry-run（填好不点提交）；否则正常提交
+                               - 在 ApplyPilot 的提示后面追加：仲裁协议不接受、停下报告（RESULT:FAILED:arbitration）；
+                                 接入的个人规则（plugins.yaml 的 rules）
+                               - MCP 服务固定版本（ApplyPilot 用 @latest）
+                               - 后台运行；停在提交前的岗位暂停那个 worker，等你说"已投 / 不投"
+                               - ApplyPilot 的结果码 → 清单状态
+  cover_letter_check.py      纯函数：ApplyPilot 的禁用词、模型套话、长破折号、字数范围；信里的数字必须在简历文本里出现
+  store / tools              清单状态加 failed（附原因）和 waiting（停在提交前，等你）；新工具：
+                               prepare_apply_batch(day)        准备级：这一批、每个是自动还是停、缺什么设置
+                               check_cover_letter(job_id, text) 读级：校验结果
+                               save_cover_letter(job_id, text)  准备级：校验通过才保存，并生成一页 PDF
+                               start_applying(batch_id, summary) 提交级：开始投递这一批（弹窗）
+                               apply_status()                   准备级：进度和结果，结果写回清单状态
+.claude/skills/apply/SKILL.md          /apply 的编排
+.claude/skills/cover-letter/           通用 cover-letter skill（从你的 skill 去掉个人内容改写），附 render_pdf.py
+.claude/agents/cover-letter-writer.md  写信的子 agent（sonnet；只能读岗位、读简历、check / save 求职信）
+configs/default.yaml                   apply: 字数范围、worker 数、模型、MCP 版本
+```
+
+## 5. 需要你确认的取舍
+
+1. **批量批准**：agent 不会自己开始投递。每一批先列出来（哪些岗位、自动提交还是停在提交前），你批准一次（`start_applying` 弹窗，摘要必须和展示的一致）才开始。定时任务永远不投递。
+2. **Chrome 资料**：ApplyPilot 第一次运行时，会把你日常 Chrome 的整个用户资料（cookies、所有已登录的网站，包括邮箱、银行）复制给投递用的 Chrome，而投递时 Claude Code 跳过所有权限确认、并且在读不可信的招聘网页。**建议改成一个单独的 Chrome 资料**：需要登录的招聘网站你第一次手动登录，之后会记住。这是和 3B 唯一不同的地方。
+3. **你的知识库规则优先**：接入个人规则后，和 ApplyPilot 冲突的地方以你的为准。你的知识库里有两处冲突：
+   - ApplyPilot 筛选题"同领域的工具一律答 YES"，你的知识库要求不夸大、不说简历证明不了的经历；
+   - ApplyPilot 自动报薪资（区间中位数等），你的知识库写着薪资"不作为硬下限、不用于自动回答"。
+
+   按"你的优先"，这两处会改成如实回答、薪资问题停下问你。别人没有接入个人规则时，用 ApplyPilot 的默认做法。
+4. **第一批全部停在提交前**：在你的 Mac 上第一次跑时，整批都不点提交，你看过几个填得对不对，再放开自动提交。
+5. **求职信由对话里的子 agent 写**（不需要 API key），每个岗位一封，代码校验不通过就退回重写，最多 3 次，仍不通过就这个岗位不投、报告给你。
+
+## 6. 测试（先写，离线，合成数据；不启动 Chrome 和 Claude Code）
+
+- vendored 的 `apply/` 只改了 import；
+- 适配层：名单内的公司（不区分大小写）走 dry-run；写进工作库的字段；提示里有仲裁协议规则和接入的个人规则；MCP 版本固定；结果码对应的状态；停在提交前的岗位会暂停、你回复后继续（用假的 runner）；
+- 投递资料不进 `agent.sqlite`，也不出现在打标签、分析工具的返回里；
+- `start_applying` 是提交级、不在定时任务里、摘要不一致就拒绝；没批准的岗位不会被投；
+- 求职信校验：禁用词、套话、长破折号、字数、数字不在简历里；允许 "May–June" 这样的短横；
+- 两个 skill 和子 agent 只引用存在的工具，子 agent 碰不到提交级工具。
+
+## 7. 风险（你知情）
+
+- 自动提交撤不回；同一家公司投错岗位会留下记录。
+- 招聘网站可能封号；用 CapSolver 破解验证码违反多数网站的条款。
+- 投递 agent 有你的密码和 Gmail 权限，同时在读不可信的网页；网页里的注入文本可能诱导它做别的事。
+- 每个岗位跑一次 Claude Code，几分钟一个，消耗你的 Claude 额度。
