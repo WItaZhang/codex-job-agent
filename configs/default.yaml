@@ -31,6 +31,97 @@ apply_list:                       # 投递清单（spec 4.9）
   agreement_window_days: 7        # 一致率看最近几个标注日（打过 label 的推荐日）
   shown: 20                       # 对话里先列出几个；文件里是全部
   dir: apply                      # 清单文件所在的目录，位于 storage.data_dir 下
+apply:                            # 投递（spec 4.10）
+  applicant_dir: applicant        # 投递资料目录（applicant.yaml、profile.json、简历），位于 storage.data_dir 下
+  batch_size: 30                  # 一批最多多少个岗位
+  review_first: 10                # 每批先做几个停在提交前，给你检查
+  model: sonnet                   # 投递用的 Claude Code 模型（ApplyPilot 的默认值）
+  job_timeout_seconds: 900        # 单个岗位最长时间
+  letters_dir: apply/letters      # 求职信（.txt 和 .pdf），位于 storage.data_dir 下
+  logs_dir: apply/logs            # 投递过程的完整记录，位于 storage.data_dir 下
+  cover_letter:
+    min_words: 250
+    max_words: 400
+    max_attempts: 3               # 校验不过最多重写几次
+  mcp:                            # 投递 agent 用的 MCP 服务，固定版本
+    playwright: "@playwright/mcp@0.0.83"
+    gmail: "@gongrzhe/server-gmail-autoauth-mcp@1.1.11"
+  blocked_origins:                # 投递用的浏览器打不开的网站（不是严格的安全边界，不拦重定向）
+    - https://mail.google.com
+    - https://myaccount.google.com
+    - https://pay.google.com
+    - https://payments.google.com
+    - https://wallet.google.com
+    - https://drive.google.com
+    - https://outlook.live.com
+    - https://outlook.office.com
+    - https://mail.yahoo.com
+    - https://www.icloud.com
+    - https://appleid.apple.com
+    - https://mail.qq.com
+    - https://wx.qq.com
+    - https://mail.163.com
+    - https://www.dropbox.com
+    - https://onedrive.live.com
+    - https://www.paypal.com
+    - https://venmo.com
+    - https://cash.app
+    - https://www.alipay.com
+    - https://auth.alipay.com
+    - https://www.chase.com
+    - https://secure.chase.com
+    - https://www.bankofamerica.com
+    - https://secure.bankofamerica.com
+    - https://www.wellsfargo.com
+    - https://connect.secure.wellsfargo.com
+    - https://online.citi.com
+    - https://www.capitalone.com
+    - https://verified.capitalone.com
+    - https://www.americanexpress.com
+    - https://global.americanexpress.com
+    - https://www.discover.com
+    - https://www.schwab.com
+    - https://www.fidelity.com
+    - https://robinhood.com
+    - https://www.coinbase.com
+    - https://www.ssa.gov
+    - https://secure.ssa.gov
+    - https://www.irs.gov
+    - https://vault.bitwarden.com
+    - https://my.1password.com
+    - https://www.lastpass.com
+  builtin_tools: ""               # 投递 agent 可用的 Claude Code 内置工具（--tools）；空 = 一个都没有
+  permission_mode: default        # 不跳过权限检查（ApplyPilot 用 bypassPermissions）；只放行下面的白名单
+  allowed_tools:                  # 预先放行的工具，其余一律自动拒绝
+    - mcp__playwright             # Playwright MCP 的浏览器工具
+    - mcp__gmail__search_emails   # 找验证码
+    - mcp__gmail__read_email
+    - mcp__gmail__send_email      # 只接受邮件投递的岗位
+  disallowed_tools:               # ApplyPilot 关掉的 Gmail 工具（多一层保险）
+    - mcp__gmail__draft_email
+    - mcp__gmail__modify_email
+    - mcp__gmail__delete_email
+    - mcp__gmail__download_attachment
+    - mcp__gmail__batch_modify_emails
+    - mcp__gmail__batch_delete_emails
+    - mcp__gmail__create_label
+    - mcp__gmail__update_label
+    - mcp__gmail__delete_label
+    - mcp__gmail__get_or_create_label
+    - mcp__gmail__list_email_labels
+    - mcp__gmail__create_filter
+    - mcp__gmail__list_filters
+    - mcp__gmail__get_filter
+    - mcp__gmail__delete_filter
+  chrome_profile_strip:           # 复制日常 Chrome 资料后删掉：保存的密码、银行卡、表单自动填充
+    - Login Data
+    - Login Data-journal
+    - Login Data For Account
+    - Login Data For Account-journal
+    - Web Data
+    - Web Data-journal
+    - Account Web Data
+    - Account Web Data-journal
 llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null

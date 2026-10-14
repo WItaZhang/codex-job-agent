@@ -2,14 +2,17 @@
 
 - read: look only.
 - prepare: may change analyses or the job pool, never the intent or the user's labels.
-- commit: the user's own decisions (labels, choices, tag fixes, initialization). The host must ask
-  the user to approve every call (see .claude/settings.json); these tools are never auto-allowed.
+- commit: the user's own decisions (labels, choices, tag fixes, initialization, starting an apply step). The
+  host must ask the user to approve every call (see .claude/settings.json); these tools are never auto-allowed.
 
 Job descriptions are untrusted; they are returned wrapped in a marker and never reach analysis.
 """
 
 import csv
 import json
+import re
+import shutil
+import subprocess
 import threading
 import time
 from datetime import date
@@ -20,7 +23,8 @@ import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from . import apply_list, applypilot_bridge, avature, funnel
+from . import applicant as applicant_files
+from . import apply_bridge, apply_list, applypilot_bridge, avature, funnel
 from .boards import BoardSpec, load_boards
 from .changes import (
     AddEntry,
@@ -32,6 +36,7 @@ from .changes import (
     SetLevel,
 )
 from .config import Settings
+from .cover_letter_check import BANNED_WORDS, check_letter
 from .discovery import DiscoveryError, fetch_board
 from .domain import DIMENSIONS, Compensation, IntentModel, InvariantError, Job, Level, Vocabulary
 from .engine import Engine
@@ -41,7 +46,7 @@ from .pretag import pretag
 from .prompts import ReasonMapping
 from .proposals import Analysis, LabelInput
 from .selection import select_daily
-from .store import Store
+from .store import Store, new_id
 
 TOOL_TIERS: dict[str, str] = {}
 
@@ -116,6 +121,7 @@ BACKFILL_RULES = {
 
 
 APPLY_COLUMNS = ("n", "job_id", "new", "wanted", "title", "company", "location", "url", "why")
+DEFAULT_LETTER_SKILL = Path(__file__).resolve().parents[2] / ".claude" / "skills" / "cover-letter"
 
 
 def _day(day: str | None) -> str:
@@ -126,6 +132,16 @@ def _day(day: str | None) -> str:
         return date.fromisoformat(day).isoformat()
     except ValueError as error:
         raise InvariantError(f"day must be a date like 2026-10-14, not {day!r}") from error
+
+
+def _chrome_found() -> bool:
+    from .vendor.applypilot import config
+
+    try:
+        config.get_chrome_path()
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _csv_cell(value) -> str:
@@ -189,6 +205,10 @@ class Toolbox:
         self.http_client = http_client  # None: each fetch opens its own client
         self._discovery: dict | None = None  # the current or last ApplyPilot discovery run
         self._boards: dict | None = None  # the current or last fetch_boards run
+        self._apply_run: dict | None = None  # the current or last apply step
+        self.apply_runner = None  # None: Chrome + Claude Code (apply_bridge.ChromeRunner); tests pass a fake
+        self.letter_renderer = None  # None: headless Chrome (apply_bridge.render_letter_pdf)
+        self.apply_in_background = True
         self.engine = Engine(store, settings, NoModelClient())
 
     # --- views --------------------------------------------------------------------------------
@@ -720,6 +740,334 @@ class Toolbox:
         not a signal: it changes neither the intent nor any analysis."""
         self.store.set_application_status(job_ids, status)
         return {"job_ids": job_ids, "status": status}
+
+    # --- applying (spec 4.10) ---------------------------------------------------------------------
+
+    def _applicant(self) -> applicant_files.Applicant:
+        return applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+
+    def _ready_applicant(self) -> applicant_files.Applicant:
+        applicant = self._applicant()
+        missing = applicant.missing_files()
+        if missing:
+            raise InvariantError(f"Applicant files are missing: {missing}")
+        return applicant
+
+    @_tool("read")
+    def get_apply_setup(self) -> dict:
+        """Whether applying is set up: the applicant files (never their contents), resumes, what is plugged in,
+        and the programs a run needs on this machine. Contact details are never returned."""
+        folder = applicant_files.folder(self.data_dir, self.settings.apply.applicant_dir)
+        programs = {name: shutil.which(name) is not None for name in ("claude", "npx")}
+        programs["chrome"] = _chrome_found()
+        try:
+            applicant = self._applicant()
+        except InvariantError as error:
+            return {"ready": False, "missing": [str(error)], "folder": str(folder), "programs": programs}
+        missing = applicant.missing_files()
+        return {
+            "ready": not missing,
+            "missing": missing,
+            "folder": str(folder),
+            "resumes": [{"id": r.id, "use_for": r.use_for} for r in applicant.resumes],
+            "resume_selection": str(applicant.resume_selection) if applicant.resume_selection else None,
+            "cover_letter_skill": str(applicant.cover_letter_skill or DEFAULT_LETTER_SKILL),
+            "careful_companies": list(applicant.careful_companies),
+            "review_first": self.settings.apply.review_first,
+            "programs": programs,
+        }
+
+    @_tool("read")
+    def get_cover_letter_materials(self) -> dict:
+        """What a cover-letter writer needs: the skill to follow (the user's own when configured) and its context
+        files, the resumes to choose from with the rules for choosing, and the checks save_cover_letter runs."""
+        applicant = self._ready_applicant()
+        skill = applicant.cover_letter_skill or DEFAULT_LETTER_SKILL
+        rules = self.settings.apply.cover_letter
+        return {
+            "skill": {
+                "source": str(skill),
+                "files": [
+                    {"path": str(path.relative_to(skill)), "text": path.read_text(encoding="utf-8")}
+                    for path in sorted(skill.rglob("*.md"))
+                ],
+            },
+            "context": [
+                {"path": str(path), "text": path.read_text(encoding="utf-8")} for path in applicant.cover_letter_context
+            ],
+            "resumes": [{"id": r.id, "use_for": r.use_for} for r in applicant.resumes],
+            "resume_selection": applicant.resume_selection.read_text(encoding="utf-8")
+            if applicant.resume_selection
+            else None,
+            "checks": {
+                "words": [rules.min_words, rules.max_words],
+                "max_attempts": rules.max_attempts,
+                "banned_words": BANNED_WORDS,
+                "other": "Start with 'Dear'; no em dash; no model self-talk; every number must appear in the "
+                "chosen resume or the posting.",
+            },
+        }
+
+    @_tool("read")
+    def get_resume(self, resume_id: str) -> dict:
+        """One resume's text (the source of every fact and number in a cover letter)."""
+        resume = self._ready_applicant().resume(resume_id)
+        return {"id": resume.id, "use_for": resume.use_for, "text": resume.text.read_text(encoding="utf-8")}
+
+    def _letter_problems(self, job_id: str, resume_id: str, text: str) -> list[str]:
+        resume = self._ready_applicant().resume(resume_id)
+        rules = self.settings.apply.cover_letter
+        job = self.store.job(job_id)
+        return check_letter(
+            text, resume.text.read_text(encoding="utf-8"), job.description, rules.min_words, rules.max_words
+        )
+
+    @_tool("read")
+    def check_cover_letter(self, job_id: str, resume_id: str, text: str) -> dict:
+        """Run the cover-letter checks without saving."""
+        return {"problems": self._letter_problems(job_id, resume_id, text)}
+
+    @_tool("prepare")
+    def save_cover_letter(self, job_id: str, resume_id: str, text: str) -> dict:
+        """Check a letter and, only if it passes, save it with the resume it was written from and print a
+        one-page PDF. Returns the problems otherwise; fix them and save again."""
+        problems = self._letter_problems(job_id, resume_id, text)
+        if problems:
+            return {"ok": False, "problems": problems}
+        applicant = self._ready_applicant()
+        name = json.loads(applicant.profile.read_text(encoding="utf-8"))["personal"]["full_name"]
+        folder = self.data_dir / self.settings.apply.letters_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", job_id)
+        txt, pdf = folder / f"{stem}.txt", folder / f"{stem}.pdf"
+        txt.write_text(text.strip() + "\n", encoding="utf-8")
+        renderer = self.letter_renderer or apply_bridge.render_letter_pdf
+        try:
+            renderer(text, pdf, name, apply_bridge.letter_date())
+        except (InvariantError, OSError, subprocess.SubprocessError) as error:
+            txt.unlink(missing_ok=True)
+            raise InvariantError(f"Could not print the letter: {error}") from error
+        self.store.save_cover_letter(job_id, resume_id, str(txt), str(pdf))
+        return {"ok": True, "problems": [], "txt": str(txt), "pdf": str(pdf)}
+
+    @staticmethod
+    def _next_phase(data: dict) -> str | None:
+        phases = data["phases"]
+        if phases["review"] == "proposed":
+            return "review"
+        if phases["review"] in ("done", "none") and phases["rest"] == "proposed":
+            return "rest"
+        return None
+
+    @staticmethod
+    def _phase_jobs(data: dict, phase: str) -> list[dict]:
+        wanted = {"review"} if phase == "review" else {"careful", "submit"}
+        return [job for job in data["jobs"] if job["mode"] in wanted]
+
+    def _phase_summary(self, batch_id: str, data: dict, phase: str) -> str:
+        jobs = self._phase_jobs(data, phase)
+
+        def names(items):
+            return "、".join(job["company"] or job["title"] for job in items) or "无"
+
+        if phase == "review":
+            return f"批次 {batch_id}：先投 {len(jobs)} 个，全部填好后停在提交前，由你检查后自己提交：{names(jobs)}"
+        submit = [job for job in jobs if job["mode"] == "submit"]
+        stop = [job for job in jobs if job["mode"] == "careful"]
+        return (
+            f"批次 {batch_id}：接着投 {len(jobs)} 个；自动提交 {len(submit)} 个：{names(submit)}；"
+            f"停在提交前 {len(stop)} 个：{names(stop)}"
+        )
+
+    def _batch_view(self, batch_id: str) -> dict:
+        data = self.store.apply_batch(batch_id)
+        phase = self._next_phase(data)
+        jobs = [
+            {**job, "letter": "ready" if self.store.cover_letter(job["job_id"]) else "missing"} for job in data["jobs"]
+        ]
+        return {
+            "batch_id": batch_id,
+            "day": data["day"],
+            "jobs": jobs,
+            "missing_letters": [job["job_id"] for job in jobs if job["letter"] == "missing"],
+            "phase": phase,
+            "summary": self._phase_summary(batch_id, data, phase) if phase else None,
+        }
+
+    @_tool("prepare")
+    def prepare_apply_batch(
+        self, day: str | None = None, size: int | None = None, exclude: list[str] | None = None
+    ) -> dict:
+        """The next batch from the apply list's pending jobs, in list order: the first ones (config) stop before
+        submit for the user to check, jobs at companies on the careful list always stop, the rest are submitted.
+        Lists missing cover letters and the summary of the first step for start_applying. `exclude`: jobs to
+        leave out, e.g. a letter that never passed its checks."""
+        applicant = self._ready_applicant()
+        day = _day(day)
+        listed = self.build_apply_list(day, limit=10**9)["jobs"]
+        skip = set(exclude or [])
+        items = [item for item in listed if item["job_id"] not in skip][: size or self.settings.apply.batch_size]
+        if not items:
+            raise InvariantError("No pending jobs on the apply list")
+        review_first = self.settings.apply.review_first
+        jobs = []
+        for n, item in enumerate(items, start=1):
+            if n <= review_first:
+                mode = "review"
+            elif applicant_files.careful(item["company"], applicant.careful_companies):
+                mode = "careful"
+            else:
+                mode = "submit"
+            jobs.append(
+                {"n": n, "job_id": item["job_id"], "title": item["title"], "company": item["company"], "mode": mode}
+            )
+        phases = {
+            "review": "proposed" if any(job["mode"] == "review" for job in jobs) else "none",
+            "rest": "proposed" if any(job["mode"] != "review" for job in jobs) else "none",
+        }
+        batch_id = new_id("batch")
+        self.store.save_apply_batch(batch_id, day, {"jobs": jobs, "phases": phases})
+        return self._batch_view(batch_id)
+
+    def _apply_spec(self, job_id: str, mode: str) -> apply_bridge.ApplySpec:
+        letter = self.store.cover_letter(job_id)
+        if letter is None:
+            raise InvariantError(f"No cover letter for {job_id}")
+        resume = self._ready_applicant().resume(letter["resume_id"])
+        job = self.store.job(job_id)
+        return apply_bridge.ApplySpec(
+            job_id=job.id,
+            mode=mode,
+            url=job.url,
+            title=job.title,
+            company=job.company,
+            resume_pdf=resume.pdf,
+            resume_text=resume.text,
+            letter_txt=Path(letter["txt_path"]),
+            letter_pdf=Path(letter["pdf_path"]),
+        )
+
+    @_tool("commit")
+    def start_applying(self, batch_id: str, summary: str) -> dict:
+        """Start the next step of an apply batch, as the user approved it: first the jobs to review (all stop
+        before submit), then, after the user checked those, the rest. `summary` must be that step's summary
+        exactly as shown to the user."""
+        if self._apply_run and self._apply_run["status"] == "running":
+            raise InvariantError("An apply step is still running; check apply_status")
+        self._sync_apply_results()
+        data = self.store.apply_batch(batch_id)
+        phase = self._next_phase(data)
+        if phase is None:
+            raise InvariantError(f"Batch {batch_id} has no step left to start")
+        if summary != self._phase_summary(batch_id, data, phase):
+            raise InvariantError("The summary does not match the step shown to the user")
+        jobs = self._phase_jobs(data, phase)
+        applications = self.store.applications()
+        moved = [job["job_id"] for job in jobs if applications.get(job["job_id"], {}).get("status") != "pending"]
+        if moved:
+            raise InvariantError(f"Jobs {moved} are no longer pending; prepare a new batch")
+        no_letter = [job["job_id"] for job in jobs if self.store.cover_letter(job["job_id"]) is None]
+        if no_letter:
+            raise InvariantError(f"Jobs {no_letter} have no cover letter yet")
+        applicant = self._ready_applicant()
+        specs = [self._apply_spec(job["job_id"], "submit" if job["mode"] == "submit" else "stop") for job in jobs]
+        data["phases"][phase] = "running"
+        self.store.save_apply_batch(batch_id, data.pop("day"), data)
+        self.store.record_decision(
+            None,
+            "apply",
+            {"batch_id": batch_id, "phase": phase, "job_ids": [s.job_id for s in specs], "approved_via": APPROVED_VIA},
+        )
+        run = {
+            "batch_id": batch_id,
+            "phase": phase,
+            "status": "running",
+            "error": None,
+            "jobs": [{**job, "state": "queued", "outcome": None} for job in jobs],
+        }
+        self._apply_run = run
+        runner = self.apply_runner or apply_bridge.ChromeRunner(self.data_dir, self.settings, applicant.profile)
+
+        def work():
+            # Each result is recorded as soon as it is known, through this thread's own connection, so a
+            # submitted application is never left "pending" (and applied to again) if the server stops.
+            writer = Store(self.store.path, self.settings)
+            try:
+                for item, spec in zip(run["jobs"], specs, strict=True):
+                    item["state"] = "running"
+                    outcome = runner(spec)
+                    note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
+                    writer.record_application_result(item["job_id"], outcome.status, note)
+                    item["outcome"], item["state"] = outcome, "done"
+                run["status"] = "done"
+            except Exception as error:  # the runner reports per-job failures itself; this is a broken run
+                run["error"] = f"{type(error).__name__}: {error}"
+                run["status"] = "failed"
+            finally:
+                writer.db.close()
+
+        if self.apply_in_background:
+            threading.Thread(target=work, name="intent-agent-apply", daemon=True).start()
+        else:
+            work()
+            self._sync_apply_results()
+        return {"batch_id": batch_id, "phase": phase, "status": run["status"], "jobs": len(specs)}
+
+    def _sync_apply_results(self) -> None:
+        """Close the batch step once its run has ended (results are already recorded by the run)."""
+        run = self._apply_run
+        if run is None:
+            return
+        if run["status"] in ("done", "failed") and not run.get("closed"):
+            data = self.store.apply_batch(run["batch_id"])
+            data["phases"][run["phase"]] = "done"
+            self.store.save_apply_batch(run["batch_id"], data.pop("day"), data)
+            run["closed"] = True
+
+    @_tool("prepare")
+    def apply_status(self) -> dict:
+        """Progress of the current apply step. Finished results go to the apply list (waiting: filled and stopped
+        before submit, for the user to check and submit in the open tab). Includes a checklist of other sites
+        opened and emails sent, and, once the step is done, the next step's summary for start_applying."""
+        run = self._apply_run
+        if run is None:
+            return {"status": "idle"}
+        self._sync_apply_results()
+        jobs, checklist = [], []
+        for item in run["jobs"]:
+            outcome = item["outcome"]
+            jobs.append(
+                {
+                    "n": item["n"],
+                    "job_id": item["job_id"],
+                    "title": item["title"],
+                    "company": item["company"],
+                    "mode": item["mode"],
+                    "state": item["state"],
+                    "result": outcome.status if outcome else None,
+                    "reason": outcome.reason if outcome else None,
+                    "notes": list(outcome.notes) if outcome else [],
+                }
+            )
+            if outcome and (outcome.other_sites or outcome.emails):
+                checklist.append(
+                    {"job_id": item["job_id"], "other_sites": list(outcome.other_sites), "emails": list(outcome.emails)}
+                )
+        upcoming = None
+        if run["status"] != "running":
+            data = self.store.apply_batch(run["batch_id"])
+            phase = self._next_phase(data)
+            if phase:
+                upcoming = {"phase": phase, "summary": self._phase_summary(run["batch_id"], data, phase)}
+        return {
+            "batch_id": run["batch_id"],
+            "phase": run["phase"],
+            "status": run["status"],
+            "error": run["error"],
+            "jobs": jobs,
+            "checklist": checklist,
+            "next": upcoming,
+        }
 
     @_tool("prepare")
     def rank_causes(self, analysis_id: str, order: list[str]) -> dict:

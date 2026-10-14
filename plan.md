@@ -573,9 +573,9 @@ configs/default.yaml   apply_list: {agreement_window_days: 7, shown: 20, dir: ap
 
 ---
 
-# 切片 6 计划：投递（模块④，借用 ApplyPilot 的 apply/）（用户 2026-10-14 选定规则；计划待确认）
+# 切片 6 计划：投递（模块④，借用 ApplyPilot 的 apply/）（用户 2026-10-14 确认；已实现）
 
-规则见 spec 4.10。**用户确认本计划之前，不写实现代码。**
+规则见 spec 4.10，实现时的补充见 spec §10 第 54–62 条。
 
 ## 1. 做什么，不做什么
 

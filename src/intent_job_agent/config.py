@@ -60,6 +60,35 @@ class ApplyList(_Section):
     dir: str
 
 
+class ApplyMCP(_Section):
+    playwright: str  # npm package with a pinned version (ApplyPilot runs @latest)
+    gmail: str
+
+
+class CoverLetterRules(_Section):
+    min_words: int = Field(gt=0)
+    max_words: int = Field(gt=0)
+    max_attempts: int = Field(gt=0)
+
+
+class Apply(_Section):
+    applicant_dir: str
+    batch_size: int = Field(gt=0)
+    review_first: int = Field(ge=0)
+    model: str
+    job_timeout_seconds: int = Field(gt=0)
+    letters_dir: str
+    logs_dir: str
+    cover_letter: CoverLetterRules
+    mcp: ApplyMCP
+    blocked_origins: list[str]
+    builtin_tools: str
+    permission_mode: str
+    allowed_tools: list[str]
+    disallowed_tools: list[str]
+    chrome_profile_strip: list[str]
+
+
 class LLM(_Section):
     provider: Literal["host", "fake", "anthropic", "openai_compatible"]
     model: str | None
@@ -79,6 +108,7 @@ class Settings(_Section):
     tagging: Tagging
     hard_review: HardReview
     apply_list: ApplyList
+    apply: Apply
     llm: LLM
     storage: Storage
 

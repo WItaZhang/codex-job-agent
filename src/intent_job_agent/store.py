@@ -37,13 +37,18 @@ CREATE TABLE IF NOT EXISTS backfills (job_id TEXT NOT NULL, dimension TEXT NOT N
                                       PRIMARY KEY (job_id, dimension));
 CREATE TABLE IF NOT EXISTS fetch_log (seq INTEGER PRIMARY KEY, day TEXT NOT NULL, kind TEXT NOT NULL, at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS applications (job_id TEXT PRIMARY KEY, status TEXT NOT NULL, first_listed TEXT NOT NULL,
-                                         updated_at TEXT NOT NULL);
+                                         updated_at TEXT NOT NULL, note TEXT);
+CREATE TABLE IF NOT EXISTS cover_letters (job_id TEXT PRIMARY KEY, resume_id TEXT NOT NULL, txt_path TEXT NOT NULL,
+                                          pdf_path TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS apply_batches (id TEXT PRIMARY KEY, day TEXT NOT NULL, data TEXT NOT NULL,
+                                          created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
 """
 
 
-APPLICATION_STATUSES = ("pending", "applied", "skipped")
+APPLICATION_STATUSES = ("pending", "applied", "skipped")  # what the user sets
+RUN_STATUSES = ("applied", "waiting", "failed")  # what an application run reports (waiting: stopped before submit)
 
 
 def _now() -> str:
@@ -57,11 +62,16 @@ def new_id(prefix: str) -> str:
 class Store:
     def __init__(self, path: str | Path, settings: Settings):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.path = Path(path)
         self.settings = settings
         # Callers serialize access (the MCP server holds a lock); the SDK may call from worker threads.
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(_SCHEMA)
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(applications)")}
+        if "note" not in columns:  # databases created before slice 6
+            with self.db:
+                self.db.execute("ALTER TABLE applications ADD COLUMN note TEXT")
 
     # --- jobs and labels (never touch the intent) ---------------------------------
 
@@ -259,9 +269,13 @@ class Store:
     # --- the apply list: what the user did with listed jobs (never touches the intent or labels) ---
 
     def applications(self) -> dict[str, dict]:
-        """Listed jobs by id: status (pending / applied / skipped) and the day they were first listed."""
-        rows = self.db.execute("SELECT job_id, status, first_listed FROM applications")
-        return {row["job_id"]: {"status": row["status"], "first_listed": row["first_listed"]} for row in rows}
+        """Listed jobs by id: status (pending / applied / skipped, or waiting / failed after a run), the day they
+        were first listed and the last run's note."""
+        rows = self.db.execute("SELECT job_id, status, first_listed, note FROM applications")
+        return {
+            row["job_id"]: {"status": row["status"], "first_listed": row["first_listed"], "note": row["note"]}
+            for row in rows
+        }
 
     def list_applications(self, job_ids: list[str], day: str) -> None:
         """Jobs entering the list for the first time start as pending; jobs listed before keep their status."""
@@ -281,9 +295,45 @@ class Store:
             raise InvariantError(f"Jobs {unknown} were never on the apply list")
         with self.db:
             self.db.executemany(
-                "UPDATE applications SET status = ?, updated_at = ? WHERE job_id = ?",
+                "UPDATE applications SET status = ?, updated_at = ?, note = NULL WHERE job_id = ?",
                 [(status, _now(), job_id) for job_id in job_ids],
             )
+
+    def record_application_result(self, job_id: str, status: str, note: str | None) -> None:
+        if status not in RUN_STATUSES:
+            raise InvariantError(f"Run status must be one of {list(RUN_STATUSES)}, not {status!r}")
+        with self.db:
+            self.db.execute(
+                "UPDATE applications SET status = ?, note = ?, updated_at = ? WHERE job_id = ?",
+                (status, note, _now(), job_id),
+            )
+
+    def save_cover_letter(self, job_id: str, resume_id: str, txt_path: str, pdf_path: str) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO cover_letters (job_id, resume_id, txt_path, pdf_path, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (job_id, resume_id, txt_path, pdf_path, _now()),
+            )
+
+    def cover_letter(self, job_id: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT resume_id, txt_path, pdf_path FROM cover_letters WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def save_apply_batch(self, batch_id: str, day: str, data: dict) -> None:
+        with self.db:
+            self.db.execute(
+                "INSERT OR REPLACE INTO apply_batches (id, day, data, created_at) VALUES (?, ?, ?, ?)",
+                (batch_id, day, json.dumps(data, ensure_ascii=False), _now()),
+            )
+
+    def apply_batch(self, batch_id: str) -> dict:
+        row = self.db.execute("SELECT day, data FROM apply_batches WHERE id = ?", (batch_id,)).fetchone()
+        if row is None:
+            raise InvariantError(f"Unknown apply batch {batch_id}")
+        return {"day": row["day"], **json.loads(row["data"])}
 
     # --- intent: initialize once, then change only through accepted proposals ---------
 

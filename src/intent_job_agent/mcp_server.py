@@ -56,7 +56,14 @@ Daily flow (project skills /fetch-jobs and /today):
 Apply list (project skill /apply-list):
 - build_apply_list writes the day's list (JSON and CSV) and returns the agreement rate and the first jobs; show
   the agreement line first, as returned. mark_applications records applied / skipped / back to pending; it is not
-  a label and never a reason to propose an intent change."""
+  a label and never a reason to propose an intent change.
+Applying (project skill /apply):
+- get_apply_setup first. prepare_apply_batch picks the batch; cover letters are written by cover-letter-writer
+  subagents and saved with save_cover_letter, which checks them.
+- start_applying starts one step: first the reviewed jobs (all stop before submit), then, after the user checked
+  them and said to continue, the rest. Call it only on the user's go for that step, with that step's summary
+  exactly as shown. Poll apply_status; report waiting tabs, failures with their notes, and the checklist.
+- Never ask for or show passwords, an SSN, card details or keys in chat."""
 
 
 def _guarded(fn, lock: threading.Lock):

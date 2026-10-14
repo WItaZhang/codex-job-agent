@@ -1,0 +1,19 @@
+# Applicant files for /apply (spec 4.10). Copy to data/local/applicant/applicant.yaml (git-ignored).
+# Paths are relative to that folder, or absolute (for example a personal knowledge base elsewhere).
+
+profile: profile.json             # ApplyPilot's format: see profile.example.json. Contact details, work
+                                  # authorization, salary, EEO defaults and your job-site password, written by you.
+                                  # Never put an SSN or card details in it.
+
+resumes:                          # one or more; the text file is what cover letters are checked against
+  - id: main
+    pdf: resumes/main.pdf
+    text: resumes/main.md
+    use_for: Any role             # when to choose this one
+
+resume_selection: null            # optional: a file with your own rules for choosing a resume
+cover_letter_skill: null          # optional: your own cover-letter skill folder (with SKILL.md); otherwise the
+                                  # project's general skill in .claude/skills/cover-letter is used
+cover_letter_context: []          # optional: other files your skill needs, given to the writer read-only
+
+careful_companies: []             # applications to these companies always stop before submit, e.g. [Stripe]
