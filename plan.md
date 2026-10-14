@@ -497,3 +497,76 @@ CLAUDE.md      "岗位来源"一行加 Avature（已改）
 实现后的真实核对需要你同意，在本机运行，只读：
 1. 按第 2 节第 1 步找候选公司，你挑选。
 2. 运行 `fetch_boards`，核对 42 个手动导入的联想岗位都计入 `already_known`，各家的新增数量符合标题和国家过滤的预期。
+
+---
+
+# 切片 5 计划：投递清单（模块③）（用户 2026-10-14 选定 1A 2A 3A 4A；计划待确认）
+
+规则见 spec 4.9。**用户确认本计划之前，不写实现代码。**
+
+## 1. 做什么，不做什么
+
+- 做：spec 4.9 的清单（谁进、排序、为什么）、待投 / 已投 / 跳过状态、最近 7 个标注日的一致率、`/apply-list` 命令。
+- 不做：资格判断（等切片 3 的背景层）、自动投递、定时生成清单（切片 4）、把"跳过"当成信号。
+
+## 2. 实际会怎么用
+
+```
+你：/apply-list
+agent：最近 7 个标注日一致率 87%（45/52；想投 18/20，不要 27/32）
+       待投 63 个，其中新的 12 个。文件：data/local/apply/2026-10-14.json、.csv
+       1 [新][你标了想投] Senior ML Engineer — Acme · us.seattle · https://…
+       2 [新] ML Engineer, Ads — Beta · us.new_york · https://…
+            role.ml_engineering 强烈偏好；specialty.recsys 偏好；work_mode.onsite 回避
+       …（共列 20 个）
+       投完可以说"1-5 已投，7 跳过"。
+你：1-5 已投，7 跳过
+agent：已更新。还剩 57 个待投。
+```
+
+## 3. 样例（合成，写进测试）
+
+| # | 情况 | 结果 |
+| --- | --- | --- |
+| 1 | A：已打标签、在架、够推荐线，从没给你看过 | 进，标"新"，列出命中的条目和等级 |
+| 2 | B：分数够，但在伦敦，被 `location.us: require` 排除 | 不进 |
+| 3 | C：分数够，你标过 reject；后来一次修改把这条 label 标成已过时 | 不进 |
+| 4 | D：分数不够，你标过 want | 进，排在最前，注明"你标了想投" |
+| 5 | E：Greenhouse 岗位，最新一次抓取里已经没有了 | 不进（已下架） |
+| 6 | F：还没打完整标签 | 不进 |
+| 7 | 把 A 标成已投、G 标成跳过，再生成 | A、G 不再出现；其他待投的不再标"新" |
+| 8 | 确认一个修改后 H 不够推荐线了，之后又改回来 | H 先消失；再出现时不标"新" |
+| 9 | label 分布在 9 个标注日（中间隔了几天没打），包括 misread 和已过时的 | 只算最近 7 个标注日里未过时的 want / reject，分方向计数 |
+| 10 | 一条 label 都没有 | 只显示"还没有 label"，不给百分比 |
+| 11 | 薪资低于下限的岗位仍够推荐线 | 进，"为什么"里多一句"薪资低于下限" |
+
+## 4. 模块
+
+```
+src/intent_job_agent/
+  apply_list.py   纯逻辑：谁进清单、排序、"为什么"的文字、标注日窗口和一致率
+                  （复用 scoring.score_job 和 replay.evaluate，不另写打分）
+  store.py        新表 applications(job_id, status, first_listed, updated_at)
+  tools.py        build_apply_list(day=None)：准备级。写 apply/<day>.json 和 .csv，返回一致率、
+                    待投数、新增数和前 N 个（带编号和 job_id）
+                  mark_applications(job_ids, status)：准备级。status 为 待投 / 已投 / 跳过；
+                    不放进定时任务能用的工具
+configs/default.yaml   apply_list: {agreement_window_days: 7, shown: 20, dir: apply}
+.claude/skills/apply-list/SKILL.md
+```
+
+## 5. 需要你确认的取舍
+
+1. 标过 want 的排最前，其余按分数排。
+2. 不展示分值：spec 3.1 规定用户只看到等级文字。我在问题 4 里说的"分数"改为"为什么进清单"。
+3. 标"已投 / 跳过"用准备级工具，不弹窗：它不改意图、不改 label，标错了可以改回待投。如果你希望它也弹窗，就改成提交级。
+4. 清单里某个岗位的标签读错了：用已有的 `correct_tags` 修正（弹窗），修正后下次生成时重新判断。
+5. 文件按日期命名（`apply/2026-10-14.json`），同一天重复生成会覆盖。
+
+## 6. 测试（先写，离线，合成数据）
+
+- 样例 1–11。
+- 文件：JSON 字段齐全、CSV 有表头、都不含岗位原文；写在数据目录的 `apply/` 下。
+- 工具分级：两个新工具都是准备级；`mark_applications` 不在定时任务的工具里；状态值只接受三种。
+- `/apply-list` skill 里调用的工具都存在，并且不预先批准提交级工具。
+- 已有的测试继续通过。
