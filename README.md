@@ -55,6 +55,8 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 1. 准备投递资料（都在 `data/local/applicant/`，git 不管）：
    - `applicant.yaml`：参照 [示例](docs/examples/applicant/applicant.example.yaml)。写明简历（PDF 和文本）、"停在提交前"的公司名单；
      可以接入自己的选简历规则和 cover-letter skill（比如指向本机的个人知识库）。
+   - 可选 `apply_agent_read`：投递 agent 可以只读的目录（比如你的知识库），用来回答申请表里的问题。不能是根目录、用户目录，
+     也不能包含 `data/local/`。写求职信的子 agent 也能读文件（只读），读项目以外的目录时会弹窗问你。
    - `profile.json`：ApplyPilot 的格式，参照 [示例](docs/examples/applicant/profile.example.json)。联系方式、工作许可、薪资、招聘网站密码由你自己填写；
      不要写 SSN 和银行卡。
 2. 本机需要：Chrome、Node.js（`npx`）、Claude Code 命令行。可选：Gmail MCP 授权（读验证码）、`data/local/.env` 里的 `CAPSOLVER_API_KEY`。

@@ -34,6 +34,7 @@ class Applicant(_Model):
     cover_letter_skill: Path | None = None  # optional own skill directory (with SKILL.md)
     cover_letter_context: list[Path] = []  # optional extra files that skill needs
     careful_companies: list[str] = []  # applications to these always stop before submit
+    apply_agent_read: list[Path] = []  # folders the apply agent may read (read-only), e.g. a knowledge base
 
     def resume(self, resume_id: str) -> Resume:
         for resume in self.resumes:
@@ -84,8 +85,29 @@ def load(data_dir: Path, applicant_dir: str) -> Applicant:
             "resume_selection": resolve(applicant.resume_selection),
             "cover_letter_skill": resolve(applicant.cover_letter_skill),
             "cover_letter_context": [resolve(p) for p in applicant.cover_letter_context],
+            "apply_agent_read": [resolve(p) for p in applicant.apply_agent_read],
         }
     )
+
+
+def read_dir_problems(applicant: Applicant, data_dir: Path, home: Path | None = None) -> list[str]:
+    """Why a folder may not be opened to the apply agent (spec 4.10 item 6): it must exist and must not be the
+    root or the home folder, contain or sit inside the data directory, or contain the applicant profile."""
+    home = (home or Path.home()).resolve()
+    data = Path(data_dir).resolve()
+    profile = applicant.profile.resolve()
+    problems = []
+    for folder in applicant.apply_agent_read:
+        path = folder.resolve()
+        if not path.is_dir():
+            problems.append(f"{folder} is not a folder")
+        elif path == Path(path.anchor) or path == home:
+            problems.append(f"{folder} is the root or home folder")
+        elif path == data or path in data.parents or data in path.parents:
+            problems.append(f"{folder} contains or is inside the data directory {data}")
+        elif path in profile.parents:
+            problems.append(f"{folder} contains the applicant profile {profile}")
+    return problems
 
 
 def careful(company: str, names: list[str]) -> bool:

@@ -16,7 +16,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 `get_apply_setup()`：
 
 - 没有投递资料：帮用户在它给出的目录里建好：
-  - `applicant.yaml`：参照 `docs/examples/applicant/applicant.example.yaml`。简历、选简历的规则、自己的 cover-letter skill 都可以指向用户自己的知识库。
+  - `applicant.yaml`：参照 `docs/examples/applicant/applicant.example.yaml`。简历、选简历的规则、自己的 cover-letter skill 都可以指向用户自己的知识库。用户想让投递 agent 读知识库来回答申请表的问题时，把知识库目录写进 `apply_agent_read`（只读）。
   - `profile.json`：参照 `docs/examples/applicant/profile.example.json`（ApplyPilot 的格式）。联系方式、工作许可、薪资这些由用户填写；密码只由用户自己写进文件，不在对话里传，也不要读出来。不要写 SSN 和银行卡。
 - programs 里缺 claude、npx 或 Chrome：告诉用户装好再来。Gmail 读验证码和 CapSolver 是可选的，由用户自己配置。
 

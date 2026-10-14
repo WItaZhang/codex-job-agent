@@ -17,3 +17,7 @@ cover_letter_skill: null          # optional: your own cover-letter skill folder
 cover_letter_context: []          # optional: other files your skill needs, given to the writer read-only
 
 careful_companies: []             # applications to these companies always stop before submit, e.g. [Stripe]
+
+apply_agent_read: []              # optional: folders the apply agent may read (read-only) to answer application
+                                  # questions, e.g. your knowledge base. Not the root or home folder, not anything
+                                  # containing data/local or this profile.

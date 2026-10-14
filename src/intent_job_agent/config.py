@@ -83,6 +83,7 @@ class Apply(_Section):
     mcp: ApplyMCP
     blocked_origins: list[str]
     builtin_tools: str
+    file_tools: str
     permission_mode: str
     allowed_tools: list[str]
     disallowed_tools: list[str]

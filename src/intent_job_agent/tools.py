@@ -751,6 +751,9 @@ class Toolbox:
         missing = applicant.missing_files()
         if missing:
             raise InvariantError(f"Applicant files are missing: {missing}")
+        unsafe = applicant_files.read_dir_problems(applicant, self.data_dir)
+        if unsafe:
+            raise InvariantError(f"apply_agent_read folders that would expose private files: {unsafe}")
         return applicant
 
     @_tool("read")
@@ -764,7 +767,7 @@ class Toolbox:
             applicant = self._applicant()
         except InvariantError as error:
             return {"ready": False, "missing": [str(error)], "folder": str(folder), "programs": programs}
-        missing = applicant.missing_files()
+        missing = applicant.missing_files() + applicant_files.read_dir_problems(applicant, self.data_dir)
         return {
             "ready": not missing,
             "missing": missing,
@@ -773,6 +776,7 @@ class Toolbox:
             "resume_selection": str(applicant.resume_selection) if applicant.resume_selection else None,
             "cover_letter_skill": str(applicant.cover_letter_skill or DEFAULT_LETTER_SKILL),
             "careful_companies": list(applicant.careful_companies),
+            "apply_agent_read": [str(path) for path in applicant.apply_agent_read],
             "review_first": self.settings.apply.review_first,
             "programs": programs,
         }
@@ -986,7 +990,9 @@ class Toolbox:
             "jobs": [{**job, "state": "queued", "outcome": None} for job in jobs],
         }
         self._apply_run = run
-        runner = self.apply_runner or apply_bridge.ChromeRunner(self.data_dir, self.settings, applicant.profile)
+        runner = self.apply_runner or apply_bridge.ChromeRunner(
+            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
+        )
 
         def work():
             # Each result is recorded as soon as it is known, through this thread's own connection, so a

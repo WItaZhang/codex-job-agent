@@ -91,6 +91,7 @@ apply:                            # 投递（spec 4.10）
     - https://my.1password.com
     - https://www.lastpass.com
   builtin_tools: ""               # 投递 agent 可用的 Claude Code 内置工具（--tools）；空 = 一个都没有
+  file_tools: "Read,Glob,Grep"    # applicant.yaml 列了 apply_agent_read 时改用这些（只读），并以 --restricted 运行
   permission_mode: default        # 不跳过权限检查（ApplyPilot 用 bypassPermissions）；只放行下面的白名单
   allowed_tools:                  # 预先放行的工具，其余一律自动拒绝
     - mcp__playwright             # Playwright MCP 的浏览器工具

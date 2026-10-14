@@ -6,6 +6,10 @@
       "mcp__intent-agent__initialize_intent",
       "mcp__intent-agent__record_labels",
       "mcp__intent-agent__start_applying"
+    ],
+    "deny": [
+      "Read(./data/local/.env)",
+      "Read(./data/local/applicant/profile.json)"
     ]
   }
 }

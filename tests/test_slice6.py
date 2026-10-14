@@ -4,6 +4,7 @@ All data is SYNTHETIC; nothing here starts Chrome or Claude Code."""
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 import yaml
@@ -49,7 +50,7 @@ def letter(extra: str = "", words: int = 300) -> str:
     return f"Dear Hiring Team,\n\n{body} {extra}\n\nAUC rose from 0.650 to 0.671 across 12 products.\n\nSam Example"
 
 
-def write_applicant(data, careful=("Stripe",), skill_dir=None):
+def write_applicant(data, careful=("Stripe",), skill_dir=None, read_dirs=()):
     folder = data / "applicant"
     (folder / "resumes").mkdir(parents=True)
     (folder / "profile.json").write_text(json.dumps(PROFILE), encoding="utf-8")
@@ -64,6 +65,8 @@ def write_applicant(data, careful=("Stripe",), skill_dir=None):
         ],
         "careful_companies": list(careful),
     }
+    if read_dirs:
+        config["apply_agent_read"] = [str(d) for d in read_dirs]
     if skill_dir:
         config["cover_letter_skill"] = str(skill_dir)
         config["cover_letter_context"] = [str(skill_dir.parent / "facts.md")]
@@ -453,9 +456,11 @@ def test_notes_and_audit_from_the_stream():
 
 
 FAKE_CLAUDE = """#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 prompt = sys.stdin.read()
 assert "ADDITIONAL RULES" in prompt
+if os.environ.get("FAKE_ARGS"):
+    open(os.environ["FAKE_ARGS"], "w").write(json.dumps({"argv": sys.argv[1:], "prompt": prompt}))
 def say(message):
     print(json.dumps(message), flush=True)
 say({"type": "assistant", "message": {"content": [
@@ -486,6 +491,61 @@ def test_one_application_run_reads_the_stream(box, tmp_path, monkeypatch):
     assert stopped.status == "waiting"
 
 
+def test_reading_files_runs_restricted_to_the_listed_folders(box, tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "claude"
+    fake.write_text(FAKE_CLAUDE, encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{__import__('os').environ['PATH']}")
+    monkeypatch.setenv("FAKE_ARGS", str(tmp_path / "args.json"))
+    kb = tmp_path / "kb"
+    kb.mkdir()
+    write_applicant(box.data_dir, read_dirs=[kb])
+    jobs = add_jobs(box, ["Acme"])
+    write_letters(box, jobs)
+    applicant = box._applicant()
+    spec = box._apply_spec(jobs[0], "submit")
+    apply_bridge.run_application(spec, box.data_dir, box.settings, applicant.profile, 9, applicant.apply_agent_read)
+    seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
+    argv = seen["argv"]
+    assert "--restricted" in argv and argv[argv.index("--tools") + 1] == "Read,Glob,Grep"
+    assert argv[argv.index("--add-dir") + 1] == str(kb)
+    deny = json.loads(argv[argv.index("--settings") + 1])["permissions"]["deny"]
+    assert f"Read(/{box.data_dir.resolve()}/**)" in deny and f"Read(/{applicant.profile.resolve()})" in deny
+    assert str(kb) in seen["prompt"] and "read-only" in seen["prompt"]
+
+
+def test_without_folders_the_apply_agent_has_no_file_tools(tmp_path):
+    command = apply_bridge.claude_command(settings(), tmp_path / "mcp.json")
+    assert command[command.index("--tools") + 1] == "" and "--restricted" not in command
+    assert "--add-dir" not in command and "FILES" not in apply_bridge.extra_rules("submit")
+
+
+@pytest.mark.parametrize("where", ["root", "home", "data_parent", "inside_data", "missing", "has_profile"])
+def test_folders_that_would_expose_private_files_are_refused(box, tmp_path, where):
+    outside_profile = tmp_path / "secrets"
+    outside_profile.mkdir()
+    folders = {
+        "root": Path("/"),
+        "home": Path.home(),
+        "data_parent": box.data_dir.parent,
+        "inside_data": box.data_dir / "applicant",
+        "missing": tmp_path / "nope",
+        "has_profile": outside_profile,
+    }
+    write_applicant(box.data_dir, read_dirs=[folders[where]])
+    if where == "has_profile":  # a profile kept outside the data directory is protected too
+        config = yaml.safe_load((box.data_dir / "applicant" / "applicant.yaml").read_text(encoding="utf-8"))
+        (outside_profile / "profile.json").write_text(json.dumps(PROFILE), encoding="utf-8")
+        config["profile"] = str(outside_profile / "profile.json")
+        (box.data_dir / "applicant" / "applicant.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    setup = box.get_apply_setup()
+    assert setup["ready"] is False and setup["missing"]
+    with pytest.raises(InvariantError):
+        box.prepare_apply_batch(DAY)
+
+
 def test_pdf_page_count():
     assert apply_bridge.pdf_page_count(b"<< /Type /Page >> << /Type /Pages >>") == 1
 
@@ -513,7 +573,12 @@ def test_cover_letter_writer_cannot_commit_or_apply():
     meta, _ = frontmatter(ROOT / ".claude/agents/cover-letter-writer.md")
     assert meta["name"] == "cover-letter-writer" and meta["model"] == "sonnet"
     tools = {t.strip() for t in str(meta["tools"]).split(",")}
-    assert tools == {
+    assert tools == {"Read", "Glob", "Grep"} | {  # may read files, never write them
         f"mcp__intent-agent__{name}"
         for name in ("get_cover_letter_materials", "get_resume", "show_job", "check_cover_letter", "save_cover_letter")
     }
+
+
+def test_no_agent_may_read_the_applicant_profile_or_keys():
+    deny = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))["permissions"]["deny"]
+    assert {"Read(./data/local/.env)", "Read(./data/local/applicant/profile.json)"} <= set(deny)
