@@ -677,3 +677,128 @@ configs/default.yaml                   apply: 字数范围、worker 数、模型
 - 招聘网站可能封号；用 CapSolver 破解验证码违反多数网站的条款。
 - 投递 agent 有你的密码和 Gmail 权限，同时在读不可信的网页；网页里的注入文本可能诱导它做别的事。
 - 每个岗位跑一次 Claude Code，几分钟一个，消耗你的 Claude 额度。
+
+---
+
+# 切片 2h 计划：接入 BOSS 直聘（草案，2026-10-13，待用户确认）
+
+来源：2026-10-13 用户要求把 BOSS 直聘接为岗位来源。
+**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§7、§8，§10 从第 49 条起）和 CLAUDE.md 的"岗位来源"一行，再写测试，最后写代码。
+
+## 0. 先说清楚三件事
+
+1. **BOSS 没有公开接口，也不能匿名读取。** 搜索和详情都要登录。接口要带浏览器脚本生成的风控令牌（`__zp_stoken__`）；请求频率一高就会被限流、要求验证，严重时账号会被限制。它的用户协议禁止自动抓取。风险由**你自己的 BOSS 账号**承担：性质和 2c 里 LinkedIn 的风险一样，但更直接，那边最多封 IP，这边是封账号。
+2. **不绕过风控。** 不自己生成或伪造令牌，不做无头浏览器反检测，不自动通过验证码或安全验证，也不换账号、换 IP 来躲限制。遇到"环境异常"、安全验证或限流就停下，把情况报告给你，由你在浏览器里处理。
+3. **按现在的意图，BOSS 的岗位一个都进不了推荐。** 当前意图是 `location.us：必须`，代码预筛会把能读出"中国"的岗位全部放到一边。接入后，要先用显式修改（`propose_intent_edit`）把中国加进来，例如 `location.china：必须`，与美国是"或"的关系。这是运行时的操作，不属于本切片的开发。
+
+## 1. 接入方式（取舍 1）
+
+| | 做法 | 好处 | 代价 |
+| --- | --- | --- | --- |
+| **(a) 推荐** | 依赖开源的 boss-cli（GitHub `jackwener/boss-cli`，PyPI 包 `kabi-boss-cli`，pyproject 声明 Apache-2.0）。你自己在终端运行 `uv run boss login`，它会从你已登录的浏览器读取 BOSS 的 Cookie，也可以用 App 扫码。本项目只调用它的只读命令：`boss search … --json`、`boss detail … --json` 和 `boss status` | 能进入 `/fetch-jobs`，以后也能进定时任务；BOSS 改版时多半上游先修好，我们升级版本就行；它遇到安全拦截（code 121/122）会直接报错，不绕过 | 账号风险，见第 0 节第 1 条；登录态过期后要你重新运行 `boss login`，多久过期一次要实际用过才知道 |
+| (b) | agent 用 Claude in Chrome，在你已登录的 Chrome 里打开搜索页，读取岗位卡片和详情，整理成 JSON 后用 `import_jobs` 导入 | 用的就是你本人的浏览器，最接近正常浏览 | 只能在对话中运行；每个岗位都要打开页面，慢，也费 token；进不了定时任务；spec §7 写明 v1 不做浏览器自动化，选这个就要改 spec |
+| (c) | 不做自动化：你把感兴趣的岗位文本贴进导入文件，用现有的 `import_jobs` 导入 | 零风险，零开发 | 全靠手工 |
+
+(a) 的几点细节：
+- **作为依赖使用，不复制代码**，这一点和 ApplyPilot 不同。逆向得来的接口要经常跟着 BOSS 改，如果 vendor 进来，就得我们自己维护。版本锁在 `uv.lock` 里，升级时运行 `uv lock --upgrade-package kabi-boss-cli`。
+- **通过命令行的 JSON 输出对接，不 import 它的内部类。** 它的 `--json` 输出是带版本号的固定格式（`ok`、`schema_version`、`data`、`error.code`），比内部 Python 接口稳定。
+- **调用封装里写死命令白名单**，只允许 `search`、`detail`、`status` 三个命令。打招呼、投递、聊天、读简历这些操作一律不调用。
+- 实现之前，我会通读它读取 Cookie 的代码，确认它只读 zhipin.com 的 Cookie、也只发往 zhipin.com，然后锁定这个版本。登录凭证保存在它自己的 `~/.config/boss-cli/` 目录里，本项目和 agent 都不读取，也不显示。
+
+## 2. 做什么，不做什么（按 (a) 写）
+
+| 做 | 不做 |
+| --- | --- |
+| `data/local/boss.yaml`：搜索词 × 城市，加上 BOSS 自带的筛选条件（经验、学历、职位类型、薪资），格式见第 3 节。第一次由 agent 按你的意图起草，你看过之后才用 | 打招呼、投递、聊天，读取你的简历或投递记录 |
+| `discover_jobs` 新增来源 `boss`：有 `boss.yaml` 就运行，在后台跑，结果在 `discovery_status` 里单独报告新增数和错误 | 生成或伪造风控令牌、无头浏览器、自动通过验证、轮换代理 |
+| 准备级工具 `check_boss(query, city)`：检查登录状态，再搜一页，只返回总数和几个样例（标题、薪资、经验），不入库 | 保存招聘者（HR）的姓名、职位、头像和活跃状态 |
+| 只为**新的、并且通过过滤的**岗位读取详情，每次有数量上限 | 判断岗位是否下架（见取舍 3） |
+| 预打标签认识 BOSS 的结构化字段：城市、学历、经验、实习（第 4 节） | 国内大厂的校招官网（见第 7 节） |
+
+## 3. 实际会怎么用
+
+1. 你先在浏览器里登录 zhipin.com，再在终端运行一次 `uv run boss login`。
+2. agent 按你的意图起草 `boss.yaml` 给你看，例如：
+
+   ```yaml
+   searches:
+     - query: 算法工程师
+       cities: [北京, 上海, 杭州]
+       exp: 在校/应届
+       job_type: 全职
+       pages: 1            # 每个"搜索词 × 城市"读几页，默认 1
+   title_exclude: [实习, 销售, 外包]
+   ```
+
+   搜索词、城市、筛选条件和 `title_exclude` 都是来源范围，不属于意图，校准不会修改它们（和 `searches.yaml` 一样）。
+3. agent 先用 `check_boss` 验证登录状态，并试跑其中一个搜索。之后 `/fetch-jobs` 照常运行，BOSS 只是多了一个来源。
+4. 结果例如 `{"source": "boss", "searched_pages": 3, "cards": 45, "filtered_out": 6, "already_known": 0, "new": 30, "details_deferred": 9, "errors": []}`。
+5. 登录过期时，结果里只有一句提示："BOSS 登录已过期：在浏览器里打开 zhipin.com，再运行 `uv run boss login`"。其他来源照常运行。
+
+## 4. 岗位怎么落库
+
+| 本项目字段 | 来自 BOSS |
+| --- | --- |
+| `id` | `boss-` 加 `encryptJobId`。这个 ID 是稳定的，同一个岗位出现在多次搜索里也只算一次 |
+| `url` | `https://www.zhipin.com/job_detail/<encryptJobId>.html` |
+| `title` / `company` | 职位名 / 品牌名 |
+| `location` | 城市名，来自结构化字段，例如"北京"；区和商圈放进 attributes |
+| `description` | 详情里的职位描述全文。它是不可信内容，只用来打标签 |
+| `salary` | "20-40K·15薪" 解析为人民币、按月、2 万到 4 万，"15薪"放进 attributes；"200-300元/天"这类按天计的、"面议"都记为未知 |
+| `attributes` | 经验、学历、行业、规模、融资阶段、技能标签、福利标签、区、商圈 |
+| 不保存 | 招聘者的姓名、职位、头像和活跃状态；`securityId`、`lid` 这类和会话相关的令牌 |
+
+预打标签（由代码完成，不用模型）新增以下几项。它们都来自结构化字段，所以都算"有把握"：
+- **城市**：加一张中国城市表，把中文名映射为 `location.china.<拼音>`，例如北京 → `location.china.beijing`。手动导入时写中文城市名也能识别。
+- **学历**：本科 → `degree_requirement.bachelors`，硕士 → `masters`，博士 → `phd`。学历不限、大专、中专不打标签，留给子 agent 判断。
+- **经验 → seniority**（取舍 4）：在校/应届 → `new_grad`；1 年以内、1-3 年 → `junior`；3-5 年 → `mid`；5-10 年、10 年以上 → `senior`；经验不限不打标签。
+- **实习**：标题含"实习"，或者职位类型是实习 → `employment_type.internship`。
+- 打标签规则（`get_tagging_rules`）补充几条中文写法，比如校招/应届、统招本科，以及"博士优先"不算学历要求。
+
+## 5. 取舍（请逐条选）
+
+1. **接入方式**：(a) boss-cli（推荐）/ (b) Claude in Chrome / (c) 手动导入。选 (a)，就等于你知情接受了第 0 节第 1 条的账号风险。
+2. **每次抓取的量**：(a) 每次最多读 10 页搜索结果、30 个详情，请求间隔至少 3 秒（推荐，写在配置里）/ (b) 更保守：5 页、15 个详情 / (c) 你来给数字。超出详情上限的岗位本次不入库，下次如果还在搜索结果里，会接着读。
+3. **下架判断**：(a) 和 JobSpy 一样，一律视为在架（推荐）。每日 7+3 只选没展示过的岗位，所以影响不大，等做投递清单时再考虑 / (b) 连续 N 天没在任何搜索结果里出现，就不再进入推荐。
+4. **经验到 seniority 的映射**：(a) 用第 4 节的表（推荐）/ (b) "1 年以内"也算 `new_grad` / (c) 经验字段只放进 attributes，不预打标签，全部交给子 agent。
+5. **定时任务里能不能抓 BOSS**（定时任务要到切片 4 才做，这里先把规则定下来）：(a) 能，和其他来源一样属于准备级（推荐）/ (b) 不能，只在你在对话中时抓取，这样出现验证时你能当场处理。
+
+## 6. 模块
+
+```
+src/intent_job_agent/
+  boss.py        新增。解析部分是纯函数：search / detail 的 JSON 输出 → 卡片、Job；薪资文本解析。
+                 调用部分：命令白名单（search / detail / status）、请求间隔、错误分类
+                 （not_authenticated、rate_limited、安全拦截 → 整个 BOSS 来源停下）。命令运行器可以注入，测试时换成假的。
+  pretag.py      中国城市表；学历、经验、实习字段
+  tools.py       discover_jobs 加 boss 来源；check_boss（准备级，定时任务能否调用按取舍 5）
+  config / boards  读取 boss.yaml（只能放在数据目录下）
+  domain.py      Job.source 加 boss
+  prompts.py     打标签规则补充中文写法
+  mcp_server.py  说明：先跑 check_boss；登录由用户自己在终端完成，agent 不碰 Cookie；遇到验证只报告，不处理
+configs/default.yaml   discovery.boss: {max_search_pages, max_details, request_delay_seconds, timeout_seconds}
+docs/examples/boss.example.yaml、README、NOTICE（列出对 boss-cli 的依赖）
+```
+
+新增依赖：`kabi-boss-cli`（锁定版本）。
+
+## 7. 顺带一提（不在本切片内）
+
+如果你在国内主要找**校招**：字节、腾讯、阿里、百度、美团等大厂的校招岗位主要发在自家校招官网上，BOSS 上并不全。这些官网大多有公开接口，不用登录，风险比 BOSS 低，可以像 Avature 那样做成招聘板。需要的话，我单独出一份计划。
+
+## 8. 测试（先写，全部离线）
+
+用假的命令运行器回放合成的 JSON 输出，放在 `tests/fixtures/boss/`，标注 synthetic，公司和岗位都是虚构的。
+- 搜索解析：卡片字段正确；同一岗位出现在多个搜索词或城市里，只算一次；`title_exclude` 生效；已入库的岗位（按 ID 或链接判断）不读详情。
+- 详情：字段按第 4 节映射；招聘者信息和会话令牌不落库；描述里写给 AI 的指令原样存为文本，不影响任何行为。
+- 薪资："20-40K·15薪"、"15-25K" 能解析；"200-300元/天"、"面议" 记为未知。
+- 详情上限：超出上限的岗位不入库，计入 `details_deferred`；下一次运行时会读到它们。
+- 错误：遇到 `not_authenticated`、`rate_limited` 或安全拦截时，BOSS 来源立即停止，不再发出任何请求，也不重试；已经读完详情的新岗位照常入库；结果里有给用户的一句提示；其他来源照常运行。
+- 命令白名单：调用 search / detail / status 以外的命令，直接报错。
+- 预打标签：北京、上海、深圳 → `location.china.*`，算有把握；学历和经验按表映射；"实习" → internship。预筛：意图为 `location.us：必须` 时，BOSS 岗位被放到一边；加上 `location.china：必须` 后，它们重新回来。
+- `boss.yaml` 只能放在数据目录下，格式错误时报错。
+- `check_boss` 不入库，只发一次搜索请求。
+- 定时任务可用的工具集合符合取舍 5。
+- 现有 188 个测试继续通过。
+
+实现后的真实核对要你在本机完成（测试环境里没有你的登录态）：运行 `uv run boss login` → `check_boss` → 跑一次 `/fetch-jobs`，看 BOSS 的新增数，再抽查几个岗位的字段。
