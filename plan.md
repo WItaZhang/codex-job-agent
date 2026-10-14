@@ -683,7 +683,7 @@ configs/default.yaml                   apply: 字数范围、worker 数、模型
 # 切片 2h 计划：接入 BOSS 直聘（草案，2026-10-13，待用户确认）
 
 来源：2026-10-13 用户要求把 BOSS 直聘接为岗位来源。
-**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§7、§8，§10 从第 49 条起）和 CLAUDE.md 的"岗位来源"一行，再写测试，最后写代码。
+**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§7、§8，§10 从第 66 条起）和 CLAUDE.md 的"岗位来源"一行，再写测试，最后写代码。
 
 ## 0. 先说清楚三件事
 
@@ -696,7 +696,7 @@ configs/default.yaml                   apply: 字数范围、worker 数、模型
 | | 做法 | 好处 | 代价 |
 | --- | --- | --- | --- |
 | **(a) 推荐** | 依赖开源的 boss-cli（GitHub `jackwener/boss-cli`，PyPI 包 `kabi-boss-cli`，pyproject 声明 Apache-2.0）。你自己在终端运行 `uv run boss login`，它会从你已登录的浏览器读取 BOSS 的 Cookie，也可以用 App 扫码。本项目只调用它的只读命令：`boss search … --json`、`boss detail … --json` 和 `boss status` | 能进入 `/fetch-jobs`，以后也能进定时任务；BOSS 改版时多半上游先修好，我们升级版本就行；它遇到安全拦截（code 121/122）会直接报错，不绕过 | 账号风险，见第 0 节第 1 条；登录态过期后要你重新运行 `boss login`，多久过期一次要实际用过才知道 |
-| (b) | agent 用 Claude in Chrome，在你已登录的 Chrome 里打开搜索页，读取岗位卡片和详情，整理成 JSON 后用 `import_jobs` 导入 | 用的就是你本人的浏览器，最接近正常浏览 | 只能在对话中运行；每个岗位都要打开页面，慢，也费 token；进不了定时任务；spec §7 写明 v1 不做浏览器自动化，选这个就要改 spec |
+| (b) | agent 用 Claude in Chrome，在你已登录的 Chrome 里打开搜索页，读取岗位卡片和详情，整理成 JSON 后用 `import_jobs` 导入 | 用的就是你本人的浏览器，最接近正常浏览 | 只能在对话中运行；每个岗位都要打开页面，慢，也费 token；进不了定时任务（浏览器自动化在切片 6 之后已不在 §7 的"不做"里，所以不需要为此改 spec） |
 | (c) | 不做自动化：你把感兴趣的岗位文本贴进导入文件，用现有的 `import_jobs` 导入 | 零风险，零开发 | 全靠手工 |
 
 (a) 的几点细节：
@@ -799,6 +799,6 @@ docs/examples/boss.example.yaml、README、NOTICE（列出对 boss-cli 的依赖
 - `boss.yaml` 只能放在数据目录下，格式错误时报错。
 - `check_boss` 不入库，只发一次搜索请求。
 - 定时任务可用的工具集合符合取舍 5。
-- 现有 188 个测试继续通过。
+- 现有 246 个测试继续通过。
 
 实现后的真实核对要你在本机完成（测试环境里没有你的登录态）：运行 `uv run boss login` → `check_boss` → 跑一次 `/fetch-jobs`，看 BOSS 的新增数，再抽查几个岗位的字段。
