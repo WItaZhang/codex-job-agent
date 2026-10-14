@@ -69,6 +69,7 @@ class CoverLetterRules(_Section):
     min_words: int = Field(gt=0)
     max_words: int = Field(gt=0)
     max_attempts: int = Field(gt=0)
+    read_chars: int = Field(gt=0)
 
 
 class Apply(_Section):

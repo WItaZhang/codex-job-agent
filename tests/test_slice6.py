@@ -179,12 +179,23 @@ def test_setup_and_materials_never_return_contact_details(box, tmp_path):
     assert "cover-letter" in materials["skill"]["source"]  # the project's general skill by default
     assert materials["resumes"][0] == {"id": "ml", "use_for": "ML roles"}
     assert box.get_resume("ml")["text"] == RESUME
-    for payload in (setup, materials):
+    files = [read_whole(box, item["id"]) for item in listed_files(materials)]
+    for payload in (setup, materials, files):
         dumped = json.dumps(payload, ensure_ascii=False)
         assert not any(secret in dumped for secret in SECRETS)
 
 
-def test_a_personal_cover_letter_skill_can_be_plugged_in(box, tmp_path):
+def listed_files(materials):
+    return [*materials["skill"]["files"], *materials["context"], *filter(None, [materials["resume_selection"]])]
+
+
+def read_whole(box, file_id):
+    first = box.get_cover_letter_file(file_id)
+    rest = [box.get_cover_letter_file(file_id, part)["text"] for part in range(2, first["parts"] + 1)]
+    return first["text"] + "".join(rest)
+
+
+def plug_in_skill(box, tmp_path):
     kb = tmp_path / "kb"
     skill = kb / "skills" / "cover-letter"
     (skill / "references").mkdir(parents=True)
@@ -192,13 +203,51 @@ def test_a_personal_cover_letter_skill_can_be_plugged_in(box, tmp_path):
     (skill / "references" / "voice.md").write_text("Plain voice.", encoding="utf-8")
     (kb / "skills" / "facts.md").write_text("Team results stay team results.", encoding="utf-8")
     write_applicant(box.data_dir, skill_dir=skill)
+    return kb, skill
+
+
+def test_a_personal_cover_letter_skill_can_be_plugged_in(box, tmp_path):
+    kb, skill = plug_in_skill(box, tmp_path)
     materials = box.get_cover_letter_materials()
     assert materials["skill"]["source"] == str(skill)
-    files = {item["path"]: item["text"] for item in materials["skill"]["files"]}
-    assert files["SKILL.md"].endswith("My own rules.") and files["references/voice.md"] == "Plain voice."
-    assert materials["context"] == [
-        {"path": str(kb / "skills" / "facts.md"), "text": "Team results stay team results."}
-    ]
+    paths = {item["path"]: item["id"] for item in materials["skill"]["files"]}
+    assert set(paths) == {"SKILL.md", "references/voice.md"}
+    assert read_whole(box, paths["SKILL.md"]).endswith("My own rules.")
+    assert read_whole(box, paths["references/voice.md"]) == "Plain voice."
+    [context] = materials["context"]
+    assert context["path"] == str(kb / "skills" / "facts.md")
+    assert read_whole(box, context["id"]) == "Team results stay team results."
+    assert not any("text" in item for item in listed_files(materials))  # the list never carries file contents
+
+
+def test_long_material_files_are_read_in_parts(box, tmp_path):
+    kb, skill = plug_in_skill(box, tmp_path)
+    s = box.settings
+    box.settings = s.model_copy(
+        update={
+            "apply": s.apply.model_copy(
+                update={"cover_letter": s.apply.cover_letter.model_copy(update={"read_chars": 50})}
+            )
+        }
+    )
+    long_text = "".join(f"Rule {n}: say what was done and what it changed.\n" for n in range(20))
+    (skill / "SKILL.md").write_text(long_text, encoding="utf-8")
+    entry = next(item for item in box.get_cover_letter_materials()["skill"]["files"] if item["path"] == "SKILL.md")
+    assert entry["parts"] > 1
+    parts = [box.get_cover_letter_file(entry["id"], part) for part in range(1, entry["parts"] + 1)]
+    assert all(len(part["text"]) <= 50 for part in parts)
+    assert all(part["text"].endswith("\n") for part in parts)  # cut at line ends, not mid-line
+    assert "".join(part["text"] for part in parts) == long_text
+    with pytest.raises(InvariantError):
+        box.get_cover_letter_file(entry["id"], entry["parts"] + 1)
+
+
+def test_only_listed_material_files_can_be_read(box, tmp_path):
+    plug_in_skill(box, tmp_path)
+    profile = str(box.data_dir / "applicant" / "profile.json")
+    for file_id in ("profile.json", profile, "skill/../../../data/applicant/profile.json", "context/9"):
+        with pytest.raises(InvariantError):
+            box.get_cover_letter_file(file_id)
 
 
 # --- cover letters -------------------------------------------------------------------------------------
@@ -368,7 +417,13 @@ def test_contact_details_never_reach_the_database(box, tmp_path):
 
 def test_tool_tiers_and_approval():
     assert TOOL_TIERS["start_applying"] == "commit" and "start_applying" in COMMIT_TOOLS
-    for name in ("get_apply_setup", "get_cover_letter_materials", "get_resume", "check_cover_letter"):
+    for name in (
+        "get_apply_setup",
+        "get_cover_letter_materials",
+        "get_cover_letter_file",
+        "get_resume",
+        "check_cover_letter",
+    ):
         assert TOOL_TIERS[name] == "read"
     for name in ("prepare_apply_batch", "save_cover_letter", "apply_status"):
         assert TOOL_TIERS[name] == "prepare"
@@ -557,7 +612,16 @@ def test_pdf_page_count():
     ("skill", "needed"),
     [
         ("apply", {"get_apply_setup", "prepare_apply_batch", "start_applying", "apply_status", "mark_applications"}),
-        ("cover-letter", {"get_cover_letter_materials", "get_resume", "check_cover_letter", "save_cover_letter"}),
+        (
+            "cover-letter",
+            {
+                "get_cover_letter_materials",
+                "get_cover_letter_file",
+                "get_resume",
+                "check_cover_letter",
+                "save_cover_letter",
+            },
+        ),
     ],
 )
 def test_apply_skills(skill, needed):
@@ -575,7 +639,14 @@ def test_cover_letter_writer_cannot_commit_or_apply():
     tools = {t.strip() for t in str(meta["tools"]).split(",")}
     assert tools == {"Read", "Glob", "Grep"} | {  # may read files, never write them
         f"mcp__intent-agent__{name}"
-        for name in ("get_cover_letter_materials", "get_resume", "show_job", "check_cover_letter", "save_cover_letter")
+        for name in (
+            "get_cover_letter_materials",
+            "get_cover_letter_file",
+            "get_resume",
+            "show_job",
+            "check_cover_letter",
+            "save_cover_letter",
+        )
     }
 
 

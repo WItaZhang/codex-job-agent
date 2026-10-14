@@ -43,6 +43,7 @@ apply:                            # 投递（spec 4.10）
     min_words: 250
     max_words: 400
     max_attempts: 3               # 校验不过最多重写几次
+    read_chars: 12000             # 求职信材料每次最多读出多少字符，长文件分段读（一次返回太长会被宿主存成文件）
   mcp:                            # 投递 agent 用的 MCP 服务，固定版本
     playwright: "@playwright/mcp@0.0.83"
     gmail: "@gongrzhe/server-gmail-autoauth-mcp@1.1.11"
