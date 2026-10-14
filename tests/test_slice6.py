@@ -653,3 +653,143 @@ def test_cover_letter_writer_cannot_commit_or_apply():
 def test_no_agent_may_read_the_applicant_profile_or_keys():
     deny = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))["permissions"]["deny"]
     assert {"Read(./data/local/.env)", "Read(./data/local/applicant/profile.json)"} <= set(deny)
+
+
+# --- regressions from the first real batch (2026-10-14, spec section 10 items 66-68) ---------------------
+
+FAKE_CLAUDE_CHECKS_FILES = """#!/usr/bin/env python3
+import json, os, re, sys
+prompt = sys.stdin.read()
+argv = sys.argv[1:]
+mcp = argv[argv.index("--mcp-config") + 1]
+resume = re.search(r"Resume PDF \\(upload this\\): (.+)", prompt).group(1).strip()
+letter = re.search(r"Cover Letter PDF \\(upload if asked\\): (.+)", prompt).group(1).strip()
+seen = {"cwd": os.getcwd(), "mcp": mcp, "resume": resume, "letter": letter}
+seen["exist"] = [os.path.isabs(p) and os.path.exists(p) for p in (mcp, resume, letter)]
+open(os.environ["FAKE_ARGS"], "w").write(json.dumps(seen))
+print(json.dumps({"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "name": "mcp__playwright__browser_navigate", "input": {"url": "https://jobs.example.test/j00"}}]}}))
+print(json.dumps({"type": "result", "result": "RESULT:APPLIED"}))
+"""
+
+FAKE_CLAUDE_CANNOT_START = """#!/usr/bin/env python3
+import sys
+sys.stdin.read()
+print("Error: MCP config file not found: data/local/applypilot/.mcp-apply-0.json")
+sys.exit(1)
+"""
+
+
+def fake_claude(tmp_path, monkeypatch, script):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    fake = bin_dir / "claude"
+    fake.write_text(script, encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{__import__('os').environ['PATH']}")
+    monkeypatch.setenv("FAKE_ARGS", str(tmp_path / "args.json"))
+
+
+def test_a_relative_data_directory_still_gives_the_apply_run_real_files(tmp_path, monkeypatch):
+    """The first batch failed because data/local was relative while Claude Code ran in another directory."""
+    monkeypatch.chdir(tmp_path)
+    Path("data/local").mkdir(parents=True)
+    s = settings()
+    box = Toolbox(s, Store(Path("agent.sqlite"), s), data_dir=Path("data/local"))
+    (box.data_dir / "intent.yaml").write_text(
+        yaml.safe_dump({"intent": {**BASE_INTENT, "location": {"us": {"level": "require"}}}, "vocabulary": BASE_VOCAB}),
+        encoding="utf-8",
+    )
+    box.initialize_intent("data/local/intent.yaml")
+    box.letter_renderer = lambda text, pdf_path, name, day: pdf_path.write_bytes(b"%PDF-1.4 letter")
+    assert box.data_dir.is_absolute()
+    write_applicant(Path("data/local"))
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_CHECKS_FILES)
+    applicant = box._applicant()
+    outcome = apply_bridge.run_application(
+        box._apply_spec(job, "submit"), Path("data/local"), s, Path("data/local/applicant/profile.json"), 9
+    )
+    seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
+    assert seen["exist"] == [True, True, True], seen
+    assert seen["cwd"] != str(tmp_path)  # Claude Code really runs elsewhere
+    assert outcome.status == "applied" and applicant.profile.is_absolute()
+
+
+def test_letter_paths_are_derived_so_the_project_can_move(box, tmp_path):
+    write_applicant(box.data_dir)
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    assert box.store.cover_letter(job) == {"resume_id": "ml"}  # no file path in the database
+    moved = tmp_path / "moved"
+    import shutil
+
+    shutil.copytree(box.data_dir, moved / "data")
+    shutil.copy(box.store.path, moved / "agent.sqlite")
+    s = settings()
+    again = Toolbox(s, Store(moved / "agent.sqlite", s), data_dir=moved / "data")
+    spec = again._apply_spec(job, "stop")
+    for path in (spec.letter_txt, spec.letter_pdf, spec.resume_pdf, spec.resume_text):
+        assert path.exists() and moved in path.parents
+
+
+def test_a_run_that_never_started_returns_the_job_to_pending(box, tmp_path, monkeypatch):
+    write_applicant(box.data_dir)
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_CANNOT_START)
+    outcome = apply_bridge.run_application(
+        box._apply_spec(job, "submit"), box.data_dir, box.settings, box._applicant().profile, 9
+    )
+    assert (outcome.status, outcome.reason) == ("pending", "system_error")
+    assert "MCP config file not found" in outcome.notes[0]
+
+
+@pytest.mark.parametrize(
+    ("result", "acted", "expected"),
+    [
+        ("failed:no_result_line", False, ("pending", "system_error")),
+        ("failed:timeout", False, ("pending", "system_error")),
+        ("failed:no_result_line", True, ("failed", "no_result_line")),  # it did something on the site
+        ("failed:not_eligible_location", False, ("failed", "not_eligible_location")),  # the agent decided
+    ],
+)
+def test_only_runs_with_no_actions_and_no_result_are_system_errors(result, acted, expected):
+    assert apply_bridge.outcome_status("submit", result, acted) == expected
+
+
+def test_a_review_step_without_any_success_voids_the_batch(box):
+    write_applicant(box.data_dir)
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    errors = {job: ("pending", "system_error", ["Error: cannot start"]) for job in jobs[:5]}
+    sites = {job: ("failed", "captcha", []) for job in jobs[5:10]}
+    box.apply_runner = FakeRunner({**errors, **sites})
+    batch = box.prepare_apply_batch(DAY)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    status = box.apply_status()
+    assert status["next"] is None and status["void"] is True
+    applications = box.store.applications()
+    assert {applications[j]["status"] for j in jobs[:5]} == {"pending"}  # nothing happened on those sites
+    assert {applications[j]["status"] for j in jobs[5:10]} == {"failed"}
+    rest = box._phase_summary(batch["batch_id"], box.store.apply_batch(batch["batch_id"]), "rest")
+    with pytest.raises(InvariantError):
+        box.start_applying(batch["batch_id"], rest)
+    fresh = box.prepare_apply_batch(DAY)  # the jobs that never started come back in a new batch
+    assert set(jobs[:5]) <= {item["job_id"] for item in fresh["jobs"]}
+
+
+def test_a_crashed_review_step_voids_the_batch_too(box):
+    write_applicant(box.data_dir)
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+
+    def broken(spec):
+        raise RuntimeError("runner exploded")
+
+    box.apply_runner = broken
+    batch = box.prepare_apply_batch(DAY)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    status = box.apply_status()
+    assert status["status"] == "failed" and status["next"] is None and status["void"] is True

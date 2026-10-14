@@ -211,7 +211,8 @@ class Toolbox:
     ):
         self.settings = settings
         self.store = store
-        self.data_dir = Path(data_dir or settings.storage.data_dir)
+        # Configured paths stay relative (portable); at run time they are absolute (spec section 10 item 66).
+        self.data_dir = Path(data_dir or settings.storage.data_dir).resolve()
         self.http_client = http_client  # None: each fetch opens its own client
         self._discovery: dict | None = None  # the current or last ApplyPilot discovery run
         self._boards: dict | None = None  # the current or last fetch_boards run
@@ -873,10 +874,8 @@ class Toolbox:
             return {"ok": False, "problems": problems}
         applicant = self._ready_applicant()
         name = json.loads(applicant.profile.read_text(encoding="utf-8"))["personal"]["full_name"]
-        folder = self.data_dir / self.settings.apply.letters_dir
-        folder.mkdir(parents=True, exist_ok=True)
-        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", job_id)
-        txt, pdf = folder / f"{stem}.txt", folder / f"{stem}.pdf"
+        txt, pdf = self._letter_files(job_id)
+        txt.parent.mkdir(parents=True, exist_ok=True)
         txt.write_text(text.strip() + "\n", encoding="utf-8")
         renderer = self.letter_renderer or apply_bridge.render_letter_pdf
         try:
@@ -884,8 +883,16 @@ class Toolbox:
         except (InvariantError, OSError, subprocess.SubprocessError) as error:
             txt.unlink(missing_ok=True)
             raise InvariantError(f"Could not print the letter: {error}") from error
-        self.store.save_cover_letter(job_id, resume_id, str(txt), str(pdf))
+        self.store.save_cover_letter(job_id, resume_id)
         return {"ok": True, "problems": [], "txt": str(txt), "pdf": str(pdf)}
+
+    def _letter_files(self, job_id: str) -> tuple[Path, Path]:
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", job_id)
+        folder = self.data_dir / self.settings.apply.letters_dir
+        return folder / f"{stem}.txt", folder / f"{stem}.pdf"
+
+    def _letter_ready(self, job_id: str) -> bool:
+        return self.store.cover_letter(job_id) is not None and all(p.is_file() for p in self._letter_files(job_id))
 
     @staticmethod
     def _next_phase(data: dict) -> str | None:
@@ -919,9 +926,7 @@ class Toolbox:
     def _batch_view(self, batch_id: str) -> dict:
         data = self.store.apply_batch(batch_id)
         phase = self._next_phase(data)
-        jobs = [
-            {**job, "letter": "ready" if self.store.cover_letter(job["job_id"]) else "missing"} for job in data["jobs"]
-        ]
+        jobs = [{**job, "letter": "ready" if self._letter_ready(job["job_id"]) else "missing"} for job in data["jobs"]]
         return {
             "batch_id": batch_id,
             "day": data["day"],
@@ -968,8 +973,9 @@ class Toolbox:
 
     def _apply_spec(self, job_id: str, mode: str) -> apply_bridge.ApplySpec:
         letter = self.store.cover_letter(job_id)
-        if letter is None:
+        if letter is None or not self._letter_ready(job_id):
             raise InvariantError(f"No cover letter for {job_id}")
+        txt, pdf = self._letter_files(job_id)
         resume = self._ready_applicant().resume(letter["resume_id"])
         job = self.store.job(job_id)
         return apply_bridge.ApplySpec(
@@ -980,8 +986,8 @@ class Toolbox:
             company=job.company,
             resume_pdf=resume.pdf,
             resume_text=resume.text,
-            letter_txt=Path(letter["txt_path"]),
-            letter_pdf=Path(letter["pdf_path"]),
+            letter_txt=txt,
+            letter_pdf=pdf,
         )
 
     @_tool("commit")
@@ -1003,7 +1009,7 @@ class Toolbox:
         moved = [job["job_id"] for job in jobs if applications.get(job["job_id"], {}).get("status") != "pending"]
         if moved:
             raise InvariantError(f"Jobs {moved} are no longer pending; prepare a new batch")
-        no_letter = [job["job_id"] for job in jobs if self.store.cover_letter(job["job_id"]) is None]
+        no_letter = [job["job_id"] for job in jobs if not self._letter_ready(job["job_id"])]
         if no_letter:
             raise InvariantError(f"Jobs {no_letter} have no cover letter yet")
         applicant = self._ready_applicant()
@@ -1060,6 +1066,12 @@ class Toolbox:
         if run["status"] in ("done", "failed") and not run.get("closed"):
             data = self.store.apply_batch(run["batch_id"])
             data["phases"][run["phase"]] = "done"
+            worked = any(item["outcome"] and item["outcome"].status in ("waiting", "applied") for item in run["jobs"])
+            if run["phase"] == "review" and (run["status"] == "failed" or not worked):
+                # Nothing in the reviewed step worked: the rest of this batch must not start (spec item 68).
+                if data["phases"]["rest"] == "proposed":
+                    data["phases"]["rest"] = "void"
+                data["void"] = True
             self.store.save_apply_batch(run["batch_id"], data.pop("day"), data)
             run["closed"] = True
 
@@ -1098,6 +1110,7 @@ class Toolbox:
             phase = self._next_phase(data)
             if phase:
                 upcoming = {"phase": phase, "summary": self._phase_summary(run["batch_id"], data, phase)}
+        void = bool(self.store.apply_batch(run["batch_id"]).get("void"))
         return {
             "batch_id": run["batch_id"],
             "phase": run["phase"],
@@ -1106,6 +1119,15 @@ class Toolbox:
             "jobs": jobs,
             "checklist": checklist,
             "next": upcoming,
+            "void": void,
+            **(
+                {
+                    "notice": "Nothing in the first step worked, so this batch is void; "
+                    "fix the problem and prepare a new batch."
+                }
+                if void
+                else {}
+            ),
         }
 
     @_tool("prepare")

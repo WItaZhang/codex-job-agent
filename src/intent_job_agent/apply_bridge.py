@@ -66,13 +66,15 @@ class ApplyOutcome:
 
 
 def configure(data_dir: Path, settings: Settings, profile: Path | None = None) -> None:
-    """Point the vendored modules at the user's files (as discovery does) and at the apply working dirs."""
+    """Point the vendored modules at the user's files (as discovery does) and at the apply working dirs. Paths
+    become absolute here: Claude Code runs in another working directory (spec section 10 item 66)."""
     from .vendor.applypilot import config
 
+    data_dir = Path(data_dir).resolve()
     stage = applypilot_bridge.configure(data_dir, settings)
-    config.ENV_PATH = Path(data_dir) / ".env"
+    config.ENV_PATH = data_dir / ".env"
     if profile is not None:
-        config.PROFILE_PATH = profile
+        config.PROFILE_PATH = Path(profile).resolve()
     config.LOG_DIR = stage / "logs"
     config.CHROME_WORKER_DIR = stage / "chrome-workers"
     config.APPLY_WORKER_DIR = stage / "apply-workers"
@@ -228,13 +230,19 @@ def parse_result(output: str) -> str:
     return "failed:no_result_line"
 
 
-def outcome_status(mode: str, result: str) -> tuple[str, str | None]:
+SYSTEM_RESULTS = ("failed:no_result_line", "failed:timeout")
+
+
+def outcome_status(mode: str, result: str, acted: bool = True) -> tuple[str, str | None]:
     """ApplyPilot's result for this run -> the apply-list status. A dry run that reports APPLIED filled the form;
-    a site saying the user already applied means the job is done, in either mode."""
+    a site saying the user already applied means the job is done, in either mode. A run that made no tool call
+    and gave no result never reached the site: the job goes back to pending (spec section 10 item 67)."""
     if result == "applied":
         return ("waiting" if mode == "stop" else "applied"), None
     if result == "failed:already_applied":
         return "applied", "already_applied"
+    if not acted and result in SYSTEM_RESULTS:
+        return "pending", "system_error"
     return "failed", result.removeprefix("failed:")
 
 
@@ -352,6 +360,7 @@ def run_application(
 ) -> ApplyOutcome:
     from .vendor.applypilot import config
 
+    data_dir, profile = Path(data_dir).resolve(), Path(profile).resolve()
     text = build_prompt(spec, data_dir, settings, profile, read_dirs)
     mcp_path = config.APP_DIR / ".mcp-apply-0.json"
     mcp_path.write_text(json.dumps(mcp_config(settings, port)), encoding="utf-8")
@@ -410,9 +419,13 @@ def run_application(
             _kill_group(proc)
     output = "\n".join(texts)
     result = "failed:timeout" if timed_out.is_set() else parse_result(output)
-    status, reason = outcome_status(spec.mode, result)
+    status, reason = outcome_status(spec.mode, result, acted=bool(events))
+    said = notes(output)
+    if status == "pending":  # never reached the site: keep the last thing it printed to explain why
+        last = [line.strip() for line in output.splitlines() if line.strip()]
+        said = [last[-1][:300]] if last else [f"exit code {proc.returncode}"]
     seen = audit(events, spec.url)
-    return ApplyOutcome(status, reason, notes(output), seen["other_sites"], seen["emails"], str(log_path))
+    return ApplyOutcome(status, reason, said, seen["other_sites"], seen["emails"], str(log_path))
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -427,7 +440,7 @@ class ChromeRunner:
     """The real runner: one worker Chrome, one Claude Code run per application, one at a time."""
 
     def __init__(self, data_dir: Path, settings: Settings, profile: Path, read_dirs=()):
-        self.data_dir, self.settings, self.profile = Path(data_dir), settings, profile
+        self.data_dir, self.settings, self.profile = Path(data_dir).resolve(), settings, Path(profile).resolve()
         self.read_dirs = tuple(read_dirs)
         self.port: int | None = None
 
@@ -437,5 +450,5 @@ class ChromeRunner:
             if self.port is None or not _cdp_alive(self.port):
                 self.port = ensure_chrome(self.settings)
             return run_application(spec, self.data_dir, self.settings, self.profile, self.port, self.read_dirs)
-        except Exception as error:  # one broken run must not stop the batch
-            return ApplyOutcome("failed", f"error: {type(error).__name__}: {error}"[:200])
+        except Exception as error:  # one broken run must not stop the batch; nothing reached the site
+            return ApplyOutcome("pending", "system_error", [f"{type(error).__name__}: {error}"[:300]])

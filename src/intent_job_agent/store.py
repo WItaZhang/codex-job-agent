@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEX
 
 
 APPLICATION_STATUSES = ("pending", "applied", "skipped")  # what the user sets
-RUN_STATUSES = ("applied", "waiting", "failed")  # what an application run reports (waiting: stopped before submit)
+# What an application run reports: waiting = stopped before submit; pending = never reached the site.
+RUN_STATUSES = ("applied", "waiting", "failed", "pending")
 
 
 def _now() -> str:
@@ -62,7 +63,7 @@ def new_id(prefix: str) -> str:
 class Store:
     def __init__(self, path: str | Path, settings: Settings):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.path = Path(path)
+        self.path = Path(path).resolve()
         self.settings = settings
         # Callers serialize access (the MCP server holds a lock); the SDK may call from worker threads.
         self.db = sqlite3.connect(path, check_same_thread=False)
@@ -308,18 +309,18 @@ class Store:
                 (status, note, _now(), job_id),
             )
 
-    def save_cover_letter(self, job_id: str, resume_id: str, txt_path: str, pdf_path: str) -> None:
+    def save_cover_letter(self, job_id: str, resume_id: str) -> None:
+        """Which resume a saved letter was written from. The files' location is derived from the job id, so no
+        path is stored (the project can move; older rows' path columns are ignored)."""
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO cover_letters (job_id, resume_id, txt_path, pdf_path, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (job_id, resume_id, txt_path, pdf_path, _now()),
+                "VALUES (?, ?, '', '', ?)",
+                (job_id, resume_id, _now()),
             )
 
     def cover_letter(self, job_id: str) -> dict | None:
-        row = self.db.execute(
-            "SELECT resume_id, txt_path, pdf_path FROM cover_letters WHERE job_id = ?", (job_id,)
-        ).fetchone()
+        row = self.db.execute("SELECT resume_id FROM cover_letters WHERE job_id = ?", (job_id,)).fetchone()
         return dict(row) if row else None
 
     def save_apply_batch(self, batch_id: str, day: str, data: dict) -> None:
