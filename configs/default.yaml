@@ -27,6 +27,10 @@ tagging:
   backfill_dimensions: [degree_requirement]   # 新增维度后，已打标签岗位要回填的维度（spec §10 第 28 条）
 hard_review:
   every_days: 7
+apply_list:                       # 投递清单（spec 4.9）
+  agreement_window_days: 7        # 一致率看最近几个标注日（打过 label 的推荐日）
+  shown: 20                       # 对话里先列出几个；文件里是全部
+  dir: apply                      # 清单文件所在的目录，位于 storage.data_dir 下
 llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null

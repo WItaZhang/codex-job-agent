@@ -12,6 +12,7 @@ class ScoreResult:
     score: float
     excluded_by: tuple[str, ...] = ()
     contributions: tuple[tuple[str, Level, float], ...] = ()
+    below_salary_floor: bool = False
 
 
 def effective_level(intent: IntentModel, ref: str, expanded: set[str]) -> Level:
@@ -48,6 +49,7 @@ def score_job(intent: IntentModel, tags: list[str], salary: Salary | None, setti
         if not level.hard:
             contributions.append((ref, level, points[level.value]))
     score = sum(value for _, _, value in contributions)
+    below_floor = False
 
     comp = intent.compensation
     if comp and salary and (salary.currency, salary.period) == (comp.currency, comp.period):
@@ -57,7 +59,8 @@ def score_job(intent: IntentModel, tags: list[str], salary: Salary | None, setti
         value = first if first is not None else second
         if value is not None and value < comp.floor:
             score -= settings.scoring.salary_below_floor_penalty
-    return ScoreResult(bool(excluded_by), score, tuple(excluded_by), tuple(contributions))
+            below_floor = True
+    return ScoreResult(bool(excluded_by), score, tuple(excluded_by), tuple(contributions), below_floor)
 
 
 def is_recommended(result: ScoreResult, settings: Settings) -> bool:

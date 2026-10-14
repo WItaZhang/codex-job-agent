@@ -52,7 +52,11 @@ Daily flow (project skills /fetch-jobs and /today):
   whose confidently read fields break a hard constraint; they come back when the intent changes.
 - Tag through job-tagger subagents: list_untagged_jobs with brief=true, about 10 ids per subagent, each id once.
   Taggers follow get_tagging_rules and start from the suggested tags.
-- get_fetch_status tells whether today was fetched, how much budget is left and what is ready for select_today."""
+- get_fetch_status tells whether today was fetched, how much budget is left and what is ready for select_today.
+Apply list (project skill /apply-list):
+- build_apply_list writes the day's list (JSON and CSV) and returns the agreement rate and the first jobs; show
+  the agreement line first, as returned. mark_applications records applied / skipped / back to pending; it is not
+  a label and never a reason to propose an intent change."""
 
 
 def _guarded(fn, lock: threading.Lock):

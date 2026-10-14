@@ -36,9 +36,14 @@ CREATE TABLE IF NOT EXISTS backfills (job_id TEXT NOT NULL, dimension TEXT NOT N
                                       labelled INTEGER NOT NULL, created_at TEXT NOT NULL,
                                       PRIMARY KEY (job_id, dimension));
 CREATE TABLE IF NOT EXISTS fetch_log (seq INTEGER PRIMARY KEY, day TEXT NOT NULL, kind TEXT NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS applications (job_id TEXT PRIMARY KEY, status TEXT NOT NULL, first_listed TEXT NOT NULL,
+                                         updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
 """
+
+
+APPLICATION_STATUSES = ("pending", "applied", "skipped")
 
 
 def _now() -> str:
@@ -250,6 +255,35 @@ class Store:
 
     def dimension_requests(self) -> list[dict]:
         return [dict(row) for row in self.db.execute("SELECT text, label_id FROM dimension_requests ORDER BY seq")]
+
+    # --- the apply list: what the user did with listed jobs (never touches the intent or labels) ---
+
+    def applications(self) -> dict[str, dict]:
+        """Listed jobs by id: status (pending / applied / skipped) and the day they were first listed."""
+        rows = self.db.execute("SELECT job_id, status, first_listed FROM applications")
+        return {row["job_id"]: {"status": row["status"], "first_listed": row["first_listed"]} for row in rows}
+
+    def list_applications(self, job_ids: list[str], day: str) -> None:
+        """Jobs entering the list for the first time start as pending; jobs listed before keep their status."""
+        with self.db:
+            self.db.executemany(
+                "INSERT OR IGNORE INTO applications (job_id, status, first_listed, updated_at) "
+                "VALUES (?, 'pending', ?, ?)",
+                [(job_id, day, _now()) for job_id in job_ids],
+            )
+
+    def set_application_status(self, job_ids: list[str], status: str) -> None:
+        if status not in APPLICATION_STATUSES:
+            raise InvariantError(f"Status must be one of {list(APPLICATION_STATUSES)}, not {status!r}")
+        listed = self.applications()
+        unknown = [job_id for job_id in job_ids if job_id not in listed]
+        if unknown:
+            raise InvariantError(f"Jobs {unknown} were never on the apply list")
+        with self.db:
+            self.db.executemany(
+                "UPDATE applications SET status = ?, updated_at = ? WHERE job_id = ?",
+                [(status, _now(), job_id) for job_id in job_ids],
+            )
 
     # --- intent: initialize once, then change only through accepted proposals ---------
 

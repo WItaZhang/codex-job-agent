@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Section(BaseModel):
@@ -54,6 +54,12 @@ class HardReview(_Section):
     every_days: int
 
 
+class ApplyList(_Section):
+    agreement_window_days: int = Field(gt=0)
+    shown: int = Field(gt=0)
+    dir: str
+
+
 class LLM(_Section):
     provider: Literal["host", "fake", "anthropic", "openai_compatible"]
     model: str | None
@@ -72,6 +78,7 @@ class Settings(_Section):
     discovery: Discovery
     tagging: Tagging
     hard_review: HardReview
+    apply_list: ApplyList
     llm: LLM
     storage: Storage
 
