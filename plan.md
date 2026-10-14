@@ -657,7 +657,7 @@ configs/default.yaml                   apply: 字数范围、worker 数、模型
 1. **复制 Chrome 资料时去掉三样**：保存的密码（支付网站的密码在这里）、银行卡、表单自动填充记录（以前填过的 SSN 可能在这里）。cookies、书签等都留着，各网站仍是登录状态。
 2. **SSN 和付款永远不填**：投递资料里不放 SSN 和支付信息；表单要求 SSN、银行卡或申请费时，停下这个岗位并告诉你（结果码 `RESULT:FAILED:ssn_required` / `payment_required`），和仲裁协议一样。
 3. **高风险网站打不开**：网页版邮箱、网银和支付、云盘、密码管理器（Playwright MCP 的 blocked-origins，名单在配置里）。（同意）
-4. **只给浏览器和 Gmail**：投递 agent 没有命令行和读写文件。求职信的修改和生成 PDF 在投递之前、由对话里的子 agent 和 `save_cover_letter` 完成，投递时只上传现成的 PDF（浏览器自带的上传，不需要命令行）；表单里的文字题直接在网页里填。（待你确认，见对话）
+4. **只给浏览器和 Gmail，并且不跳过权限检查**：投递 agent 没有命令行和读写文件；Claude Code 不用 ApplyPilot 的 `bypassPermissions`，改成白名单：只预先放行 Playwright 的浏览器工具和 Gmail 的 `search_emails` / `read_email` / `send_email`，其余一律自动拒绝（用户 2026-10-14 选 A：开发环境的安全检查拦下了跳过全部权限确认的设计）。求职信的修改和生成 PDF 在投递之前、由对话里的子 agent 和 `save_cover_letter` 完成，投递时只上传现成的 PDF（浏览器自带的上传，不需要命令行）；表单里的文字题直接在网页里填。（待你确认，见对话）
 5. **每批结束的检查单**：每个岗位打开过的与招聘无关的网站、发出的每封邮件（收件人、标题）。（同意）
 
 第 1、3、4 条需要在你的 Mac 上实际跑一次确认生效（第 3 条依赖 Playwright MCP 在连接已有 Chrome 时也执行屏蔽，第 4 条依赖你本机 Claude Code 的版本）。
