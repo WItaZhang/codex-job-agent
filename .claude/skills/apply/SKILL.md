@@ -44,6 +44,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 4. 汇报：
    - waiting：表已经填好，开在投递用的 Chrome 的单独标签页里，请用户逐个检查，自己点提交。
    - failed：原因原样列出。arbitration 要把 notes 里的条款原文给用户看；ssn_required、payment_required 说明需要用户自己处理。
+   - applied 且 reason 是 already_applied：网站显示你以前投过，这次没有再交，已记成已投。
    - checklist：每个岗位打开过的其他网站和发出的邮件，原样列出。
 5. 用户说"1-8 已投，9 不投"之类：`mark_applications(job_ids, "applied")` / `mark_applications(job_ids, "skipped")`；想重试失败的用 "pending"。说不清楚就问。
 

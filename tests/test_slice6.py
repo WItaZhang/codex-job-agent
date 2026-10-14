@@ -152,6 +152,7 @@ def test_the_vendored_prompt_gets_our_rules(box):
     assert "arbitration" in text.lower() and "ssn" in text.lower() and "application fee" in text.lower()
     assert "new tab" in text.lower() and "leave this tab open" in text.lower()
     assert "do not send any email" in text.lower()  # an email application is a submission
+    assert "RESULT:FAILED:already_applied" in text  # never submit a second application
     submit = apply_bridge.build_prompt(box._apply_spec(jobs[0], "submit"), box.data_dir, box.settings, profile)
     assert "Do NOT click the final Submit" not in submit and "close this tab" in submit.lower()
     assert "do not send any email" not in submit.lower()
@@ -427,6 +428,8 @@ def test_the_copied_chrome_profile_loses_passwords_cards_and_autofill(tmp_path):
         ("RESULT:CAPTCHA", "stop", ("failed", "captcha")),
         ("NOTE: clause\nRESULT:FAILED:arbitration", "submit", ("failed", "arbitration")),
         ("RESULT:FAILED:ssn_required**", "submit", ("failed", "ssn_required")),
+        ("NOTE: shows applied on 2026-10-01\nRESULT:FAILED:already_applied", "submit", ("applied", "already_applied")),
+        ("RESULT:FAILED:already_applied", "stop", ("applied", "already_applied")),
         ("no result here", "submit", ("failed", "no_result_line")),
     ],
 )
