@@ -1,8 +1,11 @@
-"""The apply list (spec 4.9): which tagged open jobs go to the next step, in what order and why, and how well
-the current intent agrees with the labels of the last labelled days. Pure; the same scoring as everywhere else."""
+"""The apply list (spec 4.9): which tagged open jobs go to the next step, in what order and why, one row per
+posting found on several boards, and how well the current intent agrees with the labels of the last labelled days.
+Pure; the same scoring as everywhere else."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import duplicates
 from .config import Settings
 from .domain import IntentModel, Job, Label
 from .replay import LabelSource, evaluate
@@ -33,6 +36,60 @@ def candidates(
         if value == "want" or is_recommended(result, settings):
             chosen.append(Candidate(job, tags, value == "want", result))
     return sorted(chosen, key=lambda c: (not c.wanted, -c.result.score))
+
+
+@dataclass(frozen=True)
+class Posting:
+    """One posting with all its listings (spec 4.9 item 6). Its row takes its place and its why from the best
+    candidate and applies with `use`."""
+
+    listings: tuple[Job, ...]  # candidates first, in list order
+    places: tuple[str, ...]  # location tags of every listing, without repeats
+    candidates: tuple[Candidate, ...]  # the listings that enter the list on their own, best first
+    wanted: bool  # a listing is labelled want
+    blocked: bool  # a listing is labelled reject and none want
+    use: Candidate | None  # the candidate to apply with: one with a cover letter, else the best
+
+    @property
+    def listed(self) -> bool:
+        return bool(self.candidates) and not self.blocked
+
+
+def postings(
+    chosen: list[Candidate],
+    others: list[tuple[Job, list[str]]],
+    labels: list[Label],
+    settings: Settings,
+    has_letter: Callable[[str], bool] = lambda job_id: False,
+) -> list[Posting]:
+    """`chosen` (from `candidates`) and `others` (listings that are not candidates but were listed before or
+    labelled, with their tags) grouped by posting. Candidates come first in list order and the others by id, so a
+    posting's first listing is its best candidate. Wanted postings first; otherwise list order."""
+    values: dict[str, set[str]] = {}
+    for label in labels:
+        values.setdefault(label.job_id, set()).add(label.value)
+    tags = {c.job.id: c.tags for c in chosen} | {job.id: job_tags for job, job_tags in others}
+    by_id = {c.job.id: c for c in chosen}
+    jobs = [c.job for c in chosen] + sorted((job for job, _ in others), key=lambda job: job.id)
+    found = []
+    for listings in duplicates.group(jobs, settings):
+        marks = set().union(*(values.get(job.id, set()) for job in listings))
+        own = tuple(by_id[job.id] for job in listings if job.id in by_id)
+        with_letter = [c for c in own if has_letter(c.job.id)] if len(own) > 1 else []
+        places = [
+            tag.removeprefix("location.") for job in listings for tag in tags[job.id] if tag.startswith("location.")
+        ]
+        found.append(
+            Posting(
+                listings=tuple(listings),
+                places=tuple(dict.fromkeys(places)),
+                candidates=own,
+                wanted="want" in marks,
+                blocked="reject" in marks and "want" not in marks,
+                use=(with_letter or own or [None])[0],
+            )
+        )
+    return sorted(found, key=lambda p: not p.wanted)
 
 
 @dataclass(frozen=True)

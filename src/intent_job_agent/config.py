@@ -58,6 +58,8 @@ class ApplyList(_Section):
     agreement_window_days: int = Field(gt=0)
     shown: int = Field(gt=0)
     dir: str
+    duplicate_shingle_words: int = Field(gt=0)
+    duplicate_overlap: float = Field(gt=0, le=1)
 
 
 class ApplyMCP(_Section):
