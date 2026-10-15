@@ -683,7 +683,7 @@ configs/default.yaml                   apply: 字数范围、worker 数、模型
 # 切片 2h 计划：接入 BOSS 直聘（草案，2026-10-13，待用户确认）
 
 来源：2026-10-13 用户要求把 BOSS 直聘接为岗位来源。
-**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§7、§8，§10 从第 71 条起）和 CLAUDE.md 的"岗位来源"一行，再写测试，最后写代码。
+**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§7、§8，§10 从第 77 条起）和 CLAUDE.md 的"岗位来源"一行，再写测试，最后写代码。
 
 ## 0. 先说清楚三件事
 
@@ -802,3 +802,81 @@ docs/examples/boss.example.yaml、README、NOTICE（列出对 boss-cli 的依赖
 - 现有 246 个测试继续通过。
 
 实现后的真实核对要你在本机完成（测试环境里没有你的登录态）：运行 `uv run boss login` → `check_boss` → 跑一次 `/fetch-jobs`，看 BOSS 的新增数，再抽查几个岗位的字段。
+
+---
+
+# 切片 5b 计划：投递清单里同一个岗位只列一次（用户 2026-10-14 选定四个推荐项，同日确认计划；已实现）
+
+规则见 spec 4.9 第 6 条，实现细节见 spec §10 第 71–76 条。
+不开始任何投递，不改任何已有的投递状态。
+
+## 1. 做什么，不做什么
+
+- 做：生成清单时把同一个岗位的几条合成一行；改状态时整个岗位一起改；开始投递前再查一次，批次里不会有同一个岗位的两条。
+- 不做：
+  - 每日推荐（模块②）里的重复：同一个岗位的两条仍可能同时出现在 /today，留作后续。
+  - 导入时合并、迁移已有的 label 和求职信。
+  - 公司名别名（Amazon 和 Amazon Science 认不出来）。
+  - 按最终投递链接判断（LinkedIn 等来源打开之前没有这个链接）。
+
+## 2. 实际会怎么用
+
+```
+你：/apply-list
+agent：待投 929 个，其中新的 0 个。……
+       3 Machine Learning Engineer, Radar — Stripe · us.bay_area, us.seattle, us.new_york · https://www.linkedin.com/jobs/view/4476982356
+            另有 2 条：https://…/4476984167、https://…/4476969830
+            role.ml_engineering 强烈偏好；……
+你：3 已投
+agent：已更新（同一个岗位的 3 条一起改）。还剩 928 个待投。
+```
+
+`/apply` 生成的新批次里，每个岗位只出现一次。2026-10-14 的旧批次 batch-8852d95dd9fc 第二步里有重复（Handshake、RK Infotech、Intuit），`start_applying` 会拒绝开始，要重新生成批次（什么时候重新生成由你决定）。
+
+## 3. 样例（合成，写进 `tests/fixtures/duplicates.yaml`）
+
+公司名、文本都是编的，形状照 2026-10-14 那一批的真实情况。
+
+| # | 情况 | 结果 |
+| --- | --- | --- |
+| 1 | Acme Pay 的同一个岗位，LinkedIn 上旧金山、西雅图、纽约各一条，正文相同（照 Stripe） | 一行；地点 3 个；另有 2 条链接 |
+| 2 | Beta 的同一个岗位在 Indeed、LinkedIn、ZipRecruiter 各一条：LinkedIn 正文被截断，ZipRecruiter 多一个标题行（照 Handshake） | 一行 |
+| 3 | 公司名 "Gamma Infotech LLC" 和 "Gamma Infotech"（照 RK Infotech） | 一行 |
+| 4 | Delta 官网 Workday 上 R100001 和 R100002，正文只差年限和薪资（照 Adobe） | 两行 |
+| 5 | 再加一条 LinkedIn 上的 Delta，和两个编号都像 | 只并进其中一个；仍是两行 |
+| 6 | 同一个编号在 Workday 上有两个链接（地点路径不同，或末尾多了 `-1`） | 一行 |
+| 7 | 公司名为空的两条，标题、正文一样（照 Talent.com） | 两行 |
+| 8 | 同公司、同标题，正文不同（两个团队） | 两行 |
+| 9 | 同公司、同正文，标题不同（"ML Engineer" 和 "ML Engineer II"） | 两行 |
+| 10 | 其中一条没有正文（Glassdoor 存的是 "None"）：地点相同 / 地点不同 | 合并 / 不合并（用户 2026-10-14 实现时补充：真实清单里约四分之一的岗位没有正文） |
+| 10b | Acme 再加一条没有正文的 Glassdoor 纽约岗位 | 通过纽约那条并进 Acme 那一行 |
+| 11 | Acme 纽约那条标了 reject，其他没标 | 整个岗位不进 |
+| 12 | Acme 纽约那条标了 reject，旧金山那条标了 want | 进，"你标了想投" |
+| 13 | Beta 的 Indeed 那条投递没成功（failed） | Beta 不再列出；把 Beta 任意一条改回待投，三条一起回来 |
+| 14 | 把 Acme 的一行标成已投 | 三条都是已投 |
+| 15 | 排第二的那条已经有求职信 | 这一行和批次用那条的 job_id，不算缺求职信 |
+| 16 | 昨天进过清单的岗位今天多了一条新来源 | 这一行不标"新" |
+| 17 | 用清单生成批次 | 每个岗位一次；先检查 / 停在提交前 / 自动提交的划分不变 |
+| 18 | 旧批次的同一步里有同一个岗位的两条 | `start_applying` 拒绝，要求重新生成批次 |
+| 19 | 旧批次第一步里一条没投成，第二步里有它的另一条 | `start_applying` 拒绝，要求重新生成批次 |
+
+## 4. 模块
+
+```
+src/intent_job_agent/
+  duplicates.py   新增，纯逻辑：名称规范化、官网编号、正文重合度、same_posting(a, b)、
+                  group(listings)（按顺序加入第一个"和每一条都相同"的组）
+  apply_list.py   候选分组成岗位：reject / want 规则，选用哪一条去投（有求职信的优先），
+                  每行的地点和其他链接
+  tools.py        build_apply_list：一行一个岗位，加 also 列，每一条都记成进过清单；
+                  mark_applications：整个岗位一起改；start_applying：开始前查重复
+  config.py, configs/default.yaml   apply_list.duplicate_shingle_words: 5, duplicate_overlap: 0.9
+.claude/skills/apply-list/SKILL.md   每行下面列出"另有 N 条"；改状态会连带同一岗位的其他条
+```
+
+## 5. 测试（先写，离线，合成数据）
+
+- 样例 1–19。
+- 判断是确定性的：同样的输入换个顺序，合成的结果（哪些条在一起）不变，只有排序跟着清单走。
+- 已有的测试继续通过。
+- 另外用真实数据只读核对一次（不写进测试）：2026-10-14 那批的 Stripe、Handshake、RK Infotech、Intuit 各合成一行，Adobe R171718 / R171719 仍是两行。

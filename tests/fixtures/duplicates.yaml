@@ -1,0 +1,175 @@
+# SYNTHETIC — 切片 5b 的样例（plan.md 切片 5b 第 3 节）。公司、岗位、链接和正文都是编的，
+# 形状照 2026-10-14 那一批里同一个岗位从不同网站来了几条的真实情况：
+#   acme  ← Stripe：LinkedIn 上三个城市各一条，正文相同
+#   beta  ← Handshake：Indeed、LinkedIn（正文截断）、ZipRecruiter（多一个标题行）
+#   gamma ← RK Infotech：公司名一条带 LLC、一条不带
+#   delta ← Adobe：官网 Workday 上两个编号，正文只差年限和薪资；另有一条 LinkedIn 和两个编号都像
+#   theta ← NVIDIA：同一个 Workday 编号有两个链接（地点路径不同，末尾多了 -1）
+#   nocomp ← Talent.com：公司名为空
+#   acme-glassdoor、eta ← Glassdoor：没有正文（库里存的是字符串 "None"），只能按地点判断
+# 正文由 paragraphs 拼接；cut 只保留前 N 个词，heading 加在最前面；raw 直接给出存下来的正文。
+
+synthetic: true
+
+paragraphs:
+  about_acme: >-
+    About Acme Pay. Acme Pay is a synthetic payments company that helps small shops accept cards, send invoices
+    and settle money across borders. Our teams are small, write a lot, and ship to production every day.
+  role_acme: >-
+    The Risk team builds the models that decide in a few milliseconds whether a payment is fraudulent. As a
+    machine learning engineer on Risk you will design features from payment graphs, train and evaluate gradient
+    boosted and deep models, run online experiments, and own the serving path end to end with the platform team.
+    You have shipped models to production, you are fluent in Python and SQL, and you enjoy explaining tradeoffs to
+    product partners. Experience with streaming systems or graph features is a plus but not required.
+  about_beta: >-
+    About Beta. Beta was founded on the belief that every student deserves a path to a first job, whatever school
+    they went to and whoever they know. Our platform connects students with employers and with each other.
+  role_beta: >-
+    As a machine learning engineer you will improve how students discover jobs and how employers discover
+    students. You will build ranking and recommendation models, design offline metrics that predict online wins,
+    and run experiments with product and design. You will work across retrieval, ranking and the feature store,
+    and you will mentor interns. We are looking for someone with production experience in recommendation systems,
+    strong Python, and a habit of measuring before and after every change.
+  role_gamma: >-
+    Job Title: AI and ML Engineer, Entry Level. Employment Type: Full-Time. Gamma Infotech is hiring an entry level
+    engineer to build and deploy machine learning models for client projects in retail and logistics. You will
+    clean data, train models in Python, package them as services, and monitor them after release. A degree in
+    computer science or a related field is required, together with a working knowledge of cloud platforms.
+  about_delta: >-
+    Delta is seeking a machine learning engineer to join the Delta Trust Platform team. The team protects millions
+    of customers and their accounts from abuse, fraud and account takeover across every Delta product. You will
+    partner with data scientists, product managers and security analysts to turn research into reliable systems.
+  role_delta: >-
+    What you will do. Design, train and deploy models that detect abusive sign ups, payment fraud and compromised
+    accounts. Build real time feature pipelines and model serving that meet strict latency budgets. Own the
+    quality of the models you ship, from offline evaluation to online monitoring, alerting and retraining. Work
+    with engineers across the company to integrate risk signals into checkout, sign in and support tools. Write
+    clear design documents and review the work of your peers. What you need to succeed. Strong programming skills
+    in Python and one of Java, Scala or Go. Hands on experience with modern machine learning frameworks and with
+    large scale data processing. A track record of taking models from prototype to production and keeping them
+    healthy. Good judgement about precision, recall and the cost of mistakes for real customers.
+  years_3: >-
+    Three or more years of professional experience building and deploying machine learning solutions, or
+    equivalent experience through internships, research, or personal projects.
+  years_5: >-
+    Five or more years of professional experience building and deploying machine learning solutions, or
+    equivalent experience through internships, research, or personal projects.
+  pay_low: >-
+    The pay range for this position is one hundred twenty five thousand to two hundred thirty four thousand
+    dollars annually.
+  pay_high: >-
+    The pay range for this position is one hundred fifty one thousand to two hundred sixty five thousand dollars
+    annually.
+  benefits_delta: >-
+    Delta offers medical, dental and vision coverage, a retirement plan with a company match, paid parental leave,
+    and a yearly learning budget. We are an equal opportunity employer and we welcome applicants of every
+    background. Applications are reviewed on a rolling basis until the position is filled.
+  about_theta: >-
+    Theta builds accelerated computing systems. The data engineering team owns the pipelines that collect test
+    results from every chip that leaves the factory. As a data engineer you will design schemas, write batch and
+    streaming jobs, and help hardware engineers find failures faster. You know Python and SQL well and you have
+    run data pipelines in production.
+  role_nocomp: >-
+    Our client is hiring a machine learning engineer to build forecasting models for a regional retailer. You will
+    work with analysts to define targets, build features from sales and inventory data, train models in Python and
+    deploy them on a cloud platform. Contract to hire, hybrid, three days on site.
+  about_epsilon: >-
+    About Epsilon. Epsilon makes software for hospitals and clinics.
+  team_epsilon_a: >-
+    The Scheduling team builds the services that book appointments for millions of patients. You will write Go
+    services, design APIs used by our mobile apps, and keep the booking flow fast and reliable during flu season.
+    You care about clear interfaces, careful migrations and on call that stays quiet.
+  team_epsilon_b: >-
+    The Imaging team builds the viewer that radiologists use all day. You will write TypeScript and C plus plus,
+    render large scans in the browser, and work with clinicians to make reading studies faster and less tiring.
+    You care about performance, accessibility and pixels that are exactly right.
+  role_zeta: >-
+    Zeta is looking for a machine learning engineer to work on search quality for an online marketplace. You will
+    build query understanding and ranking models, run experiments and partner with the product team on metrics.
+    Python and production experience with ranking systems are required.
+  role_eta: >-
+    Eta is hiring a research engineer to build evaluation tools for large language models. You will write data
+    pipelines, design benchmarks and help researchers run experiments at scale on a shared cluster.
+
+listings:
+  - {id: acme-sf, source: jobspy, board: linkedin, company: Acme Pay, title: "Machine Learning Engineer, Risk",
+     location: "San Francisco, CA, USA", url: "https://www.linkedin.example/jobs/view/1001",
+     text: [about_acme, role_acme], places: [us.bay_area]}
+  - {id: acme-sea, source: jobspy, board: linkedin, company: Acme Pay, title: "Machine Learning Engineer, Risk",
+     location: "Seattle, WA, USA", url: "https://www.linkedin.example/jobs/view/1002",
+     text: [about_acme, role_acme], places: [us.seattle]}
+  - {id: acme-ny, source: jobspy, board: linkedin, company: Acme Pay, title: "Machine Learning Engineer, Risk",
+     location: "New York, USA", url: "https://www.linkedin.example/jobs/view/1003",
+     text: [about_acme, role_acme], places: [us.new_york]}
+  - {id: acme-glassdoor, source: jobspy, board: glassdoor, company: Acme Pay, title: "Machine Learning Engineer, Risk",
+     location: "New York, USA", url: "https://www.glassdoor.example/job-listing/acme-1004", raw: "None",
+     places: [us.new_york]}
+  - {id: beta-indeed, source: jobspy, board: indeed, company: Beta, title: Machine Learning Engineer,
+     location: "San Francisco, CA, USA", url: "https://www.indeed.example/viewjob?jk=b001",
+     text: [about_beta, role_beta], places: [us.bay_area]}
+  - {id: beta-linkedin, source: jobspy, board: linkedin, company: Beta, title: Machine Learning Engineer,
+     location: "San Francisco, CA, USA", url: "https://www.linkedin.example/jobs/view/2001",
+     text: [about_beta, role_beta], cut: 60, places: [us.bay_area]}
+  - {id: beta-zip, source: jobspy, board: zip_recruiter, company: Beta, title: Machine Learning Engineer,
+     location: "San Francisco, CA, USA", url: "https://www.ziprecruiter.example/c/Beta/Job/2002",
+     text: [about_beta, role_beta], heading: "### Job Description", places: [us.bay_area]}
+  - {id: gamma-linkedin, source: jobspy, board: linkedin, company: Gamma Infotech LLC, title: Machine Learning Engineer,
+     location: "Tampa, FL, USA", url: "https://www.linkedin.example/jobs/view/3001",
+     text: [role_gamma], places: [us.tampa]}
+  - {id: gamma-zip, source: jobspy, board: zip_recruiter, company: Gamma Infotech, title: Machine Learning Engineer,
+     location: "Tampa, FL, USA", url: "https://www.ziprecruiter.example/c/Gamma/Job/3002",
+     text: [role_gamma], places: [us.tampa]}
+  - {id: delta-r1, source: workday, board: Delta, company: Delta, title: Machine Learning Engineer, location: San Jose,
+     url: "https://delta.wd5.myworkdayjobs.example/external/job/San-Jose/Machine-Learning-Engineer_R100001",
+     text: [about_delta, role_delta, years_3, pay_low, benefits_delta], places: [us.bay_area]}
+  - {id: delta-r2, source: workday, board: Delta, company: Delta, title: Machine Learning Engineer, location: San Jose,
+     url: "https://delta.wd5.myworkdayjobs.example/external/job/San-Jose/Machine-Learning-Engineer_R100002",
+     text: [about_delta, role_delta, years_5, pay_high, benefits_delta], places: [us.bay_area]}
+  - {id: theta-austin, source: workday, board: Theta, company: Theta, title: Data Engineer, location: "US, TX, Austin",
+     url: "https://theta.wd5.myworkdayjobs.example/careers/job/US-TX-Austin/Data-Engineer_JR2001",
+     text: [about_theta], places: [us.austin]}
+  - {id: theta-seattle, source: workday, board: Theta, company: Theta, title: Data Engineer, location: "2 Locations",
+     url: "https://theta.wd5.myworkdayjobs.example/careers/job/US-WA-Seattle/Data-Engineer_JR2001-1",
+     text: [about_theta], places: [us.seattle]}
+  - {id: nocomp-1, source: smartextract, board: Talent.example, company: "", title: Machine Learning Engineer,
+     location: "Austin, TX", url: "https://www.talent.example/view?id=n001", text: [role_nocomp], places: [us.austin]}
+  - {id: nocomp-2, source: smartextract, board: Talent.example, company: "", title: Machine Learning Engineer,
+     location: "Dallas, TX", url: "https://www.talent.example/view?id=n002", text: [role_nocomp], places: [us.dallas]}
+  - {id: epsilon-a, source: jobspy, board: indeed, company: Epsilon, title: Software Engineer, location: "Austin, TX, USA",
+     url: "https://www.indeed.example/viewjob?jk=e001", text: [about_epsilon, team_epsilon_a], places: [us.austin]}
+  - {id: epsilon-b, source: jobspy, board: linkedin, company: Epsilon, title: Software Engineer,
+     location: "Austin, TX, USA", url: "https://www.linkedin.example/jobs/view/5002",
+     text: [about_epsilon, team_epsilon_b], places: [us.austin]}
+  - {id: zeta-1, source: jobspy, board: indeed, company: Zeta, title: ML Engineer, location: "Austin, TX, USA",
+     url: "https://www.indeed.example/viewjob?jk=z001", text: [role_zeta], places: [us.austin]}
+  - {id: zeta-2, source: jobspy, board: linkedin, company: Zeta, title: ML Engineer II, location: "Austin, TX, USA",
+     url: "https://www.linkedin.example/jobs/view/6002", text: [role_zeta], places: [us.austin]}
+  - {id: eta-1, source: jobspy, board: indeed, company: Eta, title: Research Engineer, location: "Austin, TX, USA",
+     url: "https://www.indeed.example/viewjob?jk=t001", text: [role_eta], places: [us.austin]}
+  - {id: eta-2, source: jobspy, board: glassdoor, company: Eta, title: Research Engineer, location: "Austin, TX, USA",
+     url: "https://www.glassdoor.example/job-listing/eta-7002", raw: "None", places: [us.austin]}
+  - {id: eta-3, source: jobspy, board: linkedin, company: Eta, title: Research Engineer, location: "Dallas, TX, USA",
+     url: "https://www.linkedin.example/jobs/view/7003", text: [], places: [us.dallas]}
+
+# 和 delta 的两个编号都像的 LinkedIn 岗位（样例 5）：只能并进其中一个
+ambiguous:
+  - {id: delta-linkedin, source: jobspy, board: linkedin, company: Delta, title: Machine Learning Engineer,
+     location: "San Jose, CA, USA", url: "https://www.linkedin.example/jobs/view/4001",
+     text: [about_delta, role_delta, years_3, pay_low, benefits_delta], places: [us.bay_area]}
+
+# listings 合成的岗位（不含 ambiguous）
+postings:
+  - [acme-sf, acme-sea, acme-ny, acme-glassdoor]
+  - [beta-indeed, beta-linkedin, beta-zip]
+  - [gamma-linkedin, gamma-zip]
+  - [delta-r1]
+  - [delta-r2]
+  - [theta-austin, theta-seattle]
+  - [nocomp-1]
+  - [nocomp-2]
+  - [epsilon-a]
+  - [epsilon-b]
+  - [zeta-1]
+  - [zeta-2]
+  - [eta-1, eta-2]
+  - [eta-3]
