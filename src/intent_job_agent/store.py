@@ -177,6 +177,20 @@ class Store:
         full = self.settings.discovery.full_text_chars
         return sorted(waiting, key=lambda job: len(job.description) < full)
 
+    def untag(self, job_id: str) -> Job:
+        """Send a job not yet shown back to the tagging queue: it was tagged without its text (spec 2c item 18)."""
+        if job_id in self.shown_job_ids():
+            raise InvariantError(f"Job {job_id} was already shown; fix its tags through a misread correction")
+        job = self.job(job_id).model_copy(update={"tags": []})
+        with self.db:
+            self.db.execute("UPDATE jobs SET data = ? WHERE id = ?", (job.model_dump_json(), job_id))
+            self.db.execute("DELETE FROM tagged WHERE job_id = ?", (job_id,))
+            self.db.execute("DELETE FROM backfills WHERE job_id = ?", (job_id,))
+        return job
+
+    def external_rows(self) -> list[dict]:
+        return [dict(row) for row in self.db.execute("SELECT url, job_id, status FROM external_rows ORDER BY rowid")]
+
     def external_row(self, url: str) -> dict | None:
         """Whether a posting from ApplyPilot's working DB was already imported or excluded."""
         row = self.db.execute("SELECT job_id, status FROM external_rows WHERE url = ?", (url,)).fetchone()
