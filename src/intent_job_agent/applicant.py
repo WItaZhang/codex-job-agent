@@ -6,13 +6,18 @@ knowledge base elsewhere on the machine).
 """
 
 from pathlib import Path
+from typing import Annotated
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from .domain import InvariantError
 
 FILE = "applicant.yaml"
+
+
+# One line of English that goes into the apply agent's instructions as it is.
+Line = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, pattern=r"^[^\r\n]+$")]
 
 
 class _Model(BaseModel):
@@ -35,6 +40,8 @@ class Applicant(_Model):
     cover_letter_context: list[Path] = []  # optional extra files that skill needs
     careful_companies: list[str] = []  # applications to these always stop before submit
     apply_agent_read: list[Path] = []  # folders the apply agent may read (read-only), e.g. a knowledge base
+    onsite_ok: list[Line] = []  # where on-site or hybrid jobs are fine; empty: ApplyPilot's single profile city
+    relocation: Line | None = None  # the answer to relocation questions; None: ApplyPilot's "cannot relocate"
 
     def resume(self, resume_id: str) -> Resume:
         for resume in self.resumes:

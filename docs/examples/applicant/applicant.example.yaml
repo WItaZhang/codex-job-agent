@@ -18,6 +18,13 @@ cover_letter_context: []          # optional: other files your skill needs, give
 
 careful_companies: []             # applications to these companies always stop before submit, e.g. [Stripe]
 
+onsite_ok: []                     # optional: where on-site or hybrid jobs are fine, in English; any city inside
+                                  # counts, e.g. [United States]. Empty: only the city in profile.json (ApplyPilot).
+                                  # Not read from your intent: change it here when your locations change.
+relocation: null                  # optional: the answer to relocation questions, in English, e.g.
+                                  # "Yes, I am willing to relocate anywhere in the United States."
+                                  # Empty: ApplyPilot's "cannot relocate".
+
 apply_agent_read: []              # optional: folders the apply agent may read (read-only) to answer application
                                   # questions, e.g. your knowledge base. Not the root or home folder, not anything
                                   # containing data/local or this profile.

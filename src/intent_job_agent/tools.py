@@ -788,6 +788,8 @@ class Toolbox:
             "cover_letter_skill": str(applicant.cover_letter_skill or DEFAULT_LETTER_SKILL),
             "careful_companies": list(applicant.careful_companies),
             "apply_agent_read": [str(path) for path in applicant.apply_agent_read],
+            "onsite_ok": list(applicant.onsite_ok),
+            "relocation": applicant.relocation,
             "review_first": self.settings.apply.review_first,
             "programs": programs,
         }
@@ -976,7 +978,8 @@ class Toolbox:
         if letter is None or not self._letter_ready(job_id):
             raise InvariantError(f"No cover letter for {job_id}")
         txt, pdf = self._letter_files(job_id)
-        resume = self._ready_applicant().resume(letter["resume_id"])
+        applicant = self._ready_applicant()
+        resume = applicant.resume(letter["resume_id"])
         job = self.store.job(job_id)
         return apply_bridge.ApplySpec(
             job_id=job.id,
@@ -988,6 +991,8 @@ class Toolbox:
             resume_text=resume.text,
             letter_txt=txt,
             letter_pdf=pdf,
+            onsite_ok=tuple(applicant.onsite_ok),
+            relocation=applicant.relocation,
         )
 
     @_tool("commit")

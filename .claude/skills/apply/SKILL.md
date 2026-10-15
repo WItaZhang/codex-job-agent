@@ -18,6 +18,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 - 没有投递资料：帮用户在它给出的目录里建好：
   - `applicant.yaml`：参照 `docs/examples/applicant/applicant.example.yaml`。简历、选简历的规则、自己的 cover-letter skill 都可以指向用户自己的知识库。用户想让投递 agent 读知识库来回答申请表的问题时，把知识库目录写进 `apply_agent_read`（只读）。
   - `profile.json`：参照 `docs/examples/applicant/profile.example.json`（ApplyPilot 的格式）。联系方式、工作许可、薪资这些由用户填写；密码只由用户自己写进文件，不在对话里传，也不要读出来。不要写 SSN 和银行卡。
+- `onsite_ok` 为空或 `relocation` 为 null：提醒用户，这样投递时只接受 `profile.json` 里那一个城市的现场或混合办公岗位，搬家题一律答不能搬家。以选择题问要不要写上（地点参照意图里的 location 条目，写英文地名），由用户自己改 `applicant.yaml`。
 - programs 里缺 claude、npx 或 Chrome：告诉用户装好再来。Gmail 读验证码和 CapSolver 是可选的，由用户自己配置。
 
 ## 2. 选出这一批
