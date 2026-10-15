@@ -1,0 +1,71 @@
+# SYNTHETIC rows for ApplyPilot's working DB (table `jobs`), shaped like what its sources stored on
+# 2026-10-13/14 for postings without text (spec section 10, slice 2c items 18-19). Companies, links and
+# text are invented.
+text: &text >-
+  SYNTHETIC posting. Build and ship machine learning systems with a small team. Own models from data
+  to production, review designs, and mentor new engineers. Python and SQL required; experience with
+  ranking or recommendation systems is a plus.
+rows:
+  glassdoor_none:  # JobSpy gave no description; ApplyPilot stored str(None)
+    url: https://www.glassdoor.com/job-listing/j?jl=9000001
+    title: Machine Learning Engineer
+    site: glassdoor
+    strategy: jobspy
+    location: Seattle, WA
+    description: "None"
+    full_description: null
+    application_url: "None"
+    detail_scraped_at: null
+  linkedin_null:  # enrichment's LLM step returned the string "null" and marked the row done
+    url: https://www.linkedin.com/jobs/view/9000002
+    title: Applied Scientist
+    site: linkedin
+    strategy: jobspy
+    location: New York, NY
+    description: null
+    full_description: "null"
+    application_url: null
+    detail_scraped_at: "2026-10-13T08:00:00+00:00"
+  ziprecruiter_null:  # JobSpy's description is real; enrichment still wrote "null"
+    url: https://www.ziprecruiter.com/c/Example-Labs/Job/ML-Engineer?jid=9000003
+    title: ML Engineer
+    site: zip_recruiter
+    strategy: jobspy
+    location: Austin, TX
+    description: *text
+    full_description: "null"
+    application_url: "null"
+    detail_scraped_at: "2026-10-09T08:00:00+00:00"
+  simplyhired_relative:  # smartextract stored a relative link; enrichment could not open it
+    url: /job/SYNTHETIC9000004
+    title: Data Scientist
+    site: SimplyHired
+    strategy: css_selectors
+    location: Remote
+    description: null
+    full_description: null
+    application_url: null
+    detail_scraped_at: "2026-10-13T08:00:00+00:00"
+    detail_error: "Page.goto: Protocol error (Page.navigate): Cannot navigate to invalid URL"
+  odd_spelling:  # the same placeholders with other case and spacing
+    url: https://www.indeed.com/viewjob?jk=synthetic9000005
+    title: Research Engineer
+    site: indeed
+    strategy: jobspy
+    location: Boston, MA
+    description: "  NaN "
+    full_description: " NULL"
+    application_url: null
+    detail_scraped_at: "2026-10-13T08:00:00+00:00"
+  null_in_text:  # a real posting that starts with the word null: kept as it is
+    url: https://www.indeed.com/viewjob?jk=synthetic9000006
+    title: Backend Engineer
+    site: indeed
+    strategy: jobspy
+    location: Denver, CO
+    description: null
+    full_description: >-
+      null safety in Kotlin is part of the job. SYNTHETIC posting: build backend services for a small
+      payments team, review designs and keep the services running.
+    application_url: null
+    detail_scraped_at: "2026-10-13T08:00:00+00:00"

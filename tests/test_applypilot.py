@@ -7,20 +7,23 @@ cascade against a page served on the loopback interface.
 import http.server
 import json
 import os
+import sqlite3
 import threading
 import time
+from pathlib import Path
 
 import pandas as pd
 import pytest
 import yaml
 
 from intent_job_agent import applypilot_bridge as bridge
-from intent_job_agent.domain import Salary
+from intent_job_agent.domain import Job, Salary
 from intent_job_agent.store import Store
 from intent_job_agent.tools import SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
 from intent_job_agent.vendor.applypilot.discovery import jobspy as ap_jobspy
 from intent_job_agent.vendor.applypilot.discovery import smartextract as ap_smart
 from intent_job_agent.vendor.applypilot.discovery import workday as ap_workday
+from intent_job_agent.vendor.applypilot.enrichment import detail as ap_detail
 
 from .conftest import BASE_INTENT, BASE_VOCAB, settings
 
@@ -332,3 +335,255 @@ def test_discovery_setup_reports_choices_without_secrets(box, monkeypatch):
     status = box.get_discovery_setup()
     assert status["searches_yaml"] is True and status["llm_provider"] == "gemini"
     assert "synthetic-secret" not in json.dumps(status)
+
+
+# --- postings without text (slice 2c items 18-19, 2026-10-15) ------------------------------------------
+
+MISSING = yaml.safe_load((Path(__file__).parent / "fixtures" / "applypilot_missing_text.yaml").read_text("utf-8"))
+COLUMNS = (
+    "url",
+    "title",
+    "salary",
+    "description",
+    "location",
+    "site",
+    "strategy",
+    "discovered_at",
+    "full_description",
+    "application_url",
+    "detail_scraped_at",
+    "detail_error",
+)
+SIMPLYHIRED = "https://www.simplyhired.com/job/SYNTHETIC9000004"
+
+
+def url_of(name: str) -> str:
+    return MISSING["rows"][name]["url"]
+
+
+def ap_db(box) -> sqlite3.Connection:
+    bridge.configure(box.data_dir, box.settings)
+    return sqlite3.connect(bridge.staging_dir(box.data_dir, box.settings) / "applypilot.db")
+
+
+def stage(box, *names: str) -> None:
+    """Put fixture rows into ApplyPilot's working DB, as its sources stored them."""
+    db = ap_db(box)
+    with db:
+        for name in names:
+            values = {"discovered_at": "2026-10-13T07:00:00+00:00", **MISSING["rows"][name]}
+            db.execute(
+                f"INSERT INTO jobs ({', '.join(COLUMNS)}) VALUES ({', '.join('?' * len(COLUMNS))})",
+                [values.get(column) for column in COLUMNS],
+            )
+    db.close()
+
+
+def ap_set(box, url: str, **fields) -> None:
+    db = ap_db(box)
+    with db:
+        db.execute(f"UPDATE jobs SET {', '.join(f'{k} = ?' for k in fields)} WHERE url = ?", [*fields.values(), url])
+    db.close()
+
+
+def ap_resolve_urls(box) -> None:
+    """What ApplyPilot's enrichment does first: rewrite relative links it has a base URL for."""
+    db = ap_db(box)
+    ap_detail.resolve_all_urls(db)
+    db.close()
+
+
+def sync(box) -> dict:
+    return bridge.sync(box.store, box.data_dir, box.settings)
+
+
+def job_at(box, url: str) -> Job:
+    (job,) = [job for job in box.store.jobs() if job.url == url]
+    return job
+
+
+def stored_before_the_fix(box, job: Job, description: str) -> Job:
+    """A job as the bridge stored it before 2026-10-15 (placeholder text), tagged and on the apply list."""
+    job = job.model_copy(update={"description": description})
+    box.store.add_job(job)
+    box.submit_job_tags(job.id, ["role.ml_engineering"])
+    box.store.list_applications([job.id], "2026-10-14")
+    return box.store.job(job.id)
+
+
+class FakeScraper:
+    """Stands in for ApplyPilot's per-site browser batch: records the links it is given and stores `text`."""
+
+    def __init__(self, text: str):
+        self.text = text
+        self.urls: list[str] = []
+
+    def __call__(self, conn, site, jobs, delay=2.0, max_jobs=None):
+        for url, _title in jobs:
+            self.urls.append(url)
+            conn.execute(
+                "UPDATE jobs SET full_description = ?, detail_scraped_at = ?, detail_error = NULL WHERE url = ?",
+                (self.text, "2026-10-15T08:00:00+00:00", url),
+            )
+        conn.commit()
+        return {"processed": len(jobs), "ok": len(jobs), "partial": 0, "error": 0, "tiers": {}}
+
+
+def enrich(box) -> dict:
+    searches(box)
+    report = bridge.run_sources(box.data_dir, box.settings, [], enrich=True)
+    assert report["enrich"]["error"] is None, report
+    return report
+
+
+def test_glassdoor_rows_without_a_description_are_stored_without_text(box, monkeypatch):
+    glassdoor = row(1, site="glassdoor", job_url="https://www.glassdoor.com/job-listing/j?jl=1", description=None)
+    glassdoor["job_url_direct"] = None
+    monkeypatch.setattr(ap_jobspy, "scrape_jobs", FakeJobSpy({"machine learning engineer": [glassdoor]}))
+    searches(box)
+    discover(box)
+    (job,) = box.store.jobs()
+    assert job.description == ""
+    assert "application_url" not in job.attributes
+
+
+def test_placeholders_from_applypilot_count_as_no_text(box):
+    stage(box, "glassdoor_none", "linkedin_null", "odd_spelling", "null_in_text")
+    assert sync(box)["new"] == 4
+    for name in ("glassdoor_none", "linkedin_null", "odd_spelling"):
+        assert job_at(box, url_of(name)).description == "", name
+    assert "application_url" not in job_at(box, url_of("glassdoor_none")).attributes
+    assert job_at(box, url_of("null_in_text")).description == MISSING["rows"]["null_in_text"]["full_description"]
+
+
+def test_search_description_is_used_when_enrichment_wrote_null(box):
+    stage(box, "ziprecruiter_null")
+    sync(box)
+    job = job_at(box, url_of("ziprecruiter_null"))
+    assert job.description == MISSING["text"]
+    assert "application_url" not in job.attributes
+
+
+def test_null_from_enrichment_never_replaces_text(box):
+    stage(box, "ziprecruiter_null")
+    ap_set(box, url_of("ziprecruiter_null"), full_description=None)
+    sync(box)
+    ap_set(box, url_of("ziprecruiter_null"), full_description="null")
+    assert sync(box)["updated"] == 0
+    assert job_at(box, url_of("ziprecruiter_null")).description == MISSING["text"]
+
+
+def test_placeholder_text_stored_earlier_is_cleared_and_nothing_else_changes(box):
+    stage(box, "glassdoor_none", "linkedin_null")
+    sync(box)
+    glassdoor = stored_before_the_fix(box, job_at(box, url_of("glassdoor_none")), "None")
+    linkedin = stored_before_the_fix(box, job_at(box, url_of("linkedin_null")), "null")
+    box.store.save_selection("2026-10-14", [(linkedin.id, "recommended")])
+    counts = sync(box)
+    assert counts["retagged"] == 0
+    for job in (glassdoor, linkedin):
+        after = box.store.job(job.id)
+        assert after.description == ""
+        assert box.store.is_tagged(job.id) and after.tags == job.tags
+        assert box.store.applications()[job.id]["status"] == "pending"
+
+
+def test_tagged_job_without_text_takes_real_text_and_goes_back_to_tagging(box):
+    stage(box, "ziprecruiter_null")
+    sync(box)
+    job = stored_before_the_fix(box, job_at(box, url_of("ziprecruiter_null")), "null")
+    assert sync(box)["retagged"] == 1
+    after = box.store.job(job.id)
+    assert after.description == MISSING["text"] and after.tags == []
+    assert job.id in [waiting.id for waiting in box.store.untagged_jobs()]
+    assert box.store.applications()[job.id]["status"] == "pending"
+    box.submit_job_tags(job.id, ["role.ml_engineering"])
+    assert sync(box)["retagged"] == 0
+    assert box.store.is_tagged(job.id)
+
+
+def test_shown_job_without_text_keeps_it(box):
+    stage(box, "linkedin_null")
+    sync(box)
+    job = stored_before_the_fix(box, job_at(box, url_of("linkedin_null")), "")
+    box.store.save_selection("2026-10-14", [(job.id, "recommended")])
+    ap_set(box, url_of("linkedin_null"), full_description=MISSING["text"])
+    assert sync(box)["retagged"] == 0
+    assert box.store.job(job.id).description == "" and box.store.is_tagged(job.id)
+
+
+def test_rows_enriched_without_text_are_retried_once(box, monkeypatch):
+    stage(box, "glassdoor_none", "linkedin_null", "simplyhired_relative", "odd_spelling", "null_in_text")
+    scraper = FakeScraper("null")
+    monkeypatch.setattr(ap_detail, "scrape_site_batch", scraper)
+    enrich(box)
+    # Glassdoor is never enriched by ApplyPilot; the row with real text is done.
+    assert sorted(scraper.urls) == sorted([url_of("linkedin_null"), SIMPLYHIRED, url_of("odd_spelling")])
+    scraper.urls.clear()
+    stage(box, "ziprecruiter_null")  # a row that came back without text after the first retry
+    enrich(box)
+    assert scraper.urls == [url_of("ziprecruiter_null")]
+    scraper.urls.clear()
+    enrich(box)
+    assert scraper.urls == []
+
+
+def test_text_found_on_retry_reaches_the_tagged_job(box, monkeypatch):
+    stage(box, "linkedin_null")
+    sync(box)
+    job = stored_before_the_fix(box, job_at(box, url_of("linkedin_null")), "null")
+    monkeypatch.setattr(ap_detail, "scrape_site_batch", FakeScraper(MISSING["text"]))
+    enrich(box)
+    assert sync(box)["retagged"] == 1
+    assert box.store.job(job.id).description == MISSING["text"]
+    assert not box.store.is_tagged(job.id)
+
+
+def test_sites_without_a_base_url_use_their_search_page_domain(box):
+    sites = [
+        {"name": "SimplyHired", "url": "https://www.simplyhired.com/search?q={query_encoded}", "type": "search"},
+        {"name": "Synthetic Board", "url": "https://jobs.example.org/search?q={query_encoded}", "type": "search"},
+        {"name": "RemoteOK", "url": "https://remoteok.com/remote-{query_encoded}-jobs", "type": "search"},
+    ]
+    (box.data_dir / "sites.yaml").write_text(yaml.safe_dump({"sites": sites}), encoding="utf-8")
+    stage_dir = bridge.configure(box.data_dir, box.settings)
+    base = yaml.safe_load((stage_dir / "config" / "sites.yaml").read_text(encoding="utf-8"))["base_urls"]
+    assert base["SimplyHired"] == "https://www.simplyhired.com"
+    assert base["Synthetic Board"] == "https://jobs.example.org"
+    assert base["RemoteOK"] is None  # ApplyPilot says these links cannot be resolved
+    assert base["Talent.com"] == "https://www.talent.com"  # ApplyPilot's own entries are kept
+
+
+def test_relative_links_become_full_links_and_stay_one_job(box):
+    stage(box, "simplyhired_relative")
+    sync(box)
+    (job,) = box.store.jobs()
+    assert job.url == SIMPLYHIRED
+    ap_resolve_urls(box)
+    assert sync(box)["new"] == 0
+    assert [j.id for j in box.store.jobs()] == [job.id]
+
+
+def test_jobs_stored_with_a_relative_link_get_the_full_link(box):
+    relative = url_of("simplyhired_relative")
+    old = Job(
+        id=bridge.external_job_id(relative),
+        source="smartextract",
+        board="SimplyHired",
+        title="Data Scientist",
+        url=relative,
+        location="Remote",
+        tags=[],
+    )
+    box.store.add_job(old)
+    box.store.mark_external(relative, old.id, "imported")
+    box.submit_job_tags(old.id, ["role.ml_engineering"])
+    box.store.list_applications([old.id], "2026-10-14")
+    stage(box, "simplyhired_relative")
+    assert sync(box)["new"] == 0
+    (job,) = box.store.jobs()
+    assert (job.id, job.url, job.tags) == (old.id, SIMPLYHIRED, ["role.ml_engineering"])
+    assert box.store.is_tagged(job.id) and box.store.applications()[job.id]["status"] == "pending"
+    ap_resolve_urls(box)
+    assert sync(box)["new"] == 0
+    assert [j.id for j in box.store.jobs()] == [old.id]
