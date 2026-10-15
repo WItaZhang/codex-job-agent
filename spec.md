@@ -428,11 +428,14 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
 ### 切片 2c 的补充
 
 17. ApplyPilot（https://github.com/Pickle-Pixel/ApplyPilot ，提交 4a8d521，AGPL-3.0）的 `discovery/jobspy.py`、`discovery/workday.py`、`discovery/smartextract.py`、`enrichment/detail.py`、`database.py`、`llm.py` 原样放在 `src/intent_job_agent/vendor/applypilot/`，**只改了 import**。它们原本依赖的配置模块由本项目重写为一个薄适配层。
-18. ApplyPilot 的代码在自己的工作库（`data/local/applypilot/applypilot.db`）里工作；完成后把新岗位以"未打标签"导入本项目，并刷新尚未打标签、尚未展示的岗位的原文。已打标签的岗位原文不再变化。
+18. ApplyPilot 的代码在自己的工作库（`data/local/applypilot/applypilot.db`）里工作；完成后把新岗位以"未打标签"导入本项目，并刷新尚未打标签、尚未展示的岗位的原文。已打标签的岗位原文不再变化。例外（2026-10-15 用户选择）：原文为空的岗位（包括存成占位词的，见第 19 条），还没展示过时，拿到真正的原文就换上；已经打过标签的退回待打标签队列，按原文重新打。重新打完之前它不在投递清单上，投递状态保留。展示过的岗位原文不变。
 19. 对 ApplyPilot 的几处修正（不改它的代码，在适配层完成）：
     - 它的示例配置用 `boards`、`location.accept_patterns/reject_patterns`、`exclude_titles`，代码却读 `sites`、`location_accept`、`location_reject_non_remote`，且从不使用 `exclude_titles`。两种写法都接受，`exclude_titles` 在导入时生效。
     - 它的地点过滤在没有任何接受规则时会丢掉所有非远程岗位；这里改为"不写就不过滤"。
     - 它存 JobSpy 结果时丢了公司名；这里在旁边另记公司名。
+    - 它的来源会把"没有"写成字符串：存 JobSpy 结果时用 `str(...)`，Glassdoor 没有描述时存成 "None"；补全原文的 LLM 一步会把 "null" 当原文写回，并记为补全成功。从它的工作库读到的字段，整个值（去掉首尾空白、不分大小写）是 `None`、`null`、`nan` 的，一律当作没有。原文取第一个真正的值：补全的原文 → 搜索结果里的描述 → 空。已经存成占位词的旧岗位，下次导入时清成空，展示过的也一样（清掉占位词不算原文变化）。2026-10-15 发现：Glassdoor 231 个存成 "None"，LinkedIn 83 个和 ZipRecruiter 1 个存成 "null"。
+    - 补全原文结束却没拿到原文的行（原文为空或是占位词），在下次补全前标回"未补全"，每行只重试一次（重试过的链接另记在它的工作库旁边）。它本来就不补全的站点（Glassdoor 等）不重试（2026-10-15 用户选择）。
+    - 它自带的 `base_urls` 缺少部分站点（如 SimplyHired），这些站点抓到的相对链接既打不开，也补不了原文。`base_urls` 里没有的站点，用它搜索页的域名补上；明确写成 null 的不补。导入时先把相对链接换成完整链接再查重，所以它以后改写成完整链接也认作同一个岗位。已存的相对链接岗位改成完整链接，岗位编号、标签和投递状态不变（2026-10-15：SimplyHired 40 个，其中 34 个在投递清单上；用户选择）。
 20. 没有 `data/local/employers.yaml` 和 `sites.yaml` 时，沿用 ApplyPilot 自带的列表（与 ApplyPilot 行为一致；自带列表以加拿大雇主和站点为主，可用自己的文件替换或清空）。
 21. LLM key 可选：ApplyPilot 的环境变量（`GEMINI_API_KEY` / `OPENAI_API_KEY` / `LLM_URL`、`LLM_MODEL`），可放在 `data/local/.env`。没有 key 时跳过 smartextract 和补全原文的第 3 步。首次设置时由 agent 以选择题询问；key 由用户自己写入文件，不在对话中传递。
 22. 代理：环境变量 `INTENT_AGENT_PROXY`（`host:port` 或 `host:port:user:pass`），传给 JobSpy、Workday 和补全时的浏览器。
