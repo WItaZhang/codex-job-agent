@@ -8,6 +8,10 @@
 #   nocomp ← Talent.com：公司名为空
 #   acme-glassdoor、eta ← Glassdoor：没有正文（库里存的是字符串 "None"），只能按地点判断
 # 正文由 paragraphs 拼接；cut 只保留前 N 个词，heading 加在最前面；raw 直接给出存下来的正文。
+# 切片 5c 的样例（plan.md 切片 5c 第 3 节，样例 20–31）在 listings_5c / postings_5c 里：同样是编的，形状照
+# 2026-10-15 在真实数据只读副本上看到的情况（括号里是对应的真实公司）。为了让代码认出招聘系统，链接用招聘系统
+# 真实的格式（jobs.lever.co、smartrecruiters 等），只是字符串，测试不会打开它们。tags 是完整的标签（地点、company）；
+# application_url 是招聘网站抓取时记下的投递链接；append 加在正文最后。
 
 synthetic: true
 
@@ -91,6 +95,87 @@ paragraphs:
     Eta is hiring a research engineer to build evaluation tools for large language models. You will write data
     pipelines, design benchmarks and help researchers run experiments at scale on a shared cluster.
 
+  role_iota: >-
+    Iota Motion builds the simulation stack behind its autonomous delivery robots. As a machine learning engineer on
+    sensor simulation you will model lidar, radar and camera returns, train generative models of rare road scenes,
+    and measure how well the simulated sensors predict what the robots see on real streets. You write Python and C
+    plus plus, you are comfortable with large GPU jobs, and you like working next to the hardware team.
+  role_kappa: >-
+    Kappa Learning helps teachers give feedback at scale. The analytics engineering team turns raw product events into
+    trusted tables, dashboards and models that school districts use to decide where to spend their budgets. You will
+    write SQL and Python, design dimensional models, own the data quality checks, and present findings to customers.
+    This is a hybrid role with two days a week in the office nearest to you.
+  role_mu: >-
+    Mu Payments is hiring a data scientist for payments risk management and analytics. You will build loss forecasts,
+    design experiments for new risk rules, size the impact of fraud attacks and explain your findings to product and
+    finance partners. Strong SQL and Python are required, together with a solid grounding in statistics and a habit
+    of checking the data before trusting a result. Experience in payments or credit risk is a plus.
+  role_nu: >-
+    Nu Networks is looking for a security operations engineer to defend a global network that carries a large share
+    of the world's internet traffic. You will triage alerts, write detections, automate response playbooks in Python,
+    and run tabletop exercises with the incident response team. Experience with SIEM tools, cloud logging and threat
+    hunting is required. Shift coverage is shared fairly across the team and on call is paid.
+  role_xi: >-
+    Xi Logistics is hiring a machine learning engineer for routing. You will build models that predict travel times,
+    choose pickup windows and balance loads across depots, and you will ship them into a planning service used by
+    thousands of drivers every morning. Python, SQL and experience with optimization or forecasting in production are
+    required. You will work closely with operations analysts who know every depot by name.
+  role_omicron: >-
+    Omicron Cloud is hiring an applied scientist for payment risk. You will research and build machine learning
+    models that stop fraudulent transactions while letting good customers pay without friction. You will design
+    features from transaction graphs, run offline and online evaluations, and publish internal papers on what worked
+    and what did not. A graduate degree in a quantitative field and strong Python skills are required.
+  role_omicron2: >-
+    Omicron Cloud is hiring a senior applied scientist to lead research on seller risk. You will set the research
+    agenda, mentor scientists, and turn models that detect abusive sellers into production systems with the
+    engineering team. You will write papers, review designs and represent the team in planning. A doctorate or
+    equivalent research experience and a record of shipped machine learning systems are required.
+  role_pi: >-
+    Pi Video is hiring new graduates to join the e-commerce user growth team as machine learning engineers. You will
+    build recommendation and ranking models that help shoppers find products they love, run online experiments, and
+    work with product managers to define success metrics. You should be graduating with a degree in computer science
+    or a related field and be fluent in Python. Experience with large scale data processing is a plus.
+  role_pi2: >-
+    Pi Video is hiring new graduates as data engineers on the creator analytics team. You will build batch and
+    streaming pipelines that count views, likes and earnings for millions of creators, design tables that analysts can
+    trust, and keep the pipelines healthy with tests and alerts. You should be graduating with a degree in computer
+    science or a related field and know SQL and one of Python, Java or Scala well.
+  role_rho: >-
+    Rho Health is hiring a machine learning engineer to work on clinical documentation. You will fine tune language
+    models that draft visit notes from conversations, build evaluation sets with clinicians, and keep patient data safe
+    at every step. Python and production experience with natural language processing are required. You will join a
+    small team that ships every week and talks to doctors every day.
+  role_sigma: >-
+    Sigma Systems is hiring a platform engineer to build the internal developer platform used by every product team.
+    You will run Kubernetes clusters, write the tooling that turns a service template into a running deployment, and
+    improve build times across a large monorepo. Go or Python, solid Linux knowledge and experience operating
+    production infrastructure are required. You will share on call with the rest of the platform team.
+  role_tau: >-
+    Tau Devices is hiring a backend engineer for its AI platform and cloud native services. You will design APIs and
+    services that serve models to millions of devices, run them on Kubernetes across several regions, and keep them
+    fast and reliable. Java or Go, experience with distributed systems and a habit of writing tests first are
+    required. You will work with researchers who train the models and teams who build the devices.
+  role_upsilon: >-
+    Our client, a regional retailer, is hiring a data analyst to support its merchandising team. You will build weekly
+    sales and inventory reports, answer questions about promotions and pricing, and automate recurring analyses in SQL
+    and Python. You will present to buyers and store managers and help them read the numbers. Hybrid, three days a
+    week in the head office, full time, with a yearly bonus.
+  role_phi: >-
+    Phi Pay is looking for a manager of data science and machine learning for risk and fraud. You will lead a team of
+    scientists and engineers who build the models that approve or decline payments in real time, set the roadmap with
+    product and operations, and hire and grow the team. You have managed data scientists before, you know fraud
+    patterns in payments, and you can explain model tradeoffs to executives in plain words.
+  role_chi: >-
+    Chi Commerce is hiring a senior machine learning engineer for its new verticals team, which brings grocery,
+    convenience and retail delivery to the marketplace. You will build ranking, search and substitution models,
+    measure them in online experiments and work with product and operations to launch in new cities. Python, deep
+    learning frameworks and production experience with recommendation systems are required.
+  role_chi_other: >-
+    Chi Commerce is hiring a senior machine learning engineer to work on logistics for its new verticals. You will
+    forecast demand by store and hour, decide how many shoppers each store needs, and build the models behind delivery
+    time promises. You will partner with operations teams in every market. Python, forecasting experience in production
+    and comfort with messy real world data are required.
+
 listings:
   - {id: acme-sf, source: jobspy, board: linkedin, company: Acme Pay, title: "Machine Learning Engineer, Risk",
      location: "San Francisco, CA, USA", url: "https://www.linkedin.example/jobs/view/1001",
@@ -173,3 +258,167 @@ postings:
   - [zeta-2]
   - [eta-1, eta-2]
   - [eta-3]
+
+# 切片 5c 的样例 20–31（plan.md 切片 5c 第 3 节）
+listings_5c:
+  # 20（照 Zoox、Meta）：官网 Lever 上福斯特城一条；Indeed 西雅图一条，投递链接是跳转包装；ZipRecruiter 多伦多一条，
+  # 链接多了 lever-source 和 /apply，大小写也不同。正文一样，但官网那条写了城市，只有链接能把三条连起来（也跨国家）。
+  - {id: iota-lever, source: lever, board: iota, company: Iota Motion, title: "Machine Learning Engineer, Sensor Simulation",
+     location: "Foster City, CA", url: "https://jobs.lever.co/iota/2347453a-f11f-4dc2-ad14-572bc1f6247f",
+     text: [role_iota], tags: [location.us.bay_area]}
+  - {id: iota-indeed, source: jobspy, board: indeed, company: Iota Motion, title: "Machine Learning Engineer, Sensor Simulation",
+     location: "Seattle, WA", url: "https://www.indeed.example/viewjob?jk=i001", text: [role_iota], tags: [location.us.seattle],
+     application_url: "https://jsv3.recruitics.com/redirect?rx_cid=3239&rx_jobId=a1KiE000_1001&rx_url=https%3A%2F%2Fjobs.lever.co%2Fiota%2F2347453a-f11f-4dc2-ad14-572bc1f6247f%3Flever-source%3DIndeed"}
+  - {id: iota-zip, source: jobspy, board: zip_recruiter, company: Iota Motion, title: "Machine Learning Engineer, Sensor Simulation",
+     location: "Toronto, ON, Canada", url: "https://www.ziprecruiter.example/c/Iota/Job/i002", text: [role_iota],
+     tags: [location.ca.toronto],
+     application_url: "https://jobs.lever.co/iota/2347453A-F11F-4DC2-AD14-572BC1F6247F/apply?lever-source=Ziprecruiter"}
+  # 21（照 Turnitin）：Indeed 上三个城市，正文一样，SmartRecruiters 编号各不相同
+  - {id: kappa-atl, source: jobspy, board: indeed, company: Kappa Learning, title: Analytics Engineer, location: "Atlanta, GA",
+     url: "https://www.indeed.example/viewjob?jk=k001", text: [role_kappa], tags: [location.us.atlanta],
+     application_url: "https://jobs.smartrecruiters.com/KappaLearning/744000155325258-analytics-engineer?trid=x1"}
+  - {id: kappa-dal, source: jobspy, board: indeed, company: Kappa Learning, title: Analytics Engineer, location: "Dallas, TX",
+     url: "https://www.indeed.example/viewjob?jk=k002", text: [role_kappa], tags: [location.us.dallas],
+     application_url: "https://jobs.smartrecruiters.com/KappaLearning/744000155325058-analytics-engineer"}
+  - {id: kappa-chi, source: jobspy, board: indeed, company: Kappa Learning, title: Analytics Engineer, location: "Chicago, IL",
+     url: "https://www.indeed.example/viewjob?jk=k003", text: [role_kappa], tags: [location.us.chicago],
+     application_url: "https://jobs.smartrecruiters.com/KappaLearning/744000155325138-analytics-engineer"}
+  # 22（照 PayPal）：官网 Workday 芝加哥 R1、圣何塞 R2，正文一样；LinkedIn 圣何塞、芝加哥各一条，没有链接
+  - {id: mu-r1, source: workday, board: Mu, company: Mu Payments, title: Data Scientist, location: "Chicago, Illinois",
+     url: "https://mu.wd1.myworkdaysite.example/recruiting/mu/jobs/job/Chicago-Illinois/Data-Scientist_R0138042",
+     text: [role_mu], tags: [location.us.chicago]}
+  - {id: mu-r2, source: workday, board: Mu, company: Mu Payments, title: Data Scientist, location: "San Jose, California",
+     url: "https://mu.wd1.myworkdaysite.example/recruiting/mu/jobs/job/San-Jose-California/Data-Scientist_R0138043",
+     text: [role_mu], tags: [location.us.bay_area]}
+  - {id: mu-li-sj, source: jobspy, board: linkedin, company: Mu Payments, title: Data Scientist, location: "San Jose, CA",
+     url: "https://www.linkedin.example/jobs/view/9201", text: [role_mu], tags: [location.us.bay_area]}
+  - {id: mu-li-chi, source: jobspy, board: linkedin, company: Mu Payments, title: Data Scientist, location: "Chicago, IL",
+     url: "https://www.linkedin.example/jobs/view/9202", text: [role_mu], tags: [location.us.chicago]}
+  # 23（照 Cisco）：官网 Workday 一条"3 Locations"（标签只有其中一个城市），LinkedIn 西雅图一条，正文一样
+  - {id: nu-wd, source: workday, board: Nu, company: Nu Networks, title: Security Operations Engineer, location: "3 Locations",
+     url: "https://nu.wd5.myworkdayjobs.example/Nu/job/US-TX-Austin/Security-Operations-Engineer_2027689-1",
+     text: [role_nu], tags: [location.us.austin]}
+  - {id: nu-li, source: jobspy, board: linkedin, company: Nu Networks, title: Security Operations Engineer,
+     location: "Seattle, WA", url: "https://www.linkedin.example/jobs/view/9301", text: [role_nu], tags: [location.us.seattle]}
+  # 23b：官网 Workday 写明芝加哥，LinkedIn 西雅图，正文一样
+  - {id: xi-wd, source: workday, board: Xi, company: Xi Logistics, title: Machine Learning Engineer, location: "Chicago, IL",
+     url: "https://xi.wd5.myworkdayjobs.example/Xi/job/Chicago/Machine-Learning-Engineer_R555001", text: [role_xi],
+     tags: [location.us.chicago]}
+  - {id: xi-li, source: jobspy, board: linkedin, company: Xi Logistics, title: Machine Learning Engineer, location: "Seattle, WA",
+     url: "https://www.linkedin.example/jobs/view/9401", text: [role_xi], tags: [location.us.seattle]}
+  # 24（照 Amazon）：LinkedIn 两个城市，正文一样，各写一个 Job ID；另一对只有一份写了编号
+  - {id: omicron-sd, source: jobspy, board: linkedin, company: Omicron Cloud, title: Applied Scientist, location: "San Diego, CA",
+     url: "https://www.linkedin.example/jobs/view/9501", text: [role_omicron], append: "Job ID: A10570976",
+     tags: [location.us.san_diego]}
+  - {id: omicron-sea, source: jobspy, board: linkedin, company: Omicron Cloud, title: Applied Scientist, location: "Seattle, WA",
+     url: "https://www.linkedin.example/jobs/view/9502", text: [role_omicron], append: "Job ID: A10570970",
+     tags: [location.us.seattle]}
+  - {id: omicron2-sd, source: jobspy, board: linkedin, company: Omicron Cloud, title: Senior Applied Scientist,
+     location: "San Diego, CA", url: "https://www.linkedin.example/jobs/view/9503", text: [role_omicron2],
+     append: "Job ID: A10571111", tags: [location.us.san_diego]}
+  - {id: omicron2-sea, source: jobspy, board: linkedin, company: Omicron Cloud, title: Senior Applied Scientist,
+     location: "Seattle, WA", url: "https://www.linkedin.example/jobs/view/9504", text: [role_omicron2],
+     tags: [location.us.seattle]}
+  # 25（照 TikTok）：LinkedIn 两个城市，正文只差各自城市的薪资数字；另一对只差截止日期
+  - {id: pi-sj, source: jobspy, board: linkedin, company: Pi Video, title: Machine Learning Engineer Graduate,
+     location: "San Jose, CA", url: "https://www.linkedin.example/jobs/view/9601", text: [role_pi],
+     append: "The base salary range for this role in the selected city is $128,000 - $316,800 annually.",
+     tags: [location.us.bay_area]}
+  - {id: pi-sea, source: jobspy, board: linkedin, company: Pi Video, title: Machine Learning Engineer Graduate,
+     location: "Seattle, WA", url: "https://www.linkedin.example/jobs/view/9602", text: [role_pi],
+     append: "The base salary range for this role in the selected city is $121,600 - $243,200 annually.",
+     tags: [location.us.seattle]}
+  - {id: pi2-sj, source: jobspy, board: linkedin, company: Pi Video, title: Data Engineer Graduate, location: "San Jose, CA",
+     url: "https://www.linkedin.example/jobs/view/9603", text: [role_pi2], append: "Applications close on 10/11/2026.",
+     tags: [location.us.bay_area]}
+  - {id: pi2-sea, source: jobspy, board: linkedin, company: Pi Video, title: Data Engineer Graduate, location: "Seattle, WA",
+     url: "https://www.linkedin.example/jobs/view/9604", text: [role_pi2], append: "Applications close on October 25, 2026.",
+     tags: [location.us.seattle]}
+  # 26：招聘网站上美国一条、加拿大一条，正文一样，没有链接
+  - {id: rho-us, source: jobspy, board: indeed, company: Rho Health, title: Machine Learning Engineer, location: "Boston, MA",
+     url: "https://www.indeed.example/viewjob?jk=r001", text: [role_rho], tags: [location.us.boston]}
+  - {id: rho-ca, source: jobspy, board: linkedin, company: Rho Health, title: Machine Learning Engineer,
+     location: "Toronto, ON, Canada", url: "https://www.linkedin.example/jobs/view/9701", text: [role_rho],
+     tags: [location.ca.toronto]}
+  # 27（照 Workday 的 JR-0110287）：同一个编号，美国、加拿大两个地点路径；再加一条 LinkedIn 美国的同正文
+  - {id: sigma-us, source: workday, board: Sigma, company: Sigma Systems, title: Platform Engineer, location: "USA, CO, Boulder",
+     url: "https://sigma.wd5.myworkdayjobs.example/en-US/Sigma/job/USA-CO-Boulder/Platform-Engineer_JR-0110287",
+     text: [role_sigma], tags: [location.us.boulder]}
+  - {id: sigma-ca, source: workday, board: Sigma, company: Sigma Systems, title: Platform Engineer,
+     location: "Canada, BC, Vancouver",
+     url: "https://sigma.wd5.myworkdayjobs.example/Sigma/job/Canada-BC-Vancouver/Platform-Engineer_JR-0110287-1",
+     text: [role_sigma], tags: [location.ca.vancouver]}
+  - {id: sigma-li, source: jobspy, board: linkedin, company: Sigma Systems, title: Platform Engineer, location: "Boulder, CO",
+     url: "https://www.linkedin.example/jobs/view/9801", text: [role_sigma], tags: [location.us.boulder]}
+  # 28（照 Google、Lenovo）：手动导入的公司招聘页，两个城市两个编号（Avature 式的 /JobDetail/ 页面）；
+  # 再加一条 LinkedIn 第三个城市的同正文
+  - {id: tau-sj, source: manual, company: Tau Devices, title: Backend Engineer, location: "San Jose, CA",
+     url: "https://jobs.tau.example/en_US/careers/JobDetail/Backend-Engineer/81634", text: [role_tau],
+     tags: [location.us.bay_area]}
+  - {id: tau-kir, source: manual, company: Tau Devices, title: Backend Engineer, location: "Kirkland, WA",
+     url: "https://jobs.tau.example/en_US/careers/JobDetail/Backend-Engineer/81635", text: [role_tau],
+     tags: [location.us.kirkland]}
+  - {id: tau-li, source: jobspy, board: linkedin, company: Tau Devices, title: Backend Engineer, location: "Seattle, WA",
+     url: "https://www.linkedin.example/jobs/view/9901", text: [role_tau], tags: [location.us.seattle]}
+  # 29（照 Talent.com）：公司名为空，用 company 标签；第三条没有 company 标签，第四条有两个
+  - {id: ups-1, source: smartextract, board: Talent.example, company: "", title: Data Analyst, location: "Austin, TX",
+     url: "https://www.talent.example/view?id=u001", text: [role_upsilon],
+     tags: [location.us.austin, company.upsilon_retail]}
+  - {id: ups-2, source: smartextract, board: Talent.example, company: "", title: Data Analyst, location: "Austin, Texas",
+     url: "https://www.talent.example/view?id=u002", text: [role_upsilon],
+     tags: [location.us.austin, company.upsilon_retail]}
+  - {id: ups-3, source: smartextract, board: Talent.example, company: "", title: Data Analyst, location: "Austin, TX",
+     url: "https://www.talent.example/view?id=u003", text: [role_upsilon], tags: [location.us.austin]}
+  - {id: ups-4, source: smartextract, board: Talent.example, company: "", title: Data Analyst, location: "Austin, TX",
+     url: "https://www.talent.example/view?id=u004", text: [role_upsilon],
+     tags: [location.us.austin, company.upsilon_retail, company.other_retail]}
+  # 30（照 Trustly）：Talent.com 一条（公司名为空，两个城市的标签）；LinkedIn 一条没有正文，原文地点写法不同
+  - {id: phi-talent, source: smartextract, board: Talent.example, company: "", title: "Manager, Data Science and ML",
+     location: "San Francisco, CA, United States", url: "https://www.talent.example/view?id=p001", text: [role_phi],
+     tags: [location.us.bay_area, location.us.new_york, company.phi_pay]}
+  - {id: phi-li, source: jobspy, board: linkedin, company: Phi Pay, title: "Manager, Data Science and ML",
+     location: "San Francisco Bay Area", url: "https://www.linkedin.example/jobs/view/9911", raw: "None",
+     tags: [location.us.bay_area]}
+  # 31：链接不算证据的情况。chi-a、chi-b 同城市、正文一样，grnh.se 短链接不同 → 按正文合并；
+  # chi-c、chi-d 不同城市、正文不同，grnh.se 短链接相同 → 按链接合并（追踪链接、招聘首页等在链接的单元测试里）
+  - {id: chi-a, source: jobspy, board: indeed, company: Chi Commerce, title: "Senior MLE, New Verticals", location: "Austin, TX",
+     url: "https://www.indeed.example/viewjob?jk=c001", text: [role_chi], tags: [location.us.austin],
+     application_url: "https://grnh.se/4dzb5wth1us"}
+  - {id: chi-b, source: jobspy, board: zip_recruiter, company: Chi Commerce, title: "Senior MLE, New Verticals",
+     location: "Austin, TX", url: "https://www.ziprecruiter.example/c/Chi/Job/c002", text: [role_chi],
+     tags: [location.us.austin], application_url: "https://grnh.se/a39e6nt05us"}
+  - {id: chi-c, source: jobspy, board: indeed, company: Chi Commerce, title: "Senior MLE, Logistics", location: "Seattle, WA",
+     url: "https://www.indeed.example/viewjob?jk=c003", text: [role_chi], tags: [location.us.seattle],
+     application_url: "https://grnh.se/6ac62ehp1us"}
+  - {id: chi-d, source: jobspy, board: indeed, company: Chi Commerce, title: "Senior MLE, Logistics", location: "Sunnyvale, CA",
+     url: "https://www.indeed.example/viewjob?jk=c004", text: [role_chi_other], tags: [location.us.bay_area],
+     application_url: "https://grnh.se/6ac62ehp1us"}
+
+postings_5c:
+  - [iota-lever, iota-indeed, iota-zip]
+  - [kappa-atl]
+  - [kappa-dal]
+  - [kappa-chi]
+  - [mu-r1, mu-li-chi]
+  - [mu-r2, mu-li-sj]
+  - [nu-wd, nu-li]
+  - [xi-wd]
+  - [xi-li]
+  - [omicron-sd]
+  - [omicron-sea]
+  - [omicron2-sd, omicron2-sea]
+  - [pi-sj]
+  - [pi-sea]
+  - [pi2-sj, pi2-sea]
+  - [rho-us]
+  - [rho-ca]
+  - [sigma-us, sigma-ca, sigma-li]
+  - [tau-sj]
+  - [tau-kir]
+  - [tau-li]
+  - [ups-1, ups-2]
+  - [ups-3]
+  - [ups-4]
+  - [phi-talent, phi-li]
+  - [chi-a, chi-b]
+  - [chi-c, chi-d]

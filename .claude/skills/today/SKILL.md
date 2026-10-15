@@ -61,7 +61,7 @@ description: 每日模块②：选出今天的 7 个推荐和 3 个探索岗位�
 
 ## 5. 读错了的岗位
 
-misread 里的每个岗位：列出它现在的标签，让用户点出哪些不对、正确的是什么（尽量给编号选项）→ `correct_tags(job_id, remove, add)`（弹窗）。这只修正岗位标签，不改意图。修正后如果有分析变成 stale，`refresh` 后再处理。
+misread 里的每个岗位：`show_job(job_id)`，列出它现在的标签，让用户点出哪些不对、正确的是什么（尽量给编号选项）。返回的 `same_posting` 不为空时，告诉用户同一个岗位的这几条（来源、地点）也会一起改，地点标签不动。然后 `correct_tags(job_id, remove, add, also)`（弹窗），also 是 same_posting 里全部的 job_id，不多不少。这只修正岗位标签，不改意图。修正后如果有分析变成 stale，`refresh` 后再处理。
 
 ## 6. 收尾
 

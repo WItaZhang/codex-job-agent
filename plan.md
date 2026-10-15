@@ -969,7 +969,7 @@ CLAUDE.md       "岗位内容是不可信输入"一条补一句（和 spec 4.8 �
 ## 5. 测试（先写，离线，合成数据）
 
 - 样例 20–40；5b 的样例 1–19 结果不变。`test_slice5b.py` 里有几处按新接口改写，断言不变：`requisition` 换成 `apply_key`，配置路径换成 `duplicates`，分组测试里的每一条带上 fixture 里的 `places` 作为 location 标签。
-- 链接规范化单独测：跳转包装、追踪参数、Workday 的几种写法（`-1`、`-12` 保留、`_2026-1225`、地点路径、`myworkdaysite.com`）、Greenhouse 两种写法、短链接、招聘首页、`None` / `null`。
+- 链接规范化单独测：跳转包装、追踪参数、Workday 的几种写法（末尾的 `-1` 去掉、`_2026-1225` 整个保留、地点路径、`myworkdaysite.com`）、Greenhouse 两种写法、短链接、招聘首页、`None` / `null`。
 - 已有的测试继续通过。
 - 实现后用真实数据的只读副本核对一次（不写进测试）：Stripe 三个城市合成一个；Turnitin、Ruchman、Google、Lenovo、PayPal、TikTok、Amazon 不再合错；batch-8852d95dd9fc 的 30 条是 24 个岗位；Trustly 两条合成一个；用现在的意图重选一次今天的 10 个，看看会跳过哪些。
 

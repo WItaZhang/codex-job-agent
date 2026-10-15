@@ -24,7 +24,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import applicant as applicant_files
-from . import apply_bridge, apply_list, applypilot_bridge, avature, funnel
+from . import apply_bridge, apply_list, applypilot_bridge, avature, duplicates, funnel
 from .boards import BoardSpec, load_boards
 from .changes import (
     AddEntry,
@@ -45,7 +45,8 @@ from .llm import NoModelClient
 from .pretag import pretag
 from .prompts import ReasonMapping
 from .proposals import Analysis, LabelInput
-from .selection import select_daily
+from .scoring import score_job
+from .selection import rank_postings, select_daily
 from .store import Store, new_id
 
 TOOL_TIERS: dict[str, str] = {}
@@ -324,7 +325,14 @@ class Toolbox:
             "tags": self.store.effective_tags(job.id) if self.store.is_tagged(job.id) else [],
             "description": _job_text(job),
             **(self._suggestions(job) if not self.store.is_tagged(job.id) else {}),
+            **({"same_posting": self._same_posting_view(job.id)} if self.store.is_tagged(job.id) else {}),
         }
+
+    def _same_posting_view(self, job_id: str) -> list[dict]:
+        """The other tagged listings of the job's posting: a misread fix on this job changes them too."""
+        return [
+            {"job_id": j.id, "board": j.board or j.source, "location": j.location} for j in self._fix_reaches(job_id)
+        ]
 
     def _suggestions(self, job: Job, pre=None) -> dict:
         pre = pre or pretag(job, self.store.vocabulary())
@@ -350,10 +358,8 @@ class Toolbox:
             self.store.current_intent(), self.store.vocabulary(), self.store.untagged_jobs(), self.settings
         )
         tagged_today = self.store.tagged_on(day)
-        shown = self.store.shown_job_ids()
-        tagged_open = [
-            j for j in self.store.jobs() if self.store.is_tagged(j.id) and j.id not in shown and self.store.is_open(j)
-        ]
+        shown, candidates, others = self._tagged_pool()
+        tagged_open = rank_postings(self.store.current_intent(), candidates, self.settings, shown, others)
         return {
             "day": day,
             "fetched": self.store.fetched_on(day),
@@ -667,14 +673,39 @@ class Toolbox:
     def select_today(self, day: str) -> dict:
         """Select today's recommended and exploration jobs (once per day) and return them numbered."""
         if not self.store.selection(day):
-            shown = self.store.shown_job_ids()
-            candidates = [
-                j
-                for j in self.store.jobs()
-                if self.store.is_tagged(j.id) and j.id not in shown and self.store.is_open(j)
-            ]
-            self.store.save_selection(day, select_daily(self.store.current_intent(), candidates, self.settings))
+            shown, candidates, others = self._tagged_pool()
+            picks = select_daily(self.store.current_intent(), candidates, self.settings, shown, others)
+            self.store.save_selection(day, picks)
         return self._day_view(day)
+
+    def _tagged_pool(self) -> tuple[list[Job], list[Job], list[Job]]:
+        """Every tagged job with its corrected tags, as the daily picks group them (spec section 10 item 82):
+        the jobs shown on earlier days in display order, today's candidates (open, not shown) and the rest."""
+        overrides, tagged = self.store.tag_overrides(), self.store.tagged_ids()
+        jobs = {
+            job.id: job.model_copy(update={"tags": overrides.get(job.id, job.tags)})
+            for job in self.store.jobs()
+            if job.id in tagged
+        }
+        shown = [jobs[job_id] for job_id in self.store.shown_in_order() if job_id in jobs]
+        shown_ids = {job.id for job in shown}
+        unshown = [job for job in jobs.values() if job.id not in shown_ids]
+        candidates = [job for job in unshown if self.store.is_open(job)]
+        candidate_ids = {job.id for job in candidates}
+        return shown, candidates, [job for job in unshown if job.id not in candidate_ids]
+
+    def _fix_reaches(self, job_id: str) -> list[Job]:
+        """The other tagged listings of a tagged job's posting (spec section 10 item 83): grouped with every tagged
+        job by the tags before the fix, this job first, then the order of the daily picks."""
+        shown, candidates, others = self._tagged_pool()
+        everything = {job.id: job for job in shown + candidates + others}
+        if job_id not in everything or duplicates.posting_key(everything[job_id]) is None:
+            return []
+        intent, key = self.store.current_intent(), duplicates.posting_key(everything[job_id])
+        unshown = sorted(candidates + others, key=lambda j: -score_job(intent, j.tags, j.salary, self.settings).score)
+        ordered = [everything[job_id]] + [j for j in shown + unshown if j.id != job_id]
+        (posting, *_) = duplicates.group([j for j in ordered if duplicates.posting_key(j) == key], self.settings)
+        return [job for job in posting if job.id != job_id]
 
     @_tool("prepare")
     def build_apply_list(self, day: str | None = None, limit: int | None = None) -> dict:
@@ -732,7 +763,7 @@ class Toolbox:
         why += [f"{ref} {LEVEL_TEXT[level]}" for ref, level, _ in best.result.contributions]
         if best.result.below_salary_floor:
             why.append("薪资低于下限")
-        also = [j.url for j in posting.listings if j.id != job.id and j.url and j.url != job.url]
+        also = [j.url for j in posting.offered if j.id != job.id and j.url and j.url != job.url]
         return {
             "n": n,
             "job_id": job.id,
@@ -1255,9 +1286,19 @@ class Toolbox:
         return self._intent_view(intent)
 
     @_tool("commit")
-    def correct_tags(self, job_id: str, remove: list[str], add: list[str]) -> dict:
-        """Fix a misread job's tags. Does not touch the intent."""
-        return {"job_id": job_id, "tags": self.engine.correct_tags(job_id, remove, add)}
+    def correct_tags(self, job_id: str, remove: list[str], add: list[str], also: list[str] | None = None) -> dict:
+        """Fix a misread job's tags. The same fix, outside location tags, also changes the other tagged listings of
+        its posting: get them from show_job (same_posting), show them to the user and pass their ids as `also`;
+        any other list is refused. Returns the job's tags and which other listings changed. Does not touch the
+        intent."""
+        reaches = [job.id for job in self._fix_reaches(job_id)]
+        if sorted(also or []) != sorted(reaches):
+            raise InvariantError(
+                f"This fix also changes the posting's other listings {reaches}: show them to the user and pass "
+                "exactly these as also"
+            )
+        tags, changed = self.engine.correct_tags(job_id, remove, add, also=tuple(reaches))
+        return {"job_id": job_id, "tags": tags, "also": changed}
 
     @_tool("commit")
     def initialize_intent(self, path: str) -> dict:

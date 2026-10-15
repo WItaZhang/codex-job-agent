@@ -103,6 +103,9 @@ class Store:
     def is_tagged(self, job_id: str) -> bool:
         return self.db.execute("SELECT 1 FROM tagged WHERE job_id = ?", (job_id,)).fetchone() is not None
 
+    def tagged_ids(self) -> set[str]:
+        return {row["job_id"] for row in self.db.execute("SELECT job_id FROM tagged")}
+
     def set_job_tags(self, job_id: str, tags: list[str]) -> Job:
         """Initial tags of a job not yet shown; later changes go through the misread correction."""
         if job_id in self.shown_job_ids():
@@ -153,8 +156,13 @@ class Store:
         return current + added
 
     def tag_revision(self) -> int:
-        """Changes analyses depend on besides the intent version: backfilled tags of labelled jobs."""
-        return self.db.execute("SELECT COUNT(*) FROM backfills WHERE labelled = 1").fetchone()[0]
+        """Changes analyses depend on besides the intent version: backfilled tags of labelled jobs, and misread
+        fixes that reached a labelled job from another listing of its posting (spec section 10 item 83)."""
+        backfilled = self.db.execute("SELECT COUNT(*) FROM backfills WHERE labelled = 1").fetchone()[0]
+        rippled = self.db.execute(
+            "SELECT COUNT(*) FROM decisions WHERE kind = 'tag_fix' AND json_extract(payload, '$.labelled') = 1"
+        ).fetchone()[0]
+        return backfilled + rippled
 
     def log_fetch(self, kind: str) -> None:
         """Jobs were fetched or imported today (the user's local date)."""
@@ -223,18 +231,36 @@ class Store:
     def shown_job_ids(self) -> set[str]:
         return {row["job_id"] for row in self.db.execute("SELECT job_id FROM selections")}
 
+    def shown_in_order(self) -> list[str]:
+        """Jobs shown on any day, by day and then by their place that day."""
+        rows = self.db.execute("SELECT job_id FROM selections ORDER BY day, position")
+        return list(dict.fromkeys(row["job_id"] for row in rows))
+
     def effective_tags(self, job_id: str) -> list[str]:
         """Job tags after any user-confirmed misread correction."""
         row = self.db.execute("SELECT tags FROM tag_overrides WHERE job_id = ?", (job_id,)).fetchone()
         return json.loads(row["tags"]) if row else list(self.job(job_id).tags)
 
-    def set_effective_tags(self, job_id: str, tags: list[str], label_id: str | None) -> None:
+    def tag_overrides(self) -> dict[str, list[str]]:
+        """Every misread correction at once: job id -> its corrected tags."""
+        return {
+            row["job_id"]: json.loads(row["tags"]) for row in self.db.execute("SELECT job_id, tags FROM tag_overrides")
+        }
+
+    def set_effective_tags(
+        self, job_id: str, tags: list[str], label_id: str | None, from_job: str | None = None, labelled: bool = False
+    ) -> None:
+        """A misread correction, on the misread job or (`from_job`) reaching another listing of its posting;
+        `labelled` when that listing has a want/reject label, which makes open analyses stale."""
+        payload = {"job_id": job_id, "tags": tags, "label_id": label_id}
+        if from_job:
+            payload |= {"from_job": from_job, "labelled": int(labelled)}
         with self.db:
             self.db.execute(
                 "INSERT OR REPLACE INTO tag_overrides (job_id, tags, decided_at) VALUES (?, ?, ?)",
                 (job_id, json.dumps(tags), _now()),
             )
-            self._decision(None, "tag_fix", None, {"job_id": job_id, "tags": tags, "label_id": label_id})
+            self._decision(None, "tag_fix", None, payload)
 
     def add_label(self, label: Label) -> None:
         self.job(label.job_id)

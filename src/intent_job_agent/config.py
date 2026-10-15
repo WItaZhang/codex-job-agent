@@ -58,8 +58,11 @@ class ApplyList(_Section):
     agreement_window_days: int = Field(gt=0)
     shown: int = Field(gt=0)
     dir: str
-    duplicate_shingle_words: int = Field(gt=0)
-    duplicate_overlap: float = Field(gt=0, le=1)
+
+
+class Duplicates(_Section):
+    shingle_words: int = Field(gt=0)
+    overlap: float = Field(gt=0, le=1)
 
 
 class ApplyMCP(_Section):
@@ -112,6 +115,7 @@ class Settings(_Section):
     tagging: Tagging
     hard_review: HardReview
     apply_list: ApplyList
+    duplicates: Duplicates
     apply: Apply
     llm: LLM
     storage: Storage

@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from intent_job_agent.domain import InvariantError, Job
-from intent_job_agent.duplicates import group, requisition, same_posting
+from intent_job_agent.duplicates import apply_key, group, same_posting
 
 from .conftest import ROOT, settings
 from .test_slice5 import label, make_box
@@ -35,9 +35,11 @@ def text(item: dict) -> str:
 
 
 def job(job_id: str) -> Job:
+    """The listing with its places as location tags (since slice 5c the rule reads cities from the tags)."""
     item = LISTINGS[job_id]
     fields = ("source", "board", "company", "title", "location", "url")
-    return Job(id=job_id, tags=[], description=text(item), **{field: item[field] for field in fields})
+    places = [f"location.{place}" for place in item["places"]]
+    return Job(id=job_id, tags=places, description=text(item), **{field: item[field] for field in fields})
 
 
 def groups_of(jobs: list[Job]) -> set[frozenset[str]]:
@@ -110,17 +112,17 @@ ASHBY = "https://jobs.ashbyhq.example/beta/"
     ],
 )
 def test_company_site_requisition_numbers(source, a, b, same):
-    first, second = (requisition(Job(id=f"j{n}", source=source, url=url, tags=[])) for n, url in enumerate((a, b)))
+    first, second = (apply_key(Job(id=f"j{n}", source=source, url=url, tags=[])) for n, url in enumerate((a, b)))
     assert first and second and (first == second) is same
 
 
 def test_board_listings_have_no_requisition_number():
-    assert requisition(job("acme-sf")) is None and requisition(job("nocomp-1")) is None
+    assert apply_key(job("acme-sf")) is None and apply_key(job("nocomp-1")) is None
 
 
 def test_thresholds_are_in_the_config():
-    apply_list = settings().apply_list
-    assert apply_list.duplicate_shingle_words == 5 and apply_list.duplicate_overlap == 0.9
+    duplicates = settings().duplicates  # moved from apply_list in slice 5c (spec section 10 item 84)
+    assert duplicates.shingle_words == 5 and duplicates.overlap == 0.9
 
 
 # --- the apply list (cases 1, 11-16) -----------------------------------------------------------------
