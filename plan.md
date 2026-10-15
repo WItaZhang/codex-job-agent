@@ -802,3 +802,73 @@ docs/examples/boss.example.yaml、README、NOTICE（列出对 boss-cli 的依赖
 - 现有 246 个测试继续通过。
 
 实现后的真实核对要你在本机完成（测试环境里没有你的登录态）：运行 `uv run boss login` → `check_boss` → 跑一次 `/fetch-jobs`，看 BOSS 的新增数，再抽查几个岗位的字段。
+
+---
+
+# 切片 2c 修正：导入的岗位没有原文（草案，2026-10-15，待用户确认）
+
+来源：2026-10-14 合并投递清单重复岗位（切片 5b）时发现，约四分之一的待投岗位没有原文，只能按地点判断是不是同一个岗位，打标签和写求职信也缺上下文。
+**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§10 切片 2c 的第 18、19 条，不新增编号，避免和 5b、2h 的编号冲突），再写测试，最后写代码。只改适配层（`applypilot_bridge.py`），vendor 文件不动。
+
+## 1. 现在的数据（只读核对 `agent.sqlite` 和 ApplyPilot 工作库的备份）
+
+| 来源 | 存的原文 | 岗位数 | 已打标签 | 在投递清单上（待投） | 展示过 / 打过 label |
+| --- | --- | --- | --- | --- | --- |
+| Glassdoor | 字符串 "None" | 231 | 230 | 125 | 0 |
+| LinkedIn | 字符串 "null" | 83 | 83 | 64（其中 1 个已写求职信） | 0 |
+| ZipRecruiter | 字符串 "null" | 1 | 1 | 1 | 0 |
+| SimplyHired | 空 | 40 | 40 | 34 | 0 |
+| LinkedIn | 空 | 2 | 2 | 0 | 0 |
+
+## 2. 原因
+
+1. **Glassdoor "None"**：JobSpy 没给 Glassdoor 的描述（Python 的 None）。ApplyPilot 存 JobSpy 结果时用 `str(...)`，只过滤了 "nan"，于是存成字符串 "None"；投递链接 `application_url` 也一样是 "None"（253 行）。ApplyPilot 的补全原文本来就跳过 Glassdoor（`SKIP_DETAIL_SITES`），所以不会再补。适配层取原文时用 `full_description or description`，"None" 不是空，就当成原文存了。
+2. **LinkedIn / ZipRecruiter "null"**：JobSpy 没给描述，补全原文的前两步（JSON-LD、页面选择器）没找到，第 3 步让 LLM 读页面，LLM 把 `"null"` 当字符串写进了原文。"null" 不是空，ApplyPilot 记为补全成功，以后不再重试。84 行都是 2026-10-13 补全的。其中 ZipRecruiter 那一个，JobSpy 其实给了原文，但适配层优先用了 "null"。
+3. **SimplyHired 空**：smartextract 存下的是相对地址（`/job/…`）。ApplyPilot 自带的 `sites.yaml` 里 `base_urls` 没有 SimplyHired，补全时无法换成完整地址，打不开页面（"Cannot navigate to invalid URL"）。所以原文是空的，而且**本项目里存的岗位链接也是相对地址，打不开**：投递清单上 34 个都投不了。
+4. LinkedIn 那 2 个空的：补全时断网。原文确实是空，存得没错。
+
+投递只用岗位自己的链接，所以 "None" 的 `application_url` 只是多余字段，不影响投递。
+
+## 3. 一定会做（新导入）
+
+- 从 ApplyPilot 工作库读到的字段，整个值（去掉首尾空白、不分大小写）是 `None`、`null`、`nan` 的，一律当作没有：原文、投递链接、标题、地点、薪资都一样。
+- 原文取第一个真正的值：补全的原文 → JobSpy 给的描述 → 空。
+- 刷新未打标签、未展示岗位的原文时用同一规则（不会用 "null" 覆盖已有原文）。
+
+## 4. 需要你选的取舍
+
+**取舍 1：已存的 315 个占位原文（Glassdoor 231、LinkedIn 83、ZipRecruiter 1）怎么办**
+
+- **(a) 只清掉**：下次导入时把这些占位原文改成空。标签、label、投递清单状态都不动，不重新抓。改动最小；但这些岗位以后也一直没有原文。
+- **(b) 清掉，并重新补全一次（推荐）**：在 (a) 之外：
+  - ApplyPilot 补全过、却没拿到原文的行（原文为空或是占位词），适配层在下次补全前把它们标回"未补全"，**每行只重试一次**（记在 ApplyPilot 工作库旁边的一张表里，和现在另记公司名的做法一样），以后新出现的这种行也一样。这次会重试 LinkedIn 84 个、ZipRecruiter 1 个，以及取舍 2 选 (a) 时的 SimplyHired 40 个；Talent.com 补全失败的 32 个也会各试一次。Glassdoor 不在内（ApplyPilot 的补全不处理 Glassdoor），只能保持为空。
+  - 原文为空、**还没展示过**的岗位，拿到真正的原文时换上原文；如果已经打过标签，就退回待打标签队列，在同一次 `/fetch-jobs` 里由子 agent 按原文重新打。重新打完之前，它暂时不在投递清单上，投递状态保留。spec 第 18 条"已打标签的岗位原文不再变化"加这一条例外。
+  - ZipRecruiter 那一个不用等补全：它现在就有 JobSpy 给的原文，下次导入时直接换上，退回重新打标签。
+  - 风险：LinkedIn 对未登录的访问有限流，重试也可能还是拿不到；拿不到的保持为空，不再试第二次。
+- **(c) 不动旧数据**，只修新导入。
+
+**取舍 2：SimplyHired 的相对链接**
+
+- **(a) 本切片一起修（推荐）**：适配层给 ApplyPilot 的 `base_urls` 补上缺的站点，取该站点搜索页的域名（SimplyHired → `https://www.simplyhired.com`）；`base_urls` 里明确写了 null 的站点（RemoteOK、WelcomeToTheJungle）照旧不补。已存的 40 个岗位改成完整链接，岗位编号不变，标签和投递状态都不动；导入时先按同一规则把相对地址换成完整地址再查重，ApplyPilot 下次补全时把工作库里的地址改写成完整地址，也认作同一个岗位，不会重复入库。原文：取舍 1 选 (b) 时会重新补全。
+- (b) 另开一个切片，这次只修原文。
+
+## 5. 模块
+
+```
+src/intent_job_agent/
+  applypilot_bridge.py   占位词判断；原文取值规则；sync 的刷新规则
+                         取舍 1(b)：补全前的"只重试一次"（表 intent_agent_retried，在 ApplyPilot 工作库里）
+                         取舍 2(a)：configure 补全 base_urls；sync 先把相对地址换成完整地址；已存岗位改链接
+  store.py               取舍 1(b)：退回待打标签（删掉 tagged 和 backfills 里的记录，标签留到重新打时覆盖）
+tests/fixtures/applypilot_missing_text.yaml   合成的 ApplyPilot 工作库行（synthetic），覆盖上面四种情况
+```
+
+## 6. 测试（先写，全部离线，合成数据）
+
+- 新导入：JobSpy 给 None 描述的 Glassdoor 行、补全原文是 "null" 的 LinkedIn 行、"NaN" / " NULL " 等大小写和空白变体，都存成空原文；"None" 的 `application_url` 不进属性；有 JobSpy 描述而补全原文是 "null" 的行，存 JobSpy 的描述；原文里正常出现 "null" 这个词的不受影响。
+- 刷新：补全原文是 "null" 时，不覆盖已有原文。
+- 旧数据（按所选取舍）：(a) 占位原文清成空，标签、投递状态不变；(b) 只重试一次（第二次运行不再标回）、Glassdoor 不重试、拿到原文的已打标签未展示岗位退回待打标签队列、展示过的岗位不动、投递状态保留。
+- 取舍 2(a)：没有 `base_urls` 的站点用搜索页域名补上，明确写 null 的不补；相对链接的已存岗位改成完整链接、编号不变；ApplyPilot 改写地址后再导入，不新增岗位。
+- vendor 文件和 ApplyPilot 的原有测试不变；现有测试继续通过。
+
+实现后在你本机核对：跑一次 `/fetch-jobs`，看占位原文是否清掉、重试补全拿到多少原文；SimplyHired 的链接能否打开。本切片不开始任何投递，不改投递状态。
