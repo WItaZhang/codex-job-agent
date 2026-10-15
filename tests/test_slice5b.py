@@ -1,4 +1,4 @@
-"""Slice 5b: one apply-list row per posting found on several boards (spec 4.9 item 6, section 10 items 69-74).
+"""Slice 5b: one apply-list row per posting found on several boards (spec 4.9 item 6, section 10 items 71-76).
 All data is SYNTHETIC (tests/fixtures/duplicates.yaml); the cases are the ones listed in plan.md (slice 5b)."""
 
 import csv

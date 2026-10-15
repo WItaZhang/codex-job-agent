@@ -709,7 +709,7 @@ class Toolbox:
 
     def _apply_postings(self, listed: dict[str, dict]) -> list[apply_list.Posting]:
         """Every posting with a listing on the apply list or that could enter it: the candidates of the current
-        intent plus the listings listed before or labelled want/reject (spec section 10 item 70)."""
+        intent plus the listings listed before or labelled want/reject (spec section 10 item 72)."""
         labels, everything = self.store.labels(), self.store.jobs()
         jobs = [
             (job, self.store.effective_tags(job.id))
@@ -1039,7 +1039,7 @@ class Toolbox:
                 for other in same.get(job_id, [])
             )
         ]
-        if taken:  # a batch prepared before postings were merged (spec section 10 item 73)
+        if taken:  # a batch prepared before postings were merged (spec section 10 item 75)
             raise InvariantError(
                 f"Jobs {taken} share a posting with another job of this step or one already tried; prepare a new batch"
             )

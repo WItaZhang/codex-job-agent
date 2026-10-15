@@ -1,5 +1,5 @@
 """Listings of the same posting found on several boards or in several cities (spec 4.9 item 6, section 10 items
-69-70). Pure and deterministic: the same company and title, nearly the same text (or the same place when a listing
+71-72). Pure and deterministic: the same company and title, nearly the same text (or the same place when a listing
 has no text), and never two different requisitions of the company's own career site."""
 
 import re
