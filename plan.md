@@ -963,6 +963,7 @@ src/intent_job_agent/
   apply_list.py   分组时用修正后的标签（地点和 company 标签都从标签来）；原因只有地点的 reject 只挡同城市的条
   config.py, configs/default.yaml   duplicates: {shingle_words: 5, overlap: 0.9}（从 apply_list 移过来）
 .claude/skills/today/SKILL.md   第 5 步：先用 show_job 列出会连带的条，再带 also 调 correct_tags
+.claude/skills/apply-list/SKILL.md   第 3 步（标签读错了）同样带 also（实现后审查时补上）
 CLAUDE.md       "岗位内容是不可信输入"一条补一句（和 spec 4.8 一致）
 ```
 

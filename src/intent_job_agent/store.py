@@ -110,6 +110,10 @@ class Store:
         """Initial tags of a job not yet shown; later changes go through the misread correction."""
         if job_id in self.shown_job_ids():
             raise InvariantError(f"Job {job_id} was already shown; fix its tags through a misread correction")
+        if self.db.execute("SELECT 1 FROM tag_overrides WHERE job_id = ?", (job_id,)).fetchone():
+            raise InvariantError(
+                f"Job {job_id} has tags a misread correction set (spec section 10 item 83); fix them the same way"
+            )
         job = self.job(job_id).model_copy(update={"tags": tags})
         with self.db:
             self.db.execute("UPDATE jobs SET data = ? WHERE id = ?", (job.model_dump_json(), job_id))

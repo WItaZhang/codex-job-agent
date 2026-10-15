@@ -46,7 +46,8 @@ _BOARDS = ("linkedin.com", "indeed.com", "ziprecruiter.com", "glassdoor.com", "g
 _TRACKING = frozenset({"source", "src", "gh_src", "lever-source", "ref", "referrer", "refer", "trk", "trackingid",
                        "refid", "cmpid", "intlink", "iis", "iisn", "jobsite", "jbsrc", "posteddate", "clickid",
                        "click_id", "gclid", "fbclid", "msclkid", "_ga", "_gl", "mc_cid", "mc_eid", "sid", "lang",
-                       "locale", "embed", "in_iframe", "board_id", "codes", "mode", "trid"})  # fmt: skip
+                       "locale", "embed", "in_iframe", "board_id", "codes", "mode", "trid",
+                       "indeed-apply-token"})  # fmt: skip
 _TRACKING_PREFIXES = ("utm_", "rx_", "air_")
 _JOB_PARAMS = frozenset({"gh_jid", "jk", "jobid", "job_id", "job", "jid", "id", "pid", "rid", "req", "reqid",
                          "requisitionid", "career_job_req_id", "opportunityid", "postingid", "jobopeningid", "jobreq",
@@ -67,7 +68,7 @@ _MAX_UNWRAP = 5
 @dataclass(frozen=True)
 class _Url:
     host: str
-    segments: tuple[str, ...]  # lowercased, without empty, locale and trailing apply segments
+    segments: tuple[str, ...]  # lowercased path and hash route, without empty, locale and trailing apply segments
     params: dict[str, str]  # lowercased names
 
     def next_after(self, marker: str) -> str | None:
@@ -85,7 +86,10 @@ def _parse(link: str) -> _Url | None:
         return None
     if parts.scheme.lower() not in ("http", "https") or not host:
         return None
-    segments = [s for s in unquote(parts.path).lower().split("/") if s and not _LOCALE.match(s)]
+    path = unquote(parts.path)
+    if parts.fragment.startswith("/"):  # a hash route such as #/job/25195 is part of the page's path
+        path = f"{path}/{unquote(parts.fragment.split('?', 1)[0])}"
+    segments = [s for s in path.lower().split("/") if s and not _LOCALE.match(s)]
     while segments and segments[-1] in _TAIL:
         segments.pop()
     params = {name.lower(): value for name, value in parse_qsl(parts.query, keep_blank_values=True)}
@@ -104,7 +108,8 @@ def _target(url: _Url) -> str | None:
         or _WRAPPER_PATH.search("/".join(url.segments))
     ):
         return None
-    return next((url.params[name] for name in _TARGET_PARAMS if re.match(r"https?://", url.params.get(name, ""))), None)
+    targets = (url.params.get(name, "") for name in _TARGET_PARAMS)
+    return next((value for value in targets if re.match(r"https?://", value, re.IGNORECASE)), None)
 
 
 def _digits(segment: str | None) -> str | None:
@@ -112,47 +117,64 @@ def _digits(segment: str | None) -> str | None:
     return found.group() if found else None
 
 
+def _uuid(segment: str | None) -> str | None:
+    value = (segment or "").lower()
+    return value if _UUID.match(value) else None
+
+
+_WORKDAY_HOSTS = ("myworkdayjobs.com", "myworkdaysite.com", "myworkday.com")
+# Sites whose links name a posting only through an id: a link to them without one is a home or list page.
+_ID_SITES = (*_WORKDAY_HOSTS, "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "icims.com",
+             "paylocity.com", "avature.net", "metacareers.com", "amazon.jobs", "jobs.apple.com",
+             "careers.microsoft.com", "careers.google.com")  # fmt: skip
+
+
 def _workday(url: _Url) -> Link | None:
     """Tenant (the host's first label, or the segment after `recruiting` on myworkdaysite.com) and the requisition:
-    the last segment after its last `_`, without the 1-2 digit repeat suffix Workday adds (`-1`)."""
+    in the last segment before any `apply` step, the part after its last `_`, without the 1-2 digit repeat suffix
+    Workday adds (`-1`). None for a career home or search page, which has no requisition."""
     segments = list(url.segments)
     tenant = segments[1] if len(segments) > 1 and segments[0] == "recruiting" else url.host.split(".")[0]
-    if not segments:
-        return None
-    requisition = re.sub(r"(?<=\d)-\d{1,2}$", "", segments[-1].rsplit("_", 1)[-1])
-    return Link("workday", f"{tenant}/{requisition}")
+    if "apply" in segments:
+        segments = segments[: segments.index("apply")]
+    last = segments[-1] if segments else ""
+    requisition = re.sub(r"(?<=\d)-\d{1,2}$", "", last.rsplit("_", 1)[-1]) if "_" in last else ""
+    return Link("workday", f"{tenant}/{requisition}") if requisition else None
+
+
+def _greenhouse(url: _Url) -> str | None:
+    gh_jid, token = url.params.get("gh_jid", ""), url.params.get("token", "")
+    if gh_jid.isdigit():
+        return gh_jid
+    if "job_app" in url.segments and token.isdigit():  # an embedded application form
+        return token
+    return url.segments[-1] if url.segments and url.segments[-1].isdigit() and "jobs" in url.segments else None
 
 
 def _avature(url: _Url) -> Link | None:
     found = _digits(url.segments[-1]) if "jobdetail" in url.segments[:-1] else None
     found = found or (url.params.get("jobid") if url.params.get("jobid", "").isdigit() else None)
-    return Link("avature", f"{url.host}/{found}") if found else None
-
-
-def _uuid_param(url: _Url, name: str) -> str | None:
-    value = url.params.get(name, "").lower()
-    return value if _UUID.match(value) else None
+    return Link("avature", found) if found else None
 
 
 def _system(url: _Url) -> Link | None:
-    """A known applicant tracking system or company career page, recognized by its host."""
+    """A known applicant tracking system or company career page with the posting's id, recognized by its host
+    (or by a parameter or path that only that system uses)."""
     host, segments = url.host, url.segments
-    if url.params.get("gh_jid", "").isdigit():
-        return Link("greenhouse", url.params["gh_jid"])
-    if _uuid_param(url, "ashby_jid"):
-        return Link("ashby", _uuid_param(url, "ashby_jid"))
-    if _on(host, ("myworkdayjobs.com", "myworkdaysite.com", "myworkday.com")):
+    if _on(host, ("greenhouse.io",)) or url.params.get("gh_jid"):
+        return Link("greenhouse", _greenhouse(url)) if _greenhouse(url) else None
+    if _uuid(url.params.get("ashby_jid")):
+        return Link("ashby", _uuid(url.params["ashby_jid"]))
+    if _on(host, _WORKDAY_HOSTS):
         return _workday(url)
-    if _on(host, ("greenhouse.io",)) and segments and segments[-1].isdigit() and "jobs" in segments:
-        return Link("greenhouse", segments[-1])
-    if _on(host, ("lever.co",)) and len(segments) >= 2:
-        return Link("lever", segments[1])
-    if host == "jobs.ashbyhq.com" and len(segments) >= 2:
-        return Link("ashby", segments[1])
+    if _on(host, ("lever.co",)) and len(segments) >= 2 and _uuid(segments[1]):
+        return Link("lever", _uuid(segments[1]))
+    if host == "jobs.ashbyhq.com" and len(segments) >= 2 and _uuid(segments[1]):
+        return Link("ashby", _uuid(segments[1]))
     if _on(host, ("smartrecruiters.com",)) and len(segments) >= 2 and _digits(segments[1]):
         return Link("smartrecruiters", _digits(segments[1]))
     if _on(host, ("icims.com",)) and _digits(url.next_after("jobs")):
-        return Link("icims", f"{host}/{_digits(url.next_after('jobs'))}")
+        return Link("icims", _digits(url.next_after("jobs")))
     if _on(host, ("paylocity.com",)) and _digits(url.next_after("details")):
         return Link("paylocity", _digits(url.next_after("details")))
     if _on(host, ("avature.net",)) or "jobdetail" in segments:
@@ -169,6 +191,10 @@ def _system(url: _Url) -> Link | None:
     if _on(host, ("careers.microsoft.com",)) and _digits(url.next_after("job")):
         return Link("microsoft", _digits(url.next_after("job")))
     return None
+
+
+def _id_site(url: _Url) -> bool:
+    return _on(url.host, _ID_SITES) or (_on(url.host, ("google.com",)) and "careers" in url.segments)
 
 
 def _other(url: _Url) -> Link | None:
@@ -197,25 +223,27 @@ def link_key(link: str) -> Link | None:
         return None
     if _on(url.host, _BOARDS):
         return None
-    return _system(url) or _other(url)
+    found = _system(url)
+    return found if found or _id_site(url) else _other(url)
 
 
 def _company_site_key(job: Job) -> Link | None:
-    """A company-site listing's own link, read in its source's format whatever the host."""
+    """A company-site listing's own link, read in its source's format whatever the host; a link without the
+    source's id is compared like any other link."""
     url = _parse(job.url)
     if url is None:
         return None
-    if job.source == "workday":
-        return _workday(url)
     found = None
-    if job.source == "greenhouse":
-        gh_jid = url.params.get("gh_jid", "")
-        found = gh_jid if gh_jid.isdigit() else _digits(url.next_after("jobs"))
+    if job.source == "workday":
+        found = _workday(url)
+    elif job.source == "greenhouse":
+        found = Link("greenhouse", _greenhouse(url)) if _greenhouse(url) else None
     elif job.source in ("lever", "ashby"):
-        found = _uuid_param(url, f"{job.source}_jid") or (url.segments[1] if len(url.segments) >= 2 else None)
+        own = _uuid(url.params.get(f"{job.source}_jid")) or (url.segments[1] if len(url.segments) >= 2 else None)
+        found = Link(job.source, own) if own else None
     elif job.source == "avature":
-        return _avature(url) or Link("avature", f"{url.host}/{'/'.join(url.segments)}")
-    return Link(job.source, found or f"{url.host}/{'/'.join(url.segments)}")
+        found = _avature(url)
+    return found or link_key(job.url)
 
 
 def apply_key(job: Job) -> Link | None:
@@ -305,8 +333,13 @@ class _Listing:
         return self.job.source == "manual" and self.link is not None and self.link.system != ""
 
     @cached_property
+    def words(self) -> list[str]:
+        """The text's words, dates left out (item 79): a changed closing date does not make another posting."""
+        return _words(_DATES.sub(" ", self.job.description))
+
+    @cached_property
     def shingles(self) -> frozenset[tuple[str, ...]]:
-        words, size = _words(self.job.description), self.shingle_words
+        words, size = self.words, self.shingle_words
         return frozenset(tuple(words[i : i + size]) for i in range(len(words) - size + 1))
 
     @cached_property
@@ -315,7 +348,7 @@ class _Listing:
 
     @cached_property
     def word_counts(self) -> Counter:
-        return Counter(_words(_DATES.sub(" ", self.job.description)))
+        return Counter(self.words)
 
     def same_city(self, other: "_Listing") -> bool:
         return bool(self.cities & other.cities) or bool(self.place and self.place == other.place)
@@ -361,6 +394,11 @@ def same_posting(a: Job, b: Job, settings: Settings) -> bool:
 def same_city(a: Job, b: Job) -> bool:
     """A shared city-level location tag, or the same raw place (item 78)."""
     return _Listing(a, 1).same_city(_Listing(b, 1))
+
+
+def names_city(job: Job) -> bool:
+    """The listing names a city: it has a city-level location tag and is not one of "N Locations" (item 78)."""
+    return not _Listing(job, 1).no_city
 
 
 def group(jobs: list[Job], settings: Settings) -> list[list[Job]]:

@@ -145,6 +145,15 @@ def _chrome_found() -> bool:
     return True
 
 
+def _company_name(job: Job) -> str:
+    """A listing's company, or for a board that gives none (Talent.com) its only company tag (spec section 10
+    item 80), so that a merged row names its company and the careful list can match it."""
+    if job.company.strip():
+        return job.company.strip()
+    tags = [tag.removeprefix("company.") for tag in job.tags if tag.startswith("company.")]
+    return tags[0].replace("_", " ") if len(tags) == 1 else ""
+
+
 def _csv_cell(value) -> str:
     """Posting text must not run as a spreadsheet formula when the user opens the CSV."""
     text = str(value)
@@ -358,8 +367,8 @@ class Toolbox:
             self.store.current_intent(), self.store.vocabulary(), self.store.untagged_jobs(), self.settings
         )
         tagged_today = self.store.tagged_on(day)
-        shown, candidates, others = self._tagged_pool()
-        tagged_open = rank_postings(self.store.current_intent(), candidates, self.settings, shown, others)
+        shown, unshown, closed = self._tagged_pool()
+        tagged_open = rank_postings(self.store.current_intent(), unshown, self.settings, shown, closed)
         return {
             "day": day,
             "fetched": self.store.fetched_on(day),
@@ -673,14 +682,14 @@ class Toolbox:
     def select_today(self, day: str) -> dict:
         """Select today's recommended and exploration jobs (once per day) and return them numbered."""
         if not self.store.selection(day):
-            shown, candidates, others = self._tagged_pool()
-            picks = select_daily(self.store.current_intent(), candidates, self.settings, shown, others)
+            shown, unshown, closed = self._tagged_pool()
+            picks = select_daily(self.store.current_intent(), unshown, self.settings, shown, closed)
             self.store.save_selection(day, picks)
         return self._day_view(day)
 
-    def _tagged_pool(self) -> tuple[list[Job], list[Job], list[Job]]:
-        """Every tagged job with its corrected tags, as the daily picks group them (spec section 10 item 82):
-        the jobs shown on earlier days in display order, today's candidates (open, not shown) and the rest."""
+    def _tagged_pool(self) -> tuple[list[Job], list[Job], set[str]]:
+        """Every tagged job with its corrected tags, as the daily picks group them (spec section 10 item 82): the
+        jobs shown on earlier days in display order, the others in storage order, and which of those are closed."""
         overrides, tagged = self.store.tag_overrides(), self.store.tagged_ids()
         jobs = {
             job.id: job.model_copy(update={"tags": overrides.get(job.id, job.tags)})
@@ -690,20 +699,18 @@ class Toolbox:
         shown = [jobs[job_id] for job_id in self.store.shown_in_order() if job_id in jobs]
         shown_ids = {job.id for job in shown}
         unshown = [job for job in jobs.values() if job.id not in shown_ids]
-        candidates = [job for job in unshown if self.store.is_open(job)]
-        candidate_ids = {job.id for job in candidates}
-        return shown, candidates, [job for job in unshown if job.id not in candidate_ids]
+        return shown, unshown, {job.id for job in unshown if not self.store.is_open(job)}
 
     def _fix_reaches(self, job_id: str) -> list[Job]:
         """The other tagged listings of a tagged job's posting (spec section 10 item 83): grouped with every tagged
         job by the tags before the fix, this job first, then the order of the daily picks."""
-        shown, candidates, others = self._tagged_pool()
-        everything = {job.id: job for job in shown + candidates + others}
+        shown, unshown, _ = self._tagged_pool()
+        everything = {job.id: job for job in shown + unshown}
         if job_id not in everything or duplicates.posting_key(everything[job_id]) is None:
             return []
         intent, key = self.store.current_intent(), duplicates.posting_key(everything[job_id])
-        unshown = sorted(candidates + others, key=lambda j: -score_job(intent, j.tags, j.salary, self.settings).score)
-        ordered = [everything[job_id]] + [j for j in shown + unshown if j.id != job_id]
+        ranked = sorted(unshown, key=lambda j: -score_job(intent, j.tags, j.salary, self.settings).score)
+        ordered = [everything[job_id]] + [j for j in shown + ranked if j.id != job_id]
         (posting, *_) = duplicates.group([j for j in ordered if duplicates.posting_key(j) == key], self.settings)
         return [job for job in posting if job.id != job_id]
 
@@ -764,13 +771,17 @@ class Toolbox:
         if best.result.below_salary_floor:
             why.append("薪资低于下限")
         also = [j.url for j in posting.offered if j.id != job.id and j.url and j.url != job.url]
+        listings = (job, *posting.listings)  # names first, then company tags of listings without one
+        named = [j.company.strip() for j in listings if j.company.strip()]
+        companies = list(dict.fromkeys(named + [name for j in listings if (name := _company_name(j))]))
         return {
             "n": n,
             "job_id": job.id,
             "new": min(listed[j.id]["first_listed"] for j in posting.listings if j.id in listed) == day,
             "wanted": posting.wanted,
             "title": job.title,
-            "company": job.company,
+            "company": companies[0] if companies else "",
+            "companies": companies,
             "location": ", ".join(posting.places),
             "url": job.url,
             "also": list(dict.fromkeys(also)),
@@ -1009,7 +1020,7 @@ class Toolbox:
         for n, item in enumerate(items, start=1):
             if n <= review_first:
                 mode = "review"
-            elif applicant_files.careful(item["company"], applicant.careful_companies):
+            elif any(applicant_files.careful(name, applicant.careful_companies) for name in item["companies"]):
                 mode = "careful"
             else:
                 mode = "submit"

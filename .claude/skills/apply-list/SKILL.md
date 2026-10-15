@@ -40,4 +40,4 @@ description: 每日模块③：按当前意图生成可交接的投递清单（J
 
 ## 3. 标签读错了
 
-用户说清单里某个岗位的标签不对：`show_job(job_id)` 看现有标签，按编号列出，让用户点出哪些不对、正确的是什么 → `correct_tags(job_id, remove, add)`（会弹窗）。这只修正岗位标签，不改意图。改完后重新 `build_apply_list()`。
+用户说清单里某个岗位的标签不对：`show_job(job_id)` 看现有标签，按编号列出，让用户点出哪些不对、正确的是什么。返回的 `same_posting` 不为空时，告诉用户同一个岗位的这几条（来源、地点）也会一起改，地点标签不动。然后 `correct_tags(job_id, remove, add, also)`（会弹窗），also 是 same_posting 里全部的 job_id，不多不少。这只修正岗位标签，不改意图。改完后重新 `build_apply_list()`。

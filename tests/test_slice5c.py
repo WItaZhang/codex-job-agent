@@ -3,7 +3,10 @@ cities and countries (spec 4.6, 4.9 item 6, section 10 items 77-85). All data is
 (tests/fixtures/duplicates.yaml); the cases are the ones listed in plan.md (slice 5c)."""
 
 import json
+import os
 import random
+import subprocess
+import sys
 
 import pytest
 
@@ -17,6 +20,7 @@ from .test_slice2f import frontmatter
 from .test_slice5 import make_box
 from .test_slice5b import FIXTURE, LISTINGS, POSTINGS
 from .test_slice5b import job as job_5b
+from .test_slice6 import write_applicant
 
 LISTINGS_5C = {item["id"]: item for item in FIXTURE["listings_5c"]}
 POSTINGS_5C = {frozenset(ids) for ids in FIXTURE["postings_5c"]}
@@ -105,16 +109,31 @@ def test_job_numbers_written_in_the_texts():
         ("Job Number: R0251266", "Job number R-0251266", True),
         ("Apply for JR2024390 today.", "Apply for JR2024391 today.", False),
         ("REQ-55501 and Job ID: A10570976", "Job ID: A10570976", True),  # one number in common
-        ("Req # 1234", "Req # 1235", False),  # fewer than 5 digits: no job number, but the texts differ only in it
+        ("Req ID: 7012345", "Requisition ID: 7012399", False),
+        ("Req # 1234", "Req # 1235", True),  # fewer than 5 digits: not a job number
     ],
 )
 def test_job_number_patterns(first, second, same):
+    """The two texts also differ in a word, so the 'only numbers differ' rule never decides these."""
     base = job("omicron2-sea")  # a board listing; its copy below is in another city
-    a = base.model_copy(update={"id": "a", "description": f"{base.description}\n\n{first}"})
-    b = base.model_copy(
-        update={"id": "b", "tags": ["location.us.austin"], "description": f"{base.description}\n\n{second}"}
-    )
+    a = base.model_copy(update={"id": "a", "description": f"{base.description}\n\nApply now. {first}"})
+    text_b = f"{base.description}\n\nApply today. {second}"
+    b = base.model_copy(update={"id": "b", "tags": ["location.us.austin"], "description": text_b})
     assert same_posting(a, b, settings()) is same
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("10/11/2026", "10/25/2026"), ("2026-10-11", "2026-10-25"), ("Oct 11, 2026", "Oct 25, 2026")],
+)
+def test_dates_do_not_count(first, second):
+    base = job("pi2-sj")
+    short = " ".join(FIXTURE["paragraphs"]["role_pi2"].split()[:40])  # a short text, where dates weigh more
+    a = base.model_copy(update={"description": f"{short} Posted {first}. Apply by {first}. Start {first}."})
+    b = a.model_copy(
+        update={"id": "b", "tags": ["location.us.seattle"], "description": a.description.replace(first, second)}
+    )
+    assert same_posting(a, b, settings())
 
 
 def test_texts_that_differ_only_in_numbers_are_two_postings_but_dates_do_not_count():
@@ -211,11 +230,11 @@ ASHBY = "42aca7f5-2f58-40ef-a6ce-19027d32a12f"
         ("https://recruiting.paylocity.com/Recruiting/Jobs/Details/4571749", Link("paylocity", "4571749")),
         (
             "https://careers-acme.icims.com/jobs/5358/data-scientist/job?mode=job&iis=Indeed",
-            Link("icims", "careers-acme.icims.com/5358"),
+            Link("icims", "5358"),
         ),
         (
             "https://jobs.lenovo.com/en_US/careers/JobDetail/Backend-Engineer/81634",
-            Link("avature", "jobs.lenovo.com/81634"),
+            Link("avature", "81634"),
         ),
         (
             "https://www.google.com/about/careers/applications/jobs/results/86191709230113478-software-engineer",
@@ -231,6 +250,28 @@ ASHBY = "42aca7f5-2f58-40ef-a6ce-19027d32a12f"
         ),
         ("https://Careers.Example.com/jobs/view?jobId=55&ref=abc", Link("", "careers.example.com/jobs/view?jobid=55")),
         ("https://grnh.se/4dzb5wth1us", Link("", "grnh.se/4dzb5wth1us")),
+        (  # one Avature instance under two hosts
+            "https://deloitteus.avature.net/careers/InviteToApply?jobId=370285",
+            Link("avature", "370285"),
+        ),
+        ("https://apply.deloitte.com/en_US/careers/JobDetail/Senior-Consultant/370285", Link("avature", "370285")),
+        ("https://boards.greenhouse.io/embed/job_app?for=acme&token=4743066005", Link("greenhouse", "4743066005")),
+        (  # Workday's own apply steps after the requisition
+            "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Seattle/ML-Engineer_R100/apply/applyManually",
+            Link("workday", "acme/r100"),
+        ),
+        (
+            "https://jsv3.recruitics.com/redirect?rx_url=HTTPS%3A%2F%2Fjobs.lever.co%2Fzoo%2F" + LEVER,
+            Link("lever", LEVER),
+        ),
+        (  # a hash route names the job
+            "https://pm.healthcaresource.com/CS/alamedahighland/#/job/25195?source=Indeed",
+            Link("", "pm.healthcaresource.com/cs/alamedahighland/job/25195"),
+        ),
+        (
+            "https://careers.kearney.example/jobs/5358/job?indeed-apply-token=abc123&mode=job",
+            Link("", "careers.kearney.example/jobs/5358/job"),
+        ),
         # not links: junk, trackers without a target, the boards' own pages, career home and list pages
         ("None", None),
         ("null", None),
@@ -248,6 +289,13 @@ ASHBY = "42aca7f5-2f58-40ef-a6ce-19027d32a12f"
         ("https://www.example.com/careers/", None),
         ("https://jobs.example.com/en/search?q=ml", None),
         ("https://example.com", None),
+        ("https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite", None),
+        ("https://acme.wd5.myworkdayjobs.com/en-US/External?q=ml", None),
+        ("https://wd1.myworkdaysite.com/recruiting/acme/jobs", None),
+        ("https://jobs.ashbyhq.com/acme/jobs", None),
+        ("https://jobs.lever.co/acme", None),
+        ("https://boards.greenhouse.io/acme", None),
+        ("https://www.google.com/about/careers/applications/jobs/results/", None),
     ],
 )
 def test_apply_links(link, key):
@@ -267,12 +315,19 @@ def test_apply_links(link, key):
         (
             "avature",
             "https://careers.acme.example/en_US/jobs/JobDetail/Data-Engineer/7001",
-            Link("avature", "careers.acme.example/7001"),
+            Link("avature", "7001"),
         ),
     ],
 )
 def test_company_site_links_by_source(source, url, key):
     assert apply_key(Job(id="j", source=source, url=url, tags=[])) == key
+
+
+def test_a_company_site_link_without_the_source_id_is_compared_like_any_other_link():
+    odd = Job(id="g", source="greenhouse", url="https://www.acme.example/careers/positions/12345", tags=[])
+    assert apply_key(odd) == Link("", "acme.example/careers/positions/12345")  # never a 'different id' veto
+    home = Job(id="w", source="workday", url="https://acme.wd5.myworkdayjobs.com/en-US/External", tags=[])
+    assert apply_key(home) is None
 
 
 def test_boards_use_the_recorded_apply_link_and_manual_imports_their_own():
@@ -308,8 +363,8 @@ def fillers(n: int, points=("role.ml_engineering",)) -> list[Job]:
     ]
 
 
-def picks(candidates, shown=(), others=()) -> list[str]:
-    return [job_id for job_id, _ in select_daily(INTENT, candidates, settings(), shown=shown, others=others)]
+def picks(candidates, shown=(), closed=()) -> list[str]:
+    return [job_id for job_id, _ in select_daily(INTENT, candidates, settings(), shown=shown, closed=closed)]
 
 
 def test_a_posting_appears_once_a_day():
@@ -339,7 +394,14 @@ def test_a_hard_excluded_or_closed_listing_still_links_a_posting_to_its_shown_li
     assert "acme-glassdoor" in picks([glassdoor, *fillers(12)])
     assert "acme-glassdoor" not in picks([bridge, glassdoor, *fillers(12)], shown=shown)
     closed = bridge.model_copy(update={"tags": ["role.ml_engineering", "location.us.new_york"]})
-    assert "acme-glassdoor" not in picks([glassdoor, *fillers(12)], shown=shown, others=[closed])
+    assert "acme-glassdoor" not in picks([closed, glassdoor, *fillers(12)], shown=shown, closed={closed.id})
+
+
+def test_score_ties_keep_the_storage_order_also_for_closed_listings():
+    """R100001 is closed and stored first; the LinkedIn listing looks like both requisitions (5b case 5)."""
+    r1, r2, linkedin = (scored(j, ["role.ml_engineering"]) for j in ("delta-r1", "delta-r2", "delta-linkedin"))
+    # in storage order the LinkedIn listing joins the closed R100001 and stands for it; R100002 is its own posting
+    assert picks([r1, r2, linkedin], closed={"delta-r1"}) == ["delta-r2", "delta-linkedin"]
 
 
 def test_exploration_does_not_take_another_listing_of_a_recommended_posting():
@@ -350,9 +412,20 @@ def test_exploration_does_not_take_another_listing_of_a_recommended_posting():
     assert ("beta-indeed", "recommended") in chosen and "beta-zip" not in [job_id for job_id, _ in chosen]
 
 
-def test_the_picks_are_deterministic():
-    candidates = [scored(j, TOP) for j in ("acme-sf", "acme-sea", "beta-indeed", "beta-zip")] + fillers(12)
-    assert picks(candidates) == picks(list(candidates))
+def test_the_picks_do_not_depend_on_hash_seeds():
+    script = (
+        "from tests.test_slice5c import scored, fillers, picks, TOP\n"
+        "ids = ['acme-sf', 'acme-sea', 'beta-indeed', 'beta-zip', 'delta-r1', 'delta-r2', 'delta-linkedin',"
+        " 'mu-r1', 'mu-r2', 'mu-li-sj', 'mu-li-chi']\n"
+        "print(picks([scored(j, TOP) for j in ids] + fillers(6)))\n"
+    )
+    runs = set()
+    for seed in ("1", "2", "3"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        run = subprocess.run([sys.executable, "-c", script], cwd=ROOT, env=env, capture_output=True, text=True)
+        assert run.returncode == 0, run.stderr
+        runs.add(run.stdout)
+    assert len(runs) == 1
 
 
 # --- the tools (cases 33, 35-37, 39, 40) ---------------------------------------------------------------
@@ -437,19 +510,27 @@ def test_a_reject_for_the_place_only_blocks_that_city(box):
     copy(box, "acme-sea", "acme-sea-indeed", board="indeed")
     add(box, "acme-ny")
     label(box, "acme-sea", "reject", DAY1, reasons=["location.us.seattle"])
-    for job_id in ("beta-indeed", "beta-zip"):
-        add(box, job_id)
-    label(box, "beta-indeed", "reject", DAY1, reasons=["location.us.bay_area", "work_mode.onsite"])
-    add(box, "gamma-zip")
-    add(box, "gamma-linkedin")
-    label(box, "gamma-zip", "reject", DAY1)
-    rows = {item["company"]: item for item in box.build_apply_list(DAY2)["jobs"]}
-    assert set(rows) == {"Acme Pay"}
-    acme = rows["Acme Pay"]
+    (acme,) = box.build_apply_list(DAY2)["jobs"]
     assert acme["job_id"] == "acme-sf" and acme["location"] == "us.bay_area, us.new_york"
-    assert acme["also"] == [LISTINGS["acme-ny"]["url"]]
-    label(box, "acme-sf", "want", DAY2)  # a want still wins
-    assert {item["company"] for item in box.build_apply_list(DAY2)["jobs"]} == {"Acme Pay"}
+    assert acme["also"] == [LISTINGS["acme-ny"]["url"]]  # both Seattle listings are held back
+    label(box, "acme-ny", "want", DAY2)  # a want still wins: nothing is held back any more
+    (acme,) = box.build_apply_list(DAY2)["jobs"]
+    assert acme["wanted"] and "https://www.board.example/acme-sea-indeed" in acme["also"]
+
+
+@pytest.mark.parametrize("reasons", [["location.us.bay_area", "work_mode.onsite"], []])
+def test_a_reject_for_more_than_the_place_blocks_every_city(box, reasons):
+    add(box, "pi2-sj")
+    add(box, "pi2-sea")  # the same posting in Seattle
+    label(box, "pi2-sj", "reject", DAY1, reasons=reasons)
+    assert box.build_apply_list(DAY2)["jobs"] == []
+
+
+def test_a_place_only_reject_does_not_hold_back_a_listing_in_several_cities(box):
+    add(box, "nu-li")  # LinkedIn Seattle
+    add(box, "nu-wd", tags=["location.us.seattle"])  # Workday "3 Locations", tagged with Seattle among them
+    label(box, "nu-li", "reject", DAY1, reasons=["location.us.seattle"])
+    assert [item["job_id"] for item in box.build_apply_list(DAY2)["jobs"]] == ["nu-wd"]
 
 
 def test_the_apply_list_follows_the_new_rule(box):
@@ -468,6 +549,28 @@ def test_the_apply_list_follows_the_new_rule(box):
     ]
     also = {item["job_id"]: item["also"] for item in rows}
     assert also["mu-r1"] == [LISTINGS_5C["mu-li-chi"]["url"]] and also["mu-r2"] == [LISTINGS_5C["mu-li-sj"]["url"]]
+
+
+def test_the_apply_list_groups_by_corrected_tags(box):
+    add(box, "rho-us")
+    add(box, "rho-ca")  # Toronto: kept out by the intent, and another country
+    assert [item["job_id"] for item in box.build_apply_list(DAY2)["jobs"]] == ["rho-us"]
+    box.store.set_effective_tags("rho-ca", ["role.ml_engineering", "location.us.boston"], None)  # really Boston
+    (row,) = box.build_apply_list(DAY2)["jobs"]
+    assert row["job_id"] == "rho-us" and row["also"] == [LISTINGS_5C["rho-ca"]["url"]]
+
+
+def test_a_row_merged_by_company_tag_names_its_company_and_the_careful_list_sees_it(box):
+    write_applicant(box.data_dir, careful=("Phi Pay", "Upsilon Retail"))
+    apply = box.settings.apply.model_copy(update={"review_first": 0})
+    box.settings = box.settings.model_copy(update={"apply": apply})
+    add(box, "phi-talent", points=TOP)  # no company name; ranks first, so its row applies with it
+    add(box, "phi-li")
+    add(box, "ups-1")
+    rows = {item["job_id"]: item for item in box.build_apply_list(DAY2)["jobs"]}
+    assert rows["phi-talent"]["company"] == "Phi Pay" and rows["ups-1"]["company"] == "upsilon retail"
+    modes = {job["job_id"]: job["mode"] for job in box.prepare_apply_batch(DAY2)["jobs"]}
+    assert modes == {"phi-talent": "careful", "ups-1": "careful"}
 
 
 # --- a misread fix reaches the posting's other listings (case 36) -------------------------------------
@@ -502,6 +605,8 @@ def test_the_fix_must_name_the_other_listings(misread):
         misread.correct_tags("acme-sea", **FIX)
     with pytest.raises(InvariantError):
         misread.correct_tags("acme-sea", **FIX, also=["acme-sea-indeed"])
+    with pytest.raises(InvariantError):
+        misread.correct_tags("acme-sea", **FIX, also=["acme-sea-indeed", "acme-ny", "acme-sf"])
     assert misread.store.effective_tags("acme-sea") == [
         "role.ml_engineering",
         "work_mode.hybrid",
@@ -546,6 +651,20 @@ def test_a_fix_reaching_only_unlabelled_listings_leaves_analyses_alone(misread):
     assert misread.store.tag_revision() == revision
 
 
-def test_the_today_skill_names_the_other_listings_before_a_fix():
-    _, skill = frontmatter(ROOT / ".claude/skills/today/SKILL.md")
-    assert "same_posting" in skill and "also" in skill
+def test_an_ambiguous_listing_follows_the_requisition_being_fixed(box):
+    for job_id in ("delta-r1", "delta-r2", "delta-linkedin"):
+        add(box, job_id)
+    assert [j["job_id"] for j in box.show_job("delta-r2")["same_posting"]] == ["delta-linkedin"]
+    assert [j["job_id"] for j in box.show_job("delta-r1")["same_posting"]] == ["delta-linkedin"]
+
+
+def test_a_listing_a_fix_reached_cannot_be_tagged_again(misread):
+    misread.correct_tags("acme-sea", **FIX, also=["acme-ny", "acme-sea-indeed"])
+    with pytest.raises(InvariantError, match="misread"):
+        misread.submit_job_tags("acme-sea-indeed", ["role.data_science", "location.us.seattle"])
+
+
+def test_the_skills_name_the_other_listings_before_a_fix():
+    for skill in ("today", "apply-list"):
+        _, text = frontmatter(ROOT / ".claude/skills" / skill / "SKILL.md")
+        assert "same_posting" in text and "correct_tags(job_id, remove, add, also)" in text, skill

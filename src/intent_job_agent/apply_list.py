@@ -86,11 +86,14 @@ def postings(
         wanted = any("want" in values.get(job.id, ()) for job in listings)
         rejected = [job for job in listings if "reject" in values.get(job.id, ())]
         whole = not wanted and any(job.id not in place_only for job in rejected)
-        held = (
-            set()
-            if wanted
-            else {j.id for r in rejected for j in listings if j.id == r.id or duplicates.same_city(j, r)}
-        )
+        held = set()
+        if not wanted:  # a reject only for its place holds back the listings that name the same city
+            held = {
+                j.id
+                for r in rejected
+                for j in listings
+                if j.id == r.id or (duplicates.names_city(j) and duplicates.same_city(j, r))
+            }
         offered = tuple(job for job in listings if job.id not in held)
         own = tuple(by_id[job.id] for job in offered if job.id in by_id)
         with_letter = [c for c in own if has_letter(c.job.id)] if len(own) > 1 else []
