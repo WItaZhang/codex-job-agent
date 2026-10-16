@@ -14,7 +14,7 @@ import pytest
 
 from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill import readback
-from intent_job_agent.form_fill.models import ReadField
+from intent_job_agent.form_fill.models import PageState, ReadField
 from intent_job_agent.form_fill.readback import find_job_tab, list_targets, normalize
 
 PAGES = Path(__file__).resolve().parent / "fixtures/form_fill/pages"
@@ -201,6 +201,83 @@ def test_review_pairs_repeating_a_control_are_dropped_after_cleanup():
     assert normalize(one_frame(nodes, pairs)) == (
         field(1, "Phone", "text", "555-0100", required=True),
         field(2, "Phone", "review", "555-0199"),
+    )
+
+
+def test_a_pressed_button_group_reads_the_pressed_button():
+    toggle = control(
+        4,
+        tag="button",
+        type="",
+        role="togglegroup",
+        labels={"preceding": "Will you require sponsorship?"},
+        options=[{"text": "Yes", "value": "", "selected": False}, {"text": "No", "value": "", "selected": True}],
+    )
+    assert normalize(one_frame([toggle])) == (field(1, "Will you require sponsorship?", "radio", "No", ("Yes", "No")),)
+
+
+def test_an_aria_checkbox_reads_aria_checked():
+    widget = control(2, tag="div", type="", role="checkbox", labels={"aria_label": "Follow the company"}, checked=True)
+    assert normalize(one_frame([widget])) == (field(1, "Follow the company", "checkbox", "Yes"),)
+
+
+def test_a_group_question_prefers_the_title_inside_the_group():
+    radios = [
+        control(
+            n,
+            type="radio",
+            group="n:edu",
+            labels={"label_for": label, "preceding": "Please refer to the posting.", "inner": "Education status"},
+            option_label=label,
+            checked=n == 5,
+        )
+        for n, label in ((5, "Student"), (6, "Graduated"))
+    ]
+    assert normalize(one_frame(radios)) == (field(1, "Education status", "radio", "Student", ("Student", "Graduated")),)
+
+
+def test_a_lone_checkbox_in_a_titled_group_takes_the_group_title():
+    box = control(
+        3,
+        type="checkbox",
+        group="n:I agree",
+        labels={"label_for": "I agree", "inner": "May we contact you about future roles?"},
+        option_label="I agree",
+        checked=False,
+    )
+    assert normalize(one_frame([box])) == (
+        field(1, "May we contact you about future roles?", "checkbox", "", ("I agree",)),
+    )
+
+
+def test_page_state_reads_the_buttons_left_and_any_received_message():
+    raw = {
+        "frames": [
+            {"url": "u", "controls": [], "pairs": [], "actions": ["Edit", " Submit\n application ", "Back"]},
+            {"url": "v", "error": "cross-origin"},
+            {"url": "w", "controls": [], "pairs": [], "actions": ["Next"], "notices": ["Contact info"]},
+        ]
+    }
+    assert readback.page_state(raw) == PageState(actions=("Submit application", "Next"))
+    assert readback.page_state(raw).before_submit
+    done = {"frames": [{"url": "u", "actions": ["Done"], "notices": ["Your application was sent to Acme!"]}]}
+    assert readback.page_state(done) == PageState(received="Your application was sent to Acme!")
+    assert not readback.page_state(done).before_submit
+    assert readback.page_state({"frames": [{"url": "u", "controls": [], "pairs": []}]}) == PageState()
+
+
+@pytest.mark.parametrize("bad", [{"frames": [{"actions": "Submit"}]}, {"frames": [{"notices": [1]}]}])
+def test_page_state_rejects_malformed_lists(bad):
+    with pytest.raises(InvariantError):
+        readback.page_state(bad)
+
+
+def test_asterisks_around_a_question_are_dropped():
+    pairs = [{"order": 1, "question": "**Gender**", "value": "Female", "source": "row"}]
+    nodes = [control(2, labels={"label_for": "* First name"}, value="Sam")]
+    assert normalize(one_frame(nodes, pairs)) == (
+        field(1, "Gender", "review", "Female"),
+        field(2, "First name", "text", "Sam", required=True),
     )
 
 
@@ -394,6 +471,168 @@ def test_extract_js_in_a_real_browser(chromium):
     assert normalize({"frames": [frame]}) == EXPECTED_BROWSER
 
 
+# A single-page form in the shape of the 2026-10-15 Ashby page: a Yes / No button group with its native checkbox
+# hidden beside it, a radio group titled by a label that points at no control, with a description in between, and
+# a consent group whose question is a paragraph followed by a link. SYNTHETIC.
+BUTTONS_HTML = """<!doctype html><html><body>
+<h1>Synthetic Engineer</h1>
+<div><div><h2>Location</h2><p>Austin</p></div><div><h2>Department</h2><p>Platform</p></div></div>
+<form>
+  <div><label for="nm">Name</label><input id="nm"></div>
+  <div><label for="q-sponsor">Will you now or in the future require sponsorship?</label>
+    <div><button type="button" aria-pressed="false">Yes</button><button type="button" aria-pressed="true">No</button>
+      <input type="checkbox" tabindex="-1" name="q-sponsor" style="opacity:0;width:1px;height:1px"></div></div>
+  <div><h2>Education</h2>
+    <div><p>This role is open to candidates who have worked on synthetic systems for a while, and this paragraph says
+      who may apply and why, at some length.</p><p>Please refer to the job posting for more information.</p></div>
+    <fieldset style="border:0"><label for="q-edu">Current education status</label>
+      <div><p>Please answer this question truthfully.</p></div>
+      <div><span><input type="radio" id="e0" name="edu"></span><label for="e0">I am currently a student.</label></div>
+      <div><span><input type="radio" id="e1" name="edu"></span><label for="e1">I graduated last year.</label></div>
+    </fieldset></div>
+  <fieldset style="border:0"><label for="q-consent"></label>
+    <div><p>May Synthetic contact you about future roles?</p><p><a href="#">Privacy Policy</a></p></div>
+    <div><span><input type="checkbox" id="c0" name="I agree"></span><label for="c0">I agree</label></div>
+  </fieldset>
+  <button type="submit">Submit Application</button>
+</form></body></html>"""
+
+EXPECTED_BUTTONS = (
+    field(1, "Name", "text", "Sam Example"),
+    field(2, "Will you now or in the future require sponsorship?", "radio", "No", ("Yes", "No")),
+    field(
+        3,
+        "Current education status",
+        "radio",
+        "I am currently a student.",
+        ("I am currently a student.", "I graduated last year."),
+    ),
+    field(4, "May Synthetic contact you about future roles?", "checkbox", "", ("I agree",)),
+)
+
+
+def test_button_groups_and_group_titles_in_a_real_browser(chromium):
+    _, pg, _ = chromium
+    pg.set_content(BUTTONS_HTML)
+    pg.fill("#nm", "Sam Example")
+    pg.check("#e0")
+    frame = pg.evaluate(readback.EXTRACT_JS)
+    raw = {"frames": [frame]}
+    assert normalize(raw) == EXPECTED_BUTTONS
+    assert readback.page_state(raw) == PageState(actions=("Submit Application",))
+
+
+LONG_QUESTION = "Race categories are defined as follows. " + "A synthetic definition sentence for this test. " * 30
+
+# A last step in the shape of the 2026-10-15 LinkedIn page: the review sits in a <dialog> opened as a modal over the
+# job page; its rows are two paragraphs (question, value) under small headings. SYNTHETIC.
+DIALOG_HTML = f"""<!doctype html><html><body>
+<header><input aria-label="Search" placeholder="Search"><nav><a href="#">Jobs</a></nav></header>
+<main><h1>Synthetic Engineer</h1><p>Austin, TX · Over 100 applicants</p><a href="#">Continue</a></main>
+<footer><label for="lang">Select language</label><select id="lang"><option>English</option></select></footer>
+<input type="file" id="up">
+<dialog id="apply" aria-labelledby="dh">
+  <header><h2 id="dh">Apply to Synthetic</h2></header>
+  <div><p>8/8 pages</p></div>
+  <div><h3>Review your application</h3><p>The employer will also receive a copy of your profile</p></div>
+  <section><div><h4>Contact info</h4><button type="button">Edit</button></div>
+    <div><div><p>First name</p><p>Sam</p></div><div><p>Email address</p><p>{EMAIL}</p></div>
+      <div><p>Mobile phone number</p><p>555-0100</p></div></div></section>
+  <section><div><h4>Resume</h4><button type="button">Edit</button></div>
+    <div><p>Upload a resume in PDF format</p><div><div><p>PDF</p></div><p>resume_synthetic.pdf</p></div></div></section>
+  <section><div><p>Work Experience</p><button type="button">Edit</button></div>
+    <div><div><p>Your title</p><p>Engineer Intern</p></div><div><p>Company</p><p>Synthetic Labs</p></div>
+      <div><p>Dates of employment</p><div><p>6</p><p>/</p><p>2024</p><p> - </p><p>8</p><p>/</p><p>2024</p></div></div>
+      <div><p>City</p><p>Austin</p></div></div></section>
+  <section><div><h4>Additional Questions</h4><button type="button">Edit</button></div>
+    <div><p>Are you legally authorized to work in the country?</p><p>Yes</p></div>
+    <div><p>Will you require sponsorship?</p><p>No</p></div>
+    <div><p>**Race/Ethnicity**<br><br>{LONG_QUESTION}</p><p>I prefer not to specify</p></div></section>
+  <section><div><h4>Privacy</h4><button type="button">Edit</button></div>
+    <div><div><p>You declare that you have read the privacy notice.</p><p>I consent</p></div></div></section>
+  <div role="checkbox" aria-label="Mark job as a top choice" aria-checked="false">
+    <div><input id="tc" type="checkbox"><label for="tc"></label></div><p>Mark job as a top choice</p></div>
+  <div role="checkbox" aria-label="Follow Synthetic to stay up to date" aria-checked="true">
+    <div><input id="fo" type="checkbox" checked><label for="fo"></label></div>
+    <p>Follow Synthetic to stay up to date</p></div>
+  <div><div role="alert"><p>Resume uploaded</p></div><div><p>1m</p><p>1/2</p></div></div>
+  <footer><button type="button">Submit application</button></footer>
+</dialog></body></html>"""
+
+EXPECTED_DIALOG = (
+    field(1, "First name", "review", "Sam"),
+    field(2, "Email address", "review", EMAIL),
+    field(3, "Mobile phone number", "review", "555-0100"),
+    field(4, "Upload a resume in PDF format", "review", "PDF resume_synthetic.pdf"),
+    field(5, "Your title", "review", "Engineer Intern"),
+    field(6, "Company", "review", "Synthetic Labs"),
+    field(7, "Dates of employment", "review", "6 / 2024 - 8 / 2024"),
+    field(8, "City", "review", "Austin"),
+    field(9, "Are you legally authorized to work in the country?", "review", "Yes"),
+    field(10, "Will you require sponsorship?", "review", "No"),
+    field(11, "Race/Ethnicity " + LONG_QUESTION.strip(), "review", "I prefer not to specify"),
+    field(12, "You declare that you have read the privacy notice.", "review", "I consent"),
+    field(13, "Mark job as a top choice", "checkbox", ""),
+    field(14, "Follow Synthetic to stay up to date", "checkbox", "Yes"),
+)
+
+
+def test_a_modal_dialog_is_read_alone_with_its_review_rows(chromium):
+    _, pg, _ = chromium
+    pg.set_content(DIALOG_HTML)
+    pg.evaluate("document.getElementById('apply').showModal()")
+    raw = {"frames": [pg.evaluate(readback.EXTRACT_JS)]}
+    assert normalize(raw) == EXPECTED_DIALOG
+    assert readback.page_state(raw) == PageState(actions=("Submit application",))
+
+
+# A review page in the shape of the 2026-10-15 Workday page: groups titled by a small heading, holding rows that are
+# a heading or an orphan label plus a value. SYNTHETIC.
+SECTIONS_HTML = f"""<!doctype html><html><body>
+<h3>My Information</h3>
+<div role="group"><h4>Contact</h4><div>
+  <div><h4>Email Address</h4><div><div><span>{EMAIL}</span></div></div></div>
+  <div><h4>Phone</h4><div><div><span>555-0100 (Mobile)</span></div></div></div></div></div>
+<h3>Voluntary Disclosures</h3>
+<div role="group"><h4>Equal Opportunity Employment</h4><div>
+  <div><label for="gender">Gender</label><div><span>Female</span></div></div>
+  <div><label for="veteran">Veterans</label><div><span>I do not wish to self-identify.</span></div></div></div></div>
+<button type="button">Back</button><button type="button">Submit</button>
+</body></html>"""
+
+
+def test_review_sections_are_not_rows_of_their_own(chromium):
+    _, pg, _ = chromium
+    pg.set_content(SECTIONS_HTML)
+    raw = {"frames": [pg.evaluate(readback.EXTRACT_JS)]}
+    assert normalize(raw) == (
+        field(1, "Email Address", "review", EMAIL),
+        field(2, "Phone", "review", "555-0100 (Mobile)"),
+        field(3, "Gender", "review", "Female"),
+        field(4, "Veterans", "review", "I do not wish to self-identify."),
+    )
+    assert readback.page_state(raw) == PageState(actions=("Submit",))
+
+
+def test_a_page_with_nothing_to_read_in_its_dialog_is_read_whole(chromium):
+    _, pg, _ = chromium
+    html = """<!doctype html><html><body><label for="a">Answer</label><input id="a" value="x">
+      <dialog id="d"><p>We use cookies.</p><button type="button">OK</button></dialog></body></html>"""
+    pg.set_content(html)
+    pg.evaluate("document.getElementById('d').showModal()")
+    assert normalize({"frames": [pg.evaluate(readback.EXTRACT_JS)]}) == (field(1, "Answer", "text", "x"),)
+
+
+def test_a_received_page_is_not_before_submit(chromium):
+    _, pg, _ = chromium
+    pg.set_content(
+        """<!doctype html><html><body><h1>Thank you for applying!</h1><p>We will be in touch.</p>
+        <a href="#">Back to jobs</a><button type="button">Done</button></body></html>"""
+    )
+    state = readback.page_state({"frames": [pg.evaluate(readback.EXTRACT_JS)]})
+    assert state == PageState(received="Thank you for applying!") and not state.before_submit
+
+
 class StandInRedactor:
     """Masks the synthetic email only; the real redactor lives in redact.py."""
 
@@ -414,9 +653,10 @@ def test_read_final_page_over_cdp_leaves_the_page_open(chromium, tmp_path):
     target = find_job_tab([], targets, before_url)
     assert target is not None
 
-    fields = readback.read_final_page(port, target, tmp_path, StandInRedactor())
+    final = readback.read_final_page(port, target, tmp_path, StandInRedactor())
 
-    assert fields == EXPECTED_BROWSER
+    assert final.fields == EXPECTED_BROWSER
+    assert final.state == PageState(actions=("Submit application",))
     assert not pg.is_closed() and pg.url == before_url
     assert pg.input_value("#fn") == "Sam"  # nothing was cleared or retyped
     assert {p.name for p in tmp_path.iterdir()} == {"page.html", "screenshot.png", "readback.json", "raw.json"}
@@ -518,6 +758,54 @@ def test_the_saved_screenshot_has_the_contact_value_blacked_out(chromium, tmp_pa
     assert pixel(browser, png, name["x"] + 4, name["y"] + name["height"] / 2)[:3] != [0, 0, 0]
     assert pg.input_value("#em") == EMAIL and not pg.is_closed()  # the page itself is unchanged
     assert not (tmp_path / readback.SCREENSHOT_NOTE).exists()
+
+
+def black_rows(browser, png: bytes, width: int) -> int:
+    """How many rows of a PNG hold an unbroken run of black pixels at least `width` wide."""
+    pg = browser.new_page()
+    try:
+        url = "data:image/png;base64," + base64.b64encode(png).decode()
+        return pg.evaluate(
+            """async ([url, width]) => {
+                const img = new Image(); img.src = url; await img.decode();
+                const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+                const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+                const d = g.getImageData(0, 0, img.width, img.height).data;
+                let rows = 0;
+                for (let y = 0; y < img.height; y++) {
+                    let run = 0, best = 0;
+                    for (let x = 0; x < img.width; x++) {
+                        const i = 4 * (y * img.width + x);
+                        run = d[i] < 16 && d[i + 1] < 16 && d[i + 2] < 16 ? run + 1 : 0;
+                        best = Math.max(best, run);
+                    }
+                    if (best >= width) rows++;
+                }
+                return rows;
+            }""",
+            [url, width],
+        )
+    finally:
+        pg.close()
+
+
+def test_a_contact_value_in_a_modal_dialog_is_blacked_out(chromium, tmp_path):
+    """A <dialog> opened as a modal sits in the browser's top layer, above any overlay drawn on the page; the
+    blackout has to follow the element itself, on a scrolled page too."""
+    browser, pg, port = chromium
+    html = f"""<!doctype html><html><body style="margin:0"><div style="height:1800px">Synthetic page</div>
+      <dialog id="d"><p>Email address</p><p id="em" style="font:20px sans-serif;padding:6px">{EMAIL}</p></dialog>
+      </body></html>"""
+    pg.goto("data:text/html;base64," + base64.b64encode(html.encode()).decode())
+    pg.evaluate("document.getElementById('d').showModal(); window.scrollTo(0, 900)")
+    box = pg.locator("#em").bounding_box()
+    target = find_job_tab([], list_targets(port), pg.url)
+
+    readback.read_final_page(port, target, tmp_path, StandInRedactor())
+
+    png = (tmp_path / "screenshot.png").read_bytes()
+    assert black_rows(browser, png, int(box["width"] * 0.9)) >= int(box["height"] * 0.8)
+    assert pg.evaluate("document.getElementById('d').open") and not pg.is_closed()  # the page is left as it was
 
 
 def test_a_screenshot_that_cannot_be_blacked_out_is_not_saved(chromium, tmp_path):

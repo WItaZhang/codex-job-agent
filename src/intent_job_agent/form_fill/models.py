@@ -84,6 +84,18 @@ class ReadField(_Model):
     required: bool = False
 
 
+class PageState(_Model):
+    """Where the form on the final page stands (slice-1 check 4): the visible buttons that would still send it or move
+    it on (as shown), and the text saying the application was received, if any."""
+
+    actions: tuple[str, ...] = ()
+    received: str = ""
+
+    @property
+    def before_submit(self) -> bool:
+        return bool(self.actions) and not self.received
+
+
 Result = Literal["correct", "wrong", "no_answer", "ambiguous", "not_reviewed", "unreadable"]
 Severity = Literal["fact", "guess", "missing", "format", "none"]
 

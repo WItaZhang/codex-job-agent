@@ -28,7 +28,7 @@ from ..config import Settings
 from ..domain import InvariantError
 from . import readback
 from .inputs import load_answers, load_checklist, load_list, profile_field_paths
-from .models import RECORD_FIELDS, AnswerEntry, ChecklistItem, JobList, JobReport, ListEntry, ReadField
+from .models import RECORD_FIELDS, AnswerEntry, ChecklistItem, JobList, JobReport, ListEntry, PageState, ReadField
 from .redact import Redactor, total_hits
 
 _Status = JobReport.model_fields["status"].annotation
@@ -47,10 +47,10 @@ GATE_REASONS = (
 )
 APPLICANT_ANSWERS = ("relocation", "onsite_ok")  # applicant.yaml fields a from_applicant entry may name
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")  # a job id names a folder
-SUBMIT_WORDS = re.compile(r"\bsubmit\b|send application|finish application|complete application", re.I)
 CODE_TOOLS = ("browser_evaluate", "browser_run_code", "browser_run_code_unsafe")
 PAGE_URL = re.compile(r"Page URL: (\S+)")
 LOG_FILE = "log.jsonl"
+META_FILE = "meta.json"
 REPORT_FILE = "feasibility.md"
 CELL_CHARS = 300
 
@@ -297,13 +297,14 @@ def read_log(path: str | Path) -> tuple[list[dict], list[str]]:
 
 
 def submit_signs(events: list[dict]) -> list[str]:
-    """Anything in the agent's tool calls that may have sent the form (plan section 2, item 4)."""
+    """Anything in the agent's tool calls that may have sent the form (plan section 2, item 4). On their own they are
+    warnings: Enter in a search box and the agent's own description of a button match too."""
     signs = []
     for event in events:
         tool, data = event["name"].rsplit("__", 1)[-1], event["input"]
         if data.get("submit") is True:
             signs.append(f"{tool} 带 submit: true（{data.get('element', '')}）")
-        if tool == "browser_click" and SUBMIT_WORDS.search(str(data.get("element", ""))):
+        if tool == "browser_click" and readback.SUBMIT_WORDS.search(str(data.get("element", ""))):
             signs.append(f"browser_click 点过「{data.get('element')}」")
         if tool in CODE_TOOLS and "submit" in json.dumps(data).lower():
             signs.append(f"{tool} 的代码里有 submit")
@@ -367,6 +368,7 @@ class _Seen:
     target: dict | None = None
     last_url: str | None = None
     signs: tuple[str, ...] = ()
+    state: PageState | None = None  # where the form on the final page stands, when it was read
     moved: tuple[str, ...] = ()
     tabs_before: int = 0
     scan: dict | None = None
@@ -423,11 +425,13 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         "fields": result.fields,
         "tab": seen.target.get("url") if seen.target else None,
         "checks": result.checks,
+        "page": seen.state.model_dump(mode="json") if seen.state else None,
+        "submit_warnings": list(seen.signs),
         "notes": list(result.notes),
         "started": started,
         "finished": _now(),
     }
-    (job_dir / "meta.json").write_text(_dump(ctx.redactor.mask_json(meta)), encoding="utf-8")
+    (job_dir / META_FILE).write_text(_dump(ctx.redactor.mask_json(meta)), encoding="utf-8")
     with (ctx.run_dir / REPORT_FILE).open("a", encoding="utf-8") as report:
         report.write(ctx.redactor.mask(_section(entry, result, seen, ctx.redactor)))
     return result
@@ -453,7 +457,8 @@ def _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks) -> tu
         notes.append("the job's tab was not found")
     else:
         try:
-            seen.fields = tuple(ctx.runner.read(seen.target, job_dir, ctx.redactor))
+            final = ctx.runner.read(seen.target, job_dir, ctx.redactor)
+            seen.fields, seen.state = tuple(final.fields), final.state
             status, page_dir = "filled", str(job_dir)
             left_out = job_dir / readback.SCREENSHOT_NOTE
             if left_out.is_file():
@@ -462,19 +467,29 @@ def _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks) -> tu
             status = "readback_failed"
             notes.append(f"read back failed: {_error(error)}")
     seen.signs = tuple(submit_signs(events))
-    checks["not_submitted"] = outcome.status != "applied" and not outcome.emails and not seen.signs
+    checks["not_submitted"] = not_submitted(outcome, seen.state, seen.signs)
     seen.moved = tuple(other_tabs(before, after)) if after is not None else ("（标签页列不出来）",)
     checks["other_tabs_unchanged"] = not seen.moved
     return ("gate" if gate else status), page_dir
 
 
+def not_submitted(outcome, state: PageState | None, signs) -> bool:
+    """Check 4 (slice-1 plan, section 2). The agent did not report a submission or send mail, and the final page has
+    no "application received" text. A page still showing its submit or next button is before submit, whatever the
+    agent's tool calls say; without that evidence, any submit-like tool call fails the check."""
+    if outcome.status == "applied" or outcome.emails or (state is not None and state.received):
+        return False
+    return (state is not None and state.before_submit) or not signs
+
+
 # --- feasibility.md ---------------------------------------------------------------------------------------------
 
 
-def _cell(text: str, redactor: Redactor) -> str:
+def _cell(text: str, redactor: Redactor, full: str = "readback.json") -> str:
+    """One table cell; a long text is cut, and `full` names the file holding all of it."""
     text = re.sub(r"\s+", " ", redactor.mask(str(text))).strip()
     if len(text) > CELL_CHARS:
-        text = text[:CELL_CHARS] + "…（全文见 readback.json）"
+        text = text[:CELL_CHARS] + f"…（全文见 {full}）"
     return text.replace("\\", "\\\\").replace("|", "\\|") or "（空）"
 
 
@@ -496,7 +511,7 @@ def _section(entry: ListEntry, result: JobOutcome, seen: _Seen, redactor: Redact
         f"- 填表 agent 的结果：{_agent_text(result.agent_result)}",
         f"- 页面目录：{result.page_dir or '无'}",
         f"- 读回：{len(fields)} 栏（控件 {len(fields) - review}，确认页文字 {review}）",
-        *(["- 备注："] + [f"  - {_cell(note, redactor)}" for note in result.notes] if result.notes else []),
+        *(["- 备注："] + [f"  - {_cell(note, redactor, META_FILE)}" for note in result.notes] if result.notes else []),
         "",
         "| 编号 | 题目 | 读回值 | 来源 | 一致 / 不一致 / 漏 |",
         "| --- | --- | --- | --- | --- |",
@@ -533,22 +548,40 @@ def _check_rows(result: JobOutcome, seen: _Seen, redactor: Redactor) -> list[str
             f"| 5 别的标签页没动 | {not_run} |  |",
         ]
     tab = seen.target.get("url", "") if seen.target else f"没有找到；agent 最后的地址：{seen.last_url or '无'}"
-    submitted = (
-        f"agent 结果是 {_agent_text(result.agent_result)}；审计里没有 submit: true，也没有点过提交按钮"
-        if checks["not_submitted"]
-        else "；".join([f"agent 结果是 {_agent_text(result.agent_result)}", *seen.signs])
-    )
+    submitted = _submit_text(result, seen)
     moved = (
         f"原有 {seen.tabs_before} 个标签页的地址和个数都没变"
         if checks["other_tabs_unchanged"]
         else "变了的原有标签页：" + "、".join(seen.moved)
     )
     return [
-        f"| 1 找得到标签页 | {_passed(checks['tab_found'])} | {_cell(tab, redactor)} |",
+        f"| 1 找得到标签页 | {_passed(checks['tab_found'])} | {_cell(tab, redactor, META_FILE)} |",
         f"| 3 打码 | {_passed(hits == 0)} | {scan} |",
-        f"| 4 没有提交 | {_passed(checks['not_submitted'])} | {_cell(submitted, redactor)} |",
-        f"| 5 别的标签页没动 | {_passed(checks['other_tabs_unchanged'])} | {_cell(moved, redactor)} |",
+        f"| 4 没有提交 | {_passed(checks['not_submitted'])} | {_cell(submitted, redactor, META_FILE)} |",
+        f"| 5 别的标签页没动 | {_passed(checks['other_tabs_unchanged'])} | {_cell(moved, redactor, META_FILE)} |",
     ]
+
+
+def _submit_text(result: JobOutcome, seen: _Seen) -> str:
+    """The explanation in check 4's row: what the agent said, what the final page shows, and the tool calls that
+    looked like a submit (warnings while the page is still before submit; all of them are in meta.json)."""
+    state, signs = seen.state, list(seen.signs)
+    parts = [f"agent 结果是 {_agent_text(result.agent_result)}"]
+    if state is None:
+        parts.append("最后一页没有读到")
+    elif state.received:
+        parts.append(f"最后一页写着「{state.received}」")
+    elif state.before_submit:
+        parts.append("最后一页还停在提交前（看得到" + "、".join(f"「{a}」" for a in state.actions) + "）")
+    else:
+        parts.append("最后一页看不到提交或下一步按钮")
+    if not signs:
+        parts.append("审计里没有 submit: true，也没有点过提交类按钮")
+    elif result.checks.get("not_submitted"):
+        parts.append(f"警告（最后一页还在提交前，不算提交）{len(signs)} 条，例如 {signs[0]}，全文见 {META_FILE}")
+    else:
+        parts.extend(signs)
+    return "；".join(parts)
 
 
 def _hit_files(scan: dict | None, root: Path | None = None) -> str:
@@ -634,7 +667,7 @@ class FormFillRunner:
             spec, self.data_dir, self.settings, self.profile, self._port(), self.read_dirs, **options
         )
 
-    def read(self, target: dict, out_dir: Path, redactor: Redactor) -> tuple[ReadField, ...]:
+    def read(self, target: dict, out_dir: Path, redactor: Redactor) -> readback.FinalPage:
         return readback.read_final_page(self._port(), target, out_dir, redactor)
 
     def _port(self) -> int:

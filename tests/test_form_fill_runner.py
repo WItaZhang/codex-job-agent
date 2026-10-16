@@ -14,7 +14,7 @@ from intent_job_agent import apply_bridge
 from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill import readback, runner
 from intent_job_agent.form_fill.inputs import load_answers, load_checklist, profile_field_paths
-from intent_job_agent.form_fill.models import JobReport, ReadField
+from intent_job_agent.form_fill.models import JobReport, PageState, ReadField
 from intent_job_agent.form_fill.readback import ReadbackError
 from intent_job_agent.form_fill.redact import Redactor, total_hits
 from intent_job_agent.store import Store
@@ -115,11 +115,14 @@ def tool_result(text: str, as_blocks: bool = True) -> dict:
     return {"type": "tool_result", "tool_use_id": "t", "content": content}
 
 
+BEFORE = PageState(actions=("Submit application",))  # the last page still shows its submit button
+
+
 class FakeBrowser:
     """Stands in for the applying Chrome, the filling agent and the CDP read. It writes the run log through the
     mask it is given, as apply_bridge.run_application does."""
 
-    def __init__(self, outcomes=None, fail=None, no_tab=(), events=(), move_tab=False, release=None):
+    def __init__(self, outcomes=None, fail=None, no_tab=(), events=(), move_tab=False, release=None, state=BEFORE):
         self.tabs = [
             {"id": "T0", "type": "page", "url": "https://mail.example.test/inbox"},
             {"id": "T1", "type": "page", "url": "https://jobs.example.test/checking"},
@@ -128,6 +131,7 @@ class FakeBrowser:
         self.outcomes = outcomes or {}
         self.fail = fail or {}
         self.no_tab, self.events, self.move_tab, self.release = set(no_tab), list(events), move_tab, release
+        self.state = state
         self.calls, self.reads, self.ensured = [], [], 0
 
     def ensure_chrome(self) -> int:
@@ -171,7 +175,7 @@ class FakeBrowser:
         out_dir.mkdir(parents=True, exist_ok=True)
         dumped = [field.model_dump(mode="json") for field in FIELDS]
         (out_dir / "readback.json").write_text(json.dumps(redactor.mask_json(dumped)), encoding="utf-8")
-        return FIELDS
+        return readback.FinalPage(FIELDS, self.state)
 
 
 def make_box(tmp_path) -> Toolbox:
@@ -426,19 +430,71 @@ def test_an_agent_that_stopped_early_is_noted(ff):
     assert first["agent_result"] == "stuck" and any("stuck" in note for note in first["notes"])
 
 
-def test_a_possible_submit_fails_check_4(ff):
+SUBMIT_LIKE = [
+    tool_use("browser_type", element="Field of Study input", ref="e1", text="Data", submit=True),
+    tool_use("browser_click", element="Review button (not submit)", ref="e9"),
+]
+
+
+def test_submit_like_actions_on_a_page_still_before_submit_are_warnings(ff):
+    """Enter in a search box and a click the agent described with "submit" do not fail check 4 while the last page
+    still shows its submit button and no received message; they are listed as warnings, in full in meta.json."""
     box, path = ff
-    box.form_fill_runner = FakeBrowser(
-        events=[
-            tool_use("browser_type", element="Cover letter", ref="e1", text="x", submit=True),
-            tool_use("browser_click", element="Submit application button", ref="e9"),
-        ]
-    )
+    box.form_fill_runner = FakeBrowser(events=SUBMIT_LIKE)
+    result = box.start_form_fill(path)
+    first = box.form_fill_status()["jobs"][0]
+    assert first["checks"]["not_submitted"] is True
+    report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+    row = next(line for line in report.splitlines() if line.startswith("| 4 没有提交 | 通过"))
+    assert "Submit application" in row and "警告" in row and "2 条" in row and "meta.json" in row
+    meta = json.loads((run_dir(box, result) / "acme-ml-01" / "meta.json").read_text(encoding="utf-8"))
+    assert meta["page"] == {"actions": ["Submit application"], "received": ""}
+    assert len(meta["submit_warnings"]) == 2
+    assert "Field of Study input" in meta["submit_warnings"][0]
+    assert "Review button (not submit)" in meta["submit_warnings"][1]
+
+
+def test_a_page_that_says_the_application_was_received_fails_check_4(ff):
+    box, path = ff
+    box.form_fill_runner = FakeBrowser(state=PageState(received="Thank you for applying!"))
     result = box.start_form_fill(path)
     first = box.form_fill_status()["jobs"][0]
     assert first["checks"]["not_submitted"] is False
     report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
-    assert "submit: true" in report and "Submit application button" in report and "不通过" in report
+    assert "| 4 没有提交 | 不通过" in report and "Thank you for applying!" in report
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        FakeBrowser(events=SUBMIT_LIKE, fail={"acme-ml-01": "read"}),  # the last page could not be read
+        FakeBrowser(events=SUBMIT_LIKE, state=PageState()),  # no submit or next button left on it
+    ],
+)
+def test_submit_like_actions_without_a_page_before_submit_fail_check_4(ff, fake):
+    box, path = ff
+    box.form_fill_runner = fake
+    result = box.start_form_fill(path)
+    first = box.form_fill_status()["jobs"][0]
+    assert first["checks"]["not_submitted"] is False
+    report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+    assert "submit: true" in report and "Review button (not submit)" in report and "不通过" in report
+
+
+def test_an_agent_that_says_it_applied_fails_check_4(ff):
+    box, path = ff
+    box.form_fill_runner = FakeBrowser(outcomes={"acme-ml-01": ("applied", None, [])})
+    box.start_form_fill(path)
+    assert box.form_fill_status()["jobs"][0]["checks"]["not_submitted"] is False
+
+
+def test_long_notes_point_to_meta_json(ff):
+    box, path = ff
+    box.form_fill_runner = FakeBrowser(outcomes={"acme-ml-01": ("waiting", None, ["x" * 400])})
+    result = box.start_form_fill(path)
+    report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+    assert "x" * 300 + "…（全文见 meta.json）" in report
+    assert "（全文见 readback.json）" not in report  # no field value here is that long
 
 
 def test_a_moved_original_tab_fails_check_5(ff):
@@ -563,9 +619,9 @@ class NoScreenshotBrowser(FakeBrowser):
     """Reads the page but, like readback.read_final_page when the blackout fails, leaves the screenshot out."""
 
     def read(self, target, out_dir, redactor):
-        fields = super().read(target, out_dir, redactor)
+        final = super().read(target, out_dir, redactor)
         (out_dir / readback.SCREENSHOT_NOTE).write_text("截图未存：打码失败（子框架里有联系方式）", encoding="utf-8")
-        return fields
+        return final
 
 
 def test_a_screenshot_left_out_is_noted(ff):
