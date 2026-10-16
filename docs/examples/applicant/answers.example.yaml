@@ -1,0 +1,120 @@
+# 示例，值都是编的：复制到 data/local/applicant/answers.yaml 后逐条改成你自己的答案（specs/form-fill.md 2.3）。
+# 每条的键写成 <类别>.<名称>，类别只能是：name、contact、work_auth、education、experience、availability、
+# compensation、location、eeo、screening。同一个键只能有一条。
+# 每条只能写 answer、from_profile、from_applicant 中的一个（经历段 kind: record 除外）。
+# 数字、日期、Yes/No 都按原样当文字读，例如 3.60 不会变成 3.6，2027-05 按月份比较。
+version: 1
+entries:
+  name.legal:
+    from_profile: personal.full_name         # 引用 profile.json 的字段，只写字段路径
+  name.first:                                # name.first 和 name.last 必须有；代码不从全名里拆
+    answer: Alex
+    kind: text
+  name.last:
+    answer: Example
+    kind: text
+  name.preferred:
+    from_profile: personal.preferred_name
+
+  contact.email:                             # 联系方式只能写 from_profile，不能写值
+    from_profile: personal.email
+  contact.phone:
+    from_profile: personal.phone
+  contact.city:
+    from_profile: personal.city
+  contact.linkedin:
+    from_profile: personal.linkedin_url
+    asks: ["linkedin profile"]
+
+  work_auth.authorized_us:
+    answer: "Yes"
+    kind: yes_no
+    asks: ["legally authorized to work", "authorized to work in the united states"]
+  work_auth.sponsorship_now:                 # 只问"现在"的担保题
+    answer: "No"
+    kind: yes_no
+    asks: ["currently require sponsorship", "currently require visa sponsorship"]
+  work_auth.sponsorship_future:              # 问"现在或将来"的题对到这一条；示例不代表你的情况，答案要你自己定
+    answer: "Yes"
+    kind: yes_no
+    asks: ["now or in the future require", "in the future require sponsorship"]
+    source: "示例：某天你在对话里说的"
+  work_auth.sponsorship_opt_named:           # 题目点名 F-1/OPT 时按题目自己的规则答，并且优先于上面两条
+    answer: "Yes"
+    kind: yes_no
+    asks: ["if you are on f-1", "if you are on opt"]
+    overrides: [work_auth.sponsorship_now, work_auth.sponsorship_future]
+  work_auth.unrestricted:                    # 有到期日就答 No 的题，和 authorized_us 分开记
+    answer: "No"
+    kind: yes_no
+    asks: ["unrestricted right to work"]
+  work_auth.status:
+    answer: F-1 STEM OPT
+    kind: choice
+    accept: ["STEM OPT"]
+    asks: ["current work authorization status", "current visa status"]
+
+  education.ms:                              # 每段经历一条，kind: record
+    kind: record
+    school: Example State University
+    aliases: ["ESU"]                         # 学校的全称、简称，按段对学校时也用
+    degree: Master of Science
+    major: Data Science
+    start: 2025-08
+    end: 2027-05                             # 按月份比较：05/2027、May 2027 都算同一个月
+    accept:                                  # 每个子栏可以写自己的其他写法
+      degree: ["M.S.", "MS"]
+    source: '简历："M.S. Data Science, Example State University, Aug 2025 – Expected May 2027"'
+  education.bs:
+    kind: record
+    school: Sample Institute of Technology
+    degree: Bachelor of Science
+    major: Mathematics
+    start: 2021-09
+    end: 2025-06
+    accept:
+      degree: ["B.S.", "BS"]
+  education.highest_level:
+    answer: Master's
+    kind: choice
+    accept: ["Master's Degree", "Masters"]
+    asks: ["highest level of education"]
+  experience.example_labs:
+    kind: record
+    company: Example Labs
+    title: Data Science Intern
+    start: 2024-06
+    end: 2024-09
+
+  availability.start_date:
+    answer: 2027-06-01
+    kind: date
+    asks: ["earliest start date", "available to start"]
+  compensation.expected:
+    answer: 95000
+    kind: number_min                         # 不低于这个数就算对；区间包含它或下限不低于它也算对
+    asks: ["salary expectation", "desired salary"]
+  location.relocation:
+    from_applicant: relocation               # 沿用 applicant.yaml 的 relocation，不在两处各写一份
+
+  eeo.gender:
+    answer: Decline to self-identify
+    kind: choice
+    accept: ["I don't wish to answer", "Prefer not to say", "Decline to answer"]
+    asks: ["gender"]
+  eeo.hispanic_latino:
+    answer: Decline to self-identify
+    accept: ["I don't wish to answer", "Prefer not to say"]
+    otherwise: "No"                          # 页面上没有拒答选项时选这个
+    kind: choice
+    asks: ["hispanic or latino"]
+
+  screening.age_18:
+    answer: "Yes"
+    kind: yes_no
+    asks: ["at least 18", "18 years of age"]
+  screening.how_heard:
+    answer: Company website
+    kind: choice
+    accept: ["Company Careers Page", "Company's website"]
+    asks: ["how did you hear"]

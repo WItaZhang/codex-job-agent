@@ -190,32 +190,36 @@ def build_prompt(spec: ApplySpec, data_dir: Path, settings: Settings, profile: P
     return localize(base, spec.onsite_ok, spec.relocation) + extra_rules(spec.mode, read_dirs)
 
 
-def mcp_config(settings: Settings, cdp_port: int) -> dict:
-    """ApplyPilot's MCP servers at pinned versions, with the browser kept off the configured high-risk sites."""
+def mcp_config(settings: Settings, cdp_port: int, gmail: bool = True) -> dict:
+    """ApplyPilot's MCP servers at pinned versions, with the browser kept off the configured high-risk sites.
+    `gmail=False` leaves the Gmail server out (the form-fill module, specs/form-fill.md 5.6)."""
     from .vendor.applypilot import config
 
-    return {
-        "mcpServers": {
-            "playwright": {
-                "command": "npx",
-                "args": [
-                    "-y",
-                    settings.apply.mcp.playwright,
-                    f"--cdp-endpoint=http://localhost:{cdp_port}",
-                    f"--viewport-size={config.DEFAULTS['viewport']}",
-                    "--blocked-origins=" + ";".join(settings.apply.blocked_origins),
-                ],
-            },
-            "gmail": {"command": "npx", "args": ["-y", settings.apply.mcp.gmail]},
-        }
+    servers = {
+        "playwright": {
+            "command": "npx",
+            "args": [
+                "-y",
+                settings.apply.mcp.playwright,
+                f"--cdp-endpoint=http://localhost:{cdp_port}",
+                f"--viewport-size={config.DEFAULTS['viewport']}",
+                "--blocked-origins=" + ";".join(settings.apply.blocked_origins),
+            ],
+        },
     }
+    if gmail:
+        servers["gmail"] = {"command": "npx", "args": ["-y", settings.apply.mcp.gmail]}
+    return {"mcpServers": servers}
 
 
-def claude_command(settings: Settings, mcp_config_path: Path, read_dirs=(), denied=()) -> list[str]:
+def claude_command(
+    settings: Settings, mcp_config_path: Path, read_dirs=(), denied=(), extra_disallowed: tuple = ()
+) -> list[str]:
     """ApplyPilot's headless Claude Code call, with an allowlist instead of skipping permission checks, and
     without the user's own MCP servers. No built-in tools, unless the user listed folders to read: then only the
     read-only file tools, in restricted mode (file tools confined to those folders, no code-running tools, no
-    user or project settings), with the `denied` paths refused even inside them."""
+    user or project settings), with the `denied` paths refused even inside them. `extra_disallowed` is added to
+    the refused tools (the form-fill module's own list)."""
     files: list[str] = []
     tools = settings.apply.builtin_tools
     if read_dirs:
@@ -240,7 +244,7 @@ def claude_command(settings: Settings, mcp_config_path: Path, read_dirs=(), deni
         "--allowedTools",
         ",".join(settings.apply.allowed_tools),
         "--disallowedTools",
-        ",".join(settings.apply.disallowed_tools),
+        ",".join([*settings.apply.disallowed_tools, *extra_disallowed]),
         "--output-format",
         "stream-json",
         "--verbose",
@@ -409,24 +413,45 @@ def ensure_chrome(settings: Settings, worker_id: int = 0) -> int:
 
 
 def run_application(
-    spec: ApplySpec, data_dir: Path, settings: Settings, profile: Path, port: int, read_dirs=()
+    spec: ApplySpec,
+    data_dir: Path,
+    settings: Settings,
+    profile: Path,
+    port: int,
+    read_dirs=(),
+    *,
+    log_path: Path | None = None,
+    mask=None,
+    extra_prompt: str = "",
+    gmail: bool = True,
+    extra_disallowed: tuple = (),
 ) -> ApplyOutcome:
+    """One headless run. The keyword options are the form-fill module's (specs/form-fill.plan.md section 1): its
+    own log file, each log line passed through `mask` before it is written, text added after the prompt, no
+    Gmail server (written to its own MCP config file, so /apply's stays as it is) and more refused tools.
+    Without them the run is /apply's, unchanged."""
     from .vendor.applypilot import config
 
     data_dir, profile = Path(data_dir).resolve(), Path(profile).resolve()
-    text = build_prompt(spec, data_dir, settings, profile, read_dirs)
-    mcp_path = config.APP_DIR / ".mcp-apply-0.json"
-    mcp_path.write_text(json.dumps(mcp_config(settings, port)), encoding="utf-8")
-    logs = Path(data_dir) / settings.apply.logs_dir
-    logs.mkdir(parents=True, exist_ok=True)
-    log_path = logs / f"{spec.job_id}.jsonl"
+    text = build_prompt(spec, data_dir, settings, profile, read_dirs) + extra_prompt
+    mcp_path = config.APP_DIR / (".mcp-apply-0.json" if gmail else ".mcp-form-fill-0.json")
+    mcp_path.write_text(json.dumps(mcp_config(settings, port, gmail=gmail)), encoding="utf-8")
+    if log_path is None:
+        logs = Path(data_dir) / settings.apply.logs_dir
+        logs.mkdir(parents=True, exist_ok=True)
+        log_path = logs / f"{spec.job_id}.jsonl"
+    else:
+        log_path = Path(log_path).resolve()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
     # The working directory holds only the files to upload (ApplyPilot copies them to apply-workers/current),
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
     proc = subprocess.Popen(
-        claude_command(settings, mcp_path, read_dirs, denied=[Path(data_dir), profile]),
+        claude_command(
+            settings, mcp_path, read_dirs, denied=[Path(data_dir), profile], extra_disallowed=extra_disallowed
+        ),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -451,7 +476,7 @@ def run_application(
         proc.stdin.close()
         with log_path.open("w", encoding="utf-8") as log:
             for line in proc.stdout:
-                log.write(line)
+                log.write(mask(line) if mask else line)
                 try:
                     message = json.loads(line)
                 except json.JSONDecodeError:

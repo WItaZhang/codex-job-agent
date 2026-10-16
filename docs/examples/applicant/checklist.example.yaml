@@ -1,0 +1,20 @@
+# 示例：复制到 data/local/applicant/checklist.yaml 后按你的要求改（specs/form-fill.md 2.4）。
+# 每条有 id（不能重复）、rule（一句话写清楚什么算通过）、level（不通过时的严重程度：guess、missing 或 format）。
+# 评审的建议经你同意后才加进来，同时记下 added（日期）和 from（哪次运行的哪条建议）。
+# 下面几条来自 2026-10-15 那批投递暴露出来的问题。
+version: 1
+items:
+  - id: no_hard_breaks
+    rule: 粘贴进文本框的简历或求职信，句子中间不能有换行（从 PDF 复制带来的硬换行）。
+    level: format
+  - id: optional_history_filled
+    rule: 选填的工作经历、教育经历、技能栏，简历里有的都要填上。
+    level: missing
+  - id: open_answers_specific
+    rule: 开放题写 2–3 句，提到这个岗位或公司的具体内容，引用简历里的真实经历，不写空话。
+    level: format
+  - id: no_invented_facts
+    rule: 标准答案和简历里都没有的事实（证书、获奖、工作年限）不能自己编，留空并在报告里列出。
+    level: guess
+    added: 2026-10-15
+    from: 示例运行 run-0001 的第 1 条建议

@@ -2,8 +2,9 @@
 
 - read: look only.
 - prepare: may change analyses or the job pool, never the intent or the user's labels.
-- commit: the user's own decisions (labels, choices, tag fixes, initialization, starting an apply step). The
-  host must ask the user to approve every call (see .claude/settings.json); these tools are never auto-allowed.
+- commit: the user's own decisions (labels, choices, tag fixes, initialization, starting an apply step or a
+  form-fill run). The host must ask the user to approve every call (see .claude/settings.json); these tools are
+  never auto-allowed.
 
 Job descriptions are untrusted; they are returned wrapped in a marker and never reach analysis.
 """
@@ -40,6 +41,7 @@ from .cover_letter_check import BANNED_WORDS, check_letter
 from .discovery import DiscoveryError, fetch_board
 from .domain import DIMENSIONS, Compensation, IntentModel, InvariantError, Job, Level, Vocabulary
 from .engine import Engine
+from .form_fill import runner as form_fill
 from .importing import inside, normalize_tags, parse_jobs
 from .llm import NoModelClient
 from .pretag import pretag
@@ -220,6 +222,9 @@ class Toolbox:
         self.apply_runner = None  # None: Chrome + Claude Code (apply_bridge.ChromeRunner); tests pass a fake
         self.letter_renderer = None  # None: headless Chrome (apply_bridge.render_letter_pdf)
         self.apply_in_background = True
+        self._form_fill_run: dict | None = None  # the current or last form-fill run
+        self.form_fill_runner = None  # None: Chrome + Claude Code (form_fill.runner.FormFillRunner); tests pass a fake
+        self.form_fill_in_background = True
         self.engine = Engine(store, settings, NoModelClient())
 
     # --- views --------------------------------------------------------------------------------
@@ -1000,7 +1005,9 @@ class Toolbox:
         """Start the next step of an apply batch, as the user approved it: first the jobs to review (all stop
         before submit), then, after the user checked those, the rest. `summary` must be that step's summary
         exactly as shown to the user."""
-        if self._apply_run and self._apply_run["status"] == "running":
+        if _running(self._form_fill_run):
+            raise InvariantError("A form-fill run is using the applying Chrome; wait for it (form_fill_status)")
+        if _running(self._apply_run):
             raise InvariantError("An apply step is still running; check apply_status")
         self._sync_apply_results()
         data = self.store.apply_batch(batch_id)
@@ -1135,6 +1142,101 @@ class Toolbox:
             ),
         }
 
+    # --- form filling (specs/form-fill.md; slice 1: specs/form-fill.plan.md) -----------------------------------
+
+    @_tool("commit")
+    def start_form_fill(self, list_path: str) -> dict:
+        """Fill every job on a form-fill list up to the final submit button and stop there; never submits. Checks
+        the list, answers.yaml and checklist.yaml first and starts nothing if any of them is invalid. Runs in the
+        background in the applying Chrome, one job at a time, and not while an apply step runs. Each job's last
+        page is read back into the run's feasibility.md for the user to mark against the open tab. Poll
+        form_fill_status. `list_path`: the list file (absolute, or relative to the project folder)."""
+        if _running(self._form_fill_run):
+            raise InvariantError("A form-fill run is still running; check form_fill_status")
+        if _running(self._apply_run):
+            raise InvariantError("An apply step is using the applying Chrome; wait for it (apply_status)")
+        applicant = self._ready_applicant()
+        inputs = form_fill.load_inputs(list_path, applicant, self.settings)
+        run_id = form_fill.new_run_id()
+        ctx = form_fill.RunContext(
+            run_id=run_id,
+            run_dir=self.data_dir / self.settings.form_fill.dir / "runs" / run_id,
+            settings=self.settings,
+            applicant=applicant,
+            answers=inputs.answers,
+            checklist=inputs.checklist,
+            redactor=inputs.redactor,
+            runner=self.form_fill_runner
+            or form_fill.FormFillRunner(self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read),
+        )
+        report = form_fill.begin_feasibility(ctx, list_path, inputs.jobs)
+        run = {
+            "run_id": run_id,
+            "status": "running",
+            "error": None,
+            "list": str(Path(list_path).expanduser().resolve()),
+            "feasibility": str(report),
+            "jobs": [
+                {"n": n, "job_id": e.id, "company": e.company, "title": e.title, "state": "queued", "outcome": None}
+                for n, e in enumerate(inputs.jobs.jobs, start=1)
+            ],
+        }
+        self._form_fill_run = run
+
+        def work():
+            try:
+                for item, entry in zip(run["jobs"], inputs.jobs.jobs, strict=True):
+                    item["state"] = "running"
+                    item["outcome"] = form_fill.run_job(entry, ctx)
+                    item["state"] = "done"
+                form_fill.finish_feasibility(ctx)
+                run["status"] = "done"
+            except Exception as error:  # run_job reports per-job failures itself; this is a broken run
+                run["error"] = ctx.redactor.mask(f"{type(error).__name__}: {error}")[:300]
+                run["status"] = "failed"
+
+        if self.form_fill_in_background:
+            threading.Thread(target=work, name="intent-agent-form-fill", daemon=True).start()
+        else:
+            work()
+        return {"run_id": run_id, "status": run["status"], "jobs": len(run["jobs"]), "feasibility": run["feasibility"]}
+
+    @_tool("prepare")
+    def form_fill_status(self) -> dict:
+        """Progress of the current or last form-fill run (it never submits): per job the state, the status (filled,
+        gate, tab_lost, readback_failed, system_error), the filling agent's own result, how many fields were read
+        back, the saved page folder, the automatic checks and the notes (contact details masked), and the path of
+        feasibility.md."""
+        run = self._form_fill_run
+        if run is None:
+            return {"status": "idle"}
+        jobs = []
+        for item in run["jobs"]:
+            outcome = item["outcome"]
+            jobs.append(
+                {
+                    "n": item["n"],
+                    "job_id": item["job_id"],
+                    "company": item["company"],
+                    "title": item["title"],
+                    "state": item["state"],
+                    "status": outcome.status if outcome else None,
+                    "agent_result": outcome.agent_result if outcome else None,
+                    "fields": outcome.fields if outcome else 0,
+                    "page_dir": outcome.page_dir if outcome else None,
+                    "checks": dict(outcome.checks) if outcome else {},
+                    "notes": list(outcome.notes) if outcome else [],
+                }
+            )
+        return {
+            "run_id": run["run_id"],
+            "status": run["status"],
+            "error": run["error"],
+            "list": run["list"],
+            "feasibility": run["feasibility"],
+            "jobs": jobs,
+        }
+
     @_tool("prepare")
     def rank_causes(self, analysis_id: str, order: list[str]) -> dict:
         """Order the candidate causes (cause ids, most likely first)."""
@@ -1240,6 +1342,10 @@ class Toolbox:
         intent = self.store.initialize(intent, vocab)
         self.store.record_decision(None, "initialize", {"path": path, "approved_via": APPROVED_VIA})
         return self._intent_view(intent)
+
+
+def _running(run: dict | None) -> bool:
+    return run is not None and run["status"] == "running"
 
 
 COMMIT_TOOLS = {name for name, tier in TOOL_TIERS.items() if tier == "commit"}

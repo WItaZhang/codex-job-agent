@@ -1,0 +1,17 @@
+# 示例，值都是编的：复制到 data/local/form-fill/lists/ 下，改成你要填的岗位（specs/form-fill.md 2.1）。
+# 有一条不对，整份清单都不运行：id 不能重复；url 必须是 https；resume 必须是 applicant.yaml 里的简历 id；
+# 求职信的 .txt 和同名 .pdf 都要存在。
+jobs:
+  - id: acme-ml-01                  # 清单内唯一；/apply 生成的清单用岗位编号
+    url: https://job-boards.greenhouse.io/acme/jobs/1234567   # 申请页地址
+    company: Acme Robotics
+    title: Machine Learning Engineer
+    resume: main                    # applicant.yaml 里的简历 id
+    cover_letter: letters/acme-ml-01.txt   # 求职信文本，同名 .pdf 用来上传；相对路径按本文件所在目录算
+  - id: beta-ds-02
+    url: https://jobs.lever.co/beta/0f1e2d3c
+    company: Beta Health
+    title: Data Scientist
+    resume: research
+    cover_letter: none              # 不交求职信
+    revisit: true                   # 已有录制也真实访问一次（见 4.1）；不写就是 false

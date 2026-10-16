@@ -124,6 +124,15 @@ apply:                            # 投递（spec 4.10）
     - Web Data-journal
     - Account Web Data
     - Account Web Data-journal
+form_fill:                        # 填表模块（specs/form-fill.md；切片 1 见 specs/form-fill.plan.md）。模型和超时沿用 apply.*
+  dir: form-fill                  # 运行目录，位于 storage.data_dir 下：runs/<运行编号>/<岗位 id>/ 和 feasibility.md
+  answers_file: answers.yaml      # 标准答案，位于 apply.applicant_dir 下
+  checklist_file: checklist.yaml  # 要求清单，位于 apply.applicant_dir 下
+  disallowed_tools:               # 填表 agent 另外禁用的工具，叠加在 apply.disallowed_tools 上（spec 5.6）
+    - mcp__playwright__browser_run_code_unsafe   # 在服务进程里执行任意代码，等于有了命令行
+    - mcp__playwright__browser_close             # 会关掉你正在检查的标签页
+    - mcp__playwright__browser_network_request   # 这两个会把带 Cookie 的请求头交给模型，进而写进运行记录
+    - mcp__playwright__browser_network_requests
 llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null

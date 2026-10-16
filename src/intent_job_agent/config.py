@@ -91,6 +91,15 @@ class Apply(_Section):
     chrome_profile_strip: list[str]
 
 
+class FormFill(_Section):
+    """The form-fill module (specs/form-fill.md); its model and timeout are apply.*'s."""
+
+    dir: str  # under storage.data_dir: runs/<run>/<job>/ and the run's feasibility.md
+    answers_file: str  # under apply.applicant_dir
+    checklist_file: str  # under apply.applicant_dir
+    disallowed_tools: list[str]  # refused on top of apply.disallowed_tools
+
+
 class LLM(_Section):
     provider: Literal["host", "fake", "anthropic", "openai_compatible"]
     model: str | None
@@ -111,6 +120,7 @@ class Settings(_Section):
     hard_review: HardReview
     apply_list: ApplyList
     apply: Apply
+    form_fill: FormFill
     llm: LLM
     storage: Storage
 
