@@ -15,6 +15,7 @@
     - (a) 表单控件：input、select、textarea、checkbox、radio，以及 `role=combobox` 这类自定义控件。读出题目、值、选项、是否必填。单页表靠这个。
     - (b) 确认页文字：成对的"题目：值"，比如 Workday 的 Review 页、LinkedIn Easy Apply 的最后一步。多步表单前几页的内容靠这个。
 - **存下这一页**：打码后的简化 HTML、截图、`readback.json`、`meta.json`，存到 `data/local/form-fill/runs/<运行>/<岗位>/`。以后可以离线重跑核对和报告。
+  - 打码用类别占位，例如 `[email]`、`[phone]`，密码写 `[已填]`。截图里页面上出现联系方式的地方涂黑，涂不了就不存截图。规格 5.6 那种 `{{personal.email}}` 引用写法是给重放用的，留到切片 2。
 - **核对**：对题，依次用 `asks`、内置的常见栏目、`overrides`，对上多条记"有歧义"。再按 `kind` 比较，结果分五种：对 / 错 / 没有标准答案 / 有歧义 / 未审查。
 - **报告**：每个岗位一份 JSON，加一份 `summary.md`。结论分四种：
   - 不能提交：有错的事实或无依据的猜测；

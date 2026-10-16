@@ -656,7 +656,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
     - 登录后的页面，在填之前就带着预填的联系方式和页头的账号邮箱。
   - **填表 agent 的完整运行记录**（`runs/<运行编号>/logs/`）：代码写入时就按上面两种方式打码，密码写成"已填"。
     - 这样 Claude Code 和 Codex 两个宿主都不靠读文件拒绝规则来保护它。Codex 没有对应的读文件拒绝规则（`.codex/config.toml` 只管工具确认）。
-    - Claude Code 下另在 `.claude/settings.json` 的 deny 里加 `Read(./data/local/form-fill/runs/*/logs/**)`，作为第二层。
+    - Claude Code 下另在 `.claude/settings.json` 的 deny 里加 `Read(./data/local/form-fill/runs/*/*/log.jsonl)`（运行记录在 `runs/<运行>/<岗位>/log.jsonl`），作为第二层。
     - 打码不影响上传核对要用的路径（4.4）。
   - 任何 agent 都不能用读文件工具读以下文件：
     - `profile.json`、`.env`；
