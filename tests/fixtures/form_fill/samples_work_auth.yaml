@@ -1,0 +1,64 @@
+# SYNTHETIC: invented applicant answers; question wordings are real-world phrasings seen on application forms
+# (several from the 2026-10-15 batch). Confirmed with the user in the sample stage (specs/form-fill.md 2.3).
+# Each case: question as shown on the page -> which answer-sheet entry it must map to -> expected value.
+synthetic: true
+answers:
+  work_auth.authorized_us: {answer: "Yes", kind: yes_no, asks: ["legally authorized to work", "authorized to work in the united states"]}
+  work_auth.sponsorship_now: {answer: "No", kind: yes_no, asks: ["currently require sponsorship", "currently require visa sponsorship"]}
+  work_auth.sponsorship_future: {answer: "Yes", kind: yes_no, asks: ["now or in the future require", "in the future require sponsorship", "require immigration support"]}
+  work_auth.sponsorship_opt_named: {answer: "Yes", kind: yes_no, asks: ["if you are on f-1", "if you are on opt", "if you are currently on opt", "on f-1/opt"], overrides: [work_auth.sponsorship_now, work_auth.sponsorship_future]}
+  work_auth.citizen_or_green_card: {answer: "No", kind: yes_no, asks: ["citizen or green card", "citizen or greencard", "citizen or permanent resident", "u.s. citizen or national"]}
+  work_auth.unrestricted: {answer: "No", kind: yes_no, asks: ["unrestricted right to work"]}
+  work_auth.status: {answer: F-1 STEM OPT, kind: choice, accept: ["STEM OPT"], asks: ["current work authorization status", "current visa status"]}
+  screening.us_person_export: {answer: "No", kind: yes_no, asks: ["u.s. person", "export control", "itar"]}
+  screening.age_18: {answer: "Yes", kind: yes_no, asks: ["at least 18", "18 years of age"]}
+cases:
+  - question: Are you legally authorized to work in the United States?
+    options: ["Yes", "No"]
+    entry: work_auth.authorized_us
+    expect: "Yes"
+  - question: Do you currently require visa sponsorship?
+    options: ["Yes", "No"]
+    entry: work_auth.sponsorship_now
+    expect: "No"
+  - question: Will you now or in the future require sponsorship for employment visa status (e.g., H-1B)?
+    options: ["Yes", "No"]
+    entry: work_auth.sponsorship_future
+    expect: "Yes"
+    note: must not borrow the "currently" answer
+  - question: Will you now or in the future require sponsorship? If you are on F-1/OPT/STEM OPT, please select Yes.
+    options: ["Yes", "No"]
+    entry: work_auth.sponsorship_opt_named
+    expect: "Yes"
+    note: matches sponsorship_future too; overrides decides, the question's own rule wins
+  - question: Will you require immigration support or visa sponsorship for this role?
+    options: ["Yes", "No"]
+    entry: work_auth.sponsorship_future
+    expect: "Yes"
+    note: generic visa-support wording does not name OPT, so the exception does not apply
+  - question: Are you a U.S. Citizen or Greencard holder?
+    options: ["Yes", "No"]
+    entry: work_auth.citizen_or_green_card
+    expect: "No"
+  - question: "Are you currently lawfully authorized to work in the U.S. as a (i) U.S. citizen or national; (ii) permanent resident?"
+    options: ["Yes", "No"]
+    entry: work_auth.citizen_or_green_card
+    expect: "No"
+    note: reads like a work-authorization question but asks about citizenship or permanent residence
+  - question: Do you have an unrestricted right to work in the U.S.? Answer No if you are on any visa or work authorization with an expiration date.
+    options: ["Yes", "No"]
+    entry: work_auth.unrestricted
+    expect: "No"
+    note: the question defines its own rule; opposite of authorized_us
+  - question: What is your current work authorization status?
+    options: ["U.S. Citizen", "Permanent Resident", "H-1B", "F-1 OPT", "F-1 STEM OPT", "Other"]
+    entry: work_auth.status
+    expect: F-1 STEM OPT
+  - question: Are you a "U.S. person" as defined by U.S. export control regulations (ITAR/EAR)?
+    options: ["Yes", "No"]
+    entry: screening.us_person_export
+    expect: "No"
+  - question: Are you at least 18 years of age?
+    options: ["Yes", "No"]
+    entry: screening.age_18
+    expect: "Yes"

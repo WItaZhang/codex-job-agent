@@ -1,0 +1,52 @@
+# SYNTHETIC: invented applicant; question and option wordings are real-world phrasings, several from the
+# 2026-10-15 batch (LinkedIn Easy Apply pre-filled education, Workday drop-downs, EEO questions without a decline
+# option). Rules confirmed with the user in the sample stage (specs/form-fill.md 2.3, decisions 11-12).
+# result: correct = matches the answer sheet; wrong = contradicts it; no_answer = no standard answer applies.
+synthetic: true
+decline_wordings: &decline ["I don't wish to answer", "I do not wish to answer", "Prefer not to say", "I prefer not to specify", "Decline to answer", "I choose not to disclose"]
+answers:
+  eeo.gender: {answer: Male, kind: choice, asks: ["gender"]}
+  eeo.hispanic_latino: {answer: Decline to self-identify, kind: choice, accept: *decline, otherwise: "No", asks: ["hispanic or latino"]}
+  eeo.race: {answer: Decline to self-identify, kind: choice, accept: *decline, asks: ["race", "ethnicity"]}
+  education.ms_esu:
+    kind: record
+    school: Example State University
+    aliases: ["ESU"]
+    degree: Master of Science
+    major: Statistics
+    start: 2025-08
+    end: 2027-05
+    accept: {degree: ["M.S.", "MS", "Master's Degree"], major: ["Applied Statistics"]}
+  education.gpa: {answer: "3.6", kind: text, accept: ["3.60", "3.6/4.0"], asks: ["gpa"]}
+  education.highest_level: {answer: Master's, kind: choice, accept: ["Master's Degree", "Masters"], asks: ["highest level of education"]}
+  screening.years_experience: {answer: "0", kind: choice, accept: ["0-1 years", "Less than 1 year"], asks: ["years of experience"]}
+  screening.how_heard: {answer: Company website, kind: choice, accept: ["Company Careers Page", "Company's website"], asks: ["how did you hear"]}
+  compensation.expected: {answer: 90000, kind: number_min, asks: ["desired salary", "salary expectation"]}
+  availability.start_date: {answer: 2027-06-01, kind: date, asks: ["earliest start date"]}
+cases:
+  - {question: "Gender", options: ["Male", "Female", "Non-binary", "I don't wish to answer"], filled: Male, entry: eeo.gender, result: correct, note: "the answer is a real value, not decline, even though decline is offered"}
+  - {question: "Gender", options: ["Male", "Female", "Non-binary", "I don't wish to answer"], filled: "I don't wish to answer", entry: eeo.gender, result: wrong}
+  - {question: "Are you Hispanic or Latino?", options: ["Yes", "No", "I don't wish to answer"], filled: "I don't wish to answer", entry: eeo.hispanic_latino, result: correct}
+  - {question: "Are you Hispanic or Latino?", options: ["Yes", "No"], filled: "No", entry: eeo.hispanic_latino, result: correct, note: "no decline option, so otherwise applies"}
+  - {question: "Are you Hispanic or Latino?", options: ["Yes", "No", "Prefer not to say"], filled: "No", entry: eeo.hispanic_latino, result: wrong, note: "a decline wording exists, otherwise must not be used"}
+  - {question: "Race / Ethnicity", options: ["Asian", "Black or African American", "White", "Prefer not to say"], filled: Prefer not to say, entry: eeo.race, result: correct}
+  - {question: "Race / Ethnicity", options: ["Asian", "Black or African American", "White", "Two or more races"], filled: "", entry: eeo.race, result: no_answer, note: "no decline wording and no otherwise: leave empty, never guess"}
+  - question: "Education (pre-filled from the LinkedIn profile)"
+    record: {school: ESU, degree: MS, major: Applied Statistics, start: 08/2025, end: 05/2027}
+    entry: education.ms_esu
+    result: correct
+    note: alias school, accepted degree and major spellings, month formats
+  - question: "Education (pre-filled from the LinkedIn profile)"
+    record: {school: Example State University, degree: Master of Science, major: Statistics, start: 08/2025, end: 12/2027}
+    entry: education.ms_esu
+    result: wrong
+    note: end month differs from the answer sheet (as the UCSD dates on 2026-10-15)
+  - {question: "GPA", filled: "3.60", entry: education.gpa, result: correct}
+  - {question: "What is your highest level of education?", options: ["High School", "Bachelor's Degree", "Master's Degree", "Doctorate"], filled: Master's Degree, entry: education.highest_level, result: correct}
+  - {question: "How many years of experience do you have?", options: ["0-1 years", "1-3 years", "3-5 years", "5+ years"], filled: 0-1 years, entry: screening.years_experience, result: correct}
+  - {question: "How did you hear about this position?", options: ["LinkedIn", "Indeed", "Company Careers Page", "Employee Referral"], filled: Company Careers Page, entry: screening.how_heard, result: correct}
+  - {question: "How did you hear about this position?", options: ["LinkedIn", "Indeed", "Company Careers Page", "Employee Referral"], filled: LinkedIn, entry: screening.how_heard, result: wrong}
+  - {question: "What is your desired salary?", filled: "$95,000", entry: compensation.expected, result: correct}
+  - {question: "What is your desired salary?", filled: "$70k", entry: compensation.expected, result: wrong}
+  - {question: "What is your desired salary?", options: ["$60k-$80k", "$80k-$100k", "$100k+"], filled: "$80k-$100k", entry: compensation.expected, result: correct, note: "range contains the answer"}
+  - {question: "What is your earliest start date?", filled: 06/01/2027, entry: availability.start_date, result: correct}

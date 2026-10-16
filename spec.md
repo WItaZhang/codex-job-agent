@@ -276,6 +276,8 @@ exception 默认为空。新增一个 exception 必须**同时满足**以下条�
 
 ### 4.10 投递（模块④，切片 6，已实现）
 
+> 填表（填到提交前、读回核对、独立评审、录制重放）从 2026-10-15 起拆成独立模块，规格见 [specs/form-fill.md](specs/form-fill.md)，决定记录见 [specs/form-fill.decisions.md](specs/form-fill.decisions.md)；接入 /apply 之前，本节规则不变。
+
 用户 2026-10-14 决定借用 ApplyPilot 的自动投递（`apply/`），并选定以下规则。系统要通用：别人填上自己的资料也能用，个人的写作规则、知识库可以接进来。
 
 1. **谁点提交**：
