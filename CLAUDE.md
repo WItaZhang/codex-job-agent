@@ -2,6 +2,21 @@
 
 需求的唯一来源是 `spec.md`。需求变化时先改 spec，再改代码。
 
+## Claude Code / Codex 共用入口
+
+- 本文件是项目约定的唯一来源，`AGENTS.md` 是指向本文件的软链接。
+- skill 只维护 `.claude/skills/`；Codex 通过 `.agents/skills` 的目录软链接读取同一份内容。
+  文中的 `/fetch-jobs`、`/today`、`/apply-list`、`/apply` 在 Codex 中对应 `$fetch-jobs`、`$today`、`$apply-list`、`$apply`。
+- 子 agent 正文只维护 `.claude/agents/*.md`。`.codex/agents/*.md` 是软链接，旁边的 `.toml` 只做 Codex 入口适配。
+  Claude 的 `model` 名称不传给 Codex；Codex 默认继承主 agent 的模型。并发数取 skill 上限和宿主剩余槽位的较小值。
+- Codex 若无法按自定义 agent 名称派生，主 agent 先读对应 `.codex/agents/*.md`，把完整定义和该批编号交给一个独立子 agent。
+  定义中的工具清单仍是行为边界：只调用列出的 intent-agent 工具；文件读取仅限定义允许的只读用途。
+  Codex 的原生子 agent 继承主会话 MCP 工具，不能把这份清单当作宿主强制执行的工具隔离。
+- Codex 的 MCP 接入和提交工具逐次确认由 `.codex/config.toml` 配置；`.claude/settings.json` 不会自动适用于 Codex。
+  提交工具只能由用户本人批准。若宿主没有加载这些确认规则，停止提交级操作并说明原因，不通过 shell 或其他方式绕过。
+  禁止读 `profile.json` 和 `.env` 的约定在两个宿主中都适用。
+- 投递工具内部目前仍启动 Claude Code；宿主改用 Codex 不改变该后端。
+
 ## 开发流程
 
 按 idea-kickoff 流程推进：采访 → 样例 → 最小切片计划 → 测试先行 → 用具体 case 迭代。

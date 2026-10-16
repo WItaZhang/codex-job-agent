@@ -5,6 +5,33 @@ agent 分析哪里没对上，给出几个修改选项；你选了，系统才�
 
 需求和规则见 [spec.md](spec.md)，开发约定见 [CLAUDE.md](CLAUDE.md)。
 
+## 在 Codex 里使用
+
+在 Codex 中打开本仓库，完成下方相同的依赖和个人文件准备，再开始新对话。项目级 `.codex/config.toml`
+接入同一个 `intent-agent` MCP 服务。使用 `$fetch-jobs`、`$today`、`$apply-list`、`$apply`；
+`$cover-letter` 也可单独调用。若 skill 列表没有刷新，重启 Codex。
+
+Claude Code 和 Codex 共用一份内容，维护位置如下；所有软链接都使用仓库内的相对路径，移动仓库后仍有效：
+
+| Codex 入口 | 唯一内容来源 |
+| --- | --- |
+| `AGENTS.md` | `CLAUDE.md` |
+| `.agents/skills` | `.claude/skills/`（整个目录，新增 skill 也自动可见） |
+| `.codex/agents/job-tagger.md` | `.claude/agents/job-tagger.md` |
+| `.codex/agents/cover-letter-writer.md` | `.claude/agents/cover-letter-writer.md` |
+
+两个 `.codex/agents/*.toml` 是原生角色入口，只引导读取上述软链接，不复制 agent 正文。
+Codex 子 agent 默认继承主会话模型，不使用 Claude 的 haiku/sonnet 名称。当前宿主不能按角色名派生时，
+skill 会把共用定义传给独立子 agent；并发数服从宿主可用槽位。
+
+Codex 的五个提交工具各自配置了 `approval_mode = "prompt"`，审批人配置为用户。使用前应信任本仓库并确保项目配置已加载，
+不要覆盖这些规则或开启自动审批。`.claude/settings.json` 的文件 deny 和子 agent 工具白名单不会自动成为 Codex 的硬隔离；
+共用指令仍禁止读取 `.env` / `profile.json`，并限制各角色使用的工具。实际投递后端仍需 Claude Code、Chrome 和 Node.js。
+
+实现依据：[Codex skill 目录与软链接](https://learn.chatgpt.com/docs/build-skills)、
+[自定义子 agent](https://learn.chatgpt.com/docs/agent-configuration/subagents)、
+[MCP 工具确认配置](https://learn.chatgpt.com/docs/config-file/config-reference)。
+
 ## 在 Claude Code 里使用
 
 1. 安装依赖：`uv sync`，然后 `uv run playwright install chromium`（补全原文要用浏览器）

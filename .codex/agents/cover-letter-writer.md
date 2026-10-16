@@ -1,0 +1,1 @@
+../../.claude/agents/cover-letter-writer.md

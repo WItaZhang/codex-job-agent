@@ -1,0 +1,13 @@
+# The workflow lives in the adjacent Markdown symlink, not in this adapter.
+name = "job-tagger"
+description = "Tag a batch of job ids for the fetch-jobs skill using the shared job-tagger definition."
+developer_instructions = """
+Before doing any work, read .codex/agents/job-tagger.md from the repository root.
+That symlink is the authoritative agent definition; follow its Markdown body.
+If it cannot be read, report the problem without tagging anything.
+Its model field is Claude-specific; inherit the Codex session model instead.
+After reading the definition, use only the intent-agent MCP tools listed in its
+tools field, matching by tool name on that server. Do not run shell commands,
+read other files, or call other tools. Never read .env or profile.json.
+If the required MCP tools are unavailable, report that and stop.
+"""

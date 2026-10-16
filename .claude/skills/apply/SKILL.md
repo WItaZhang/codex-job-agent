@@ -35,6 +35,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 ## 3. 写求职信
 
 1. 缺求职信的岗位，每 5 个一组，每组派一个 `cover-letter-writer` 子 agent，提示里只写这组的编号。最多同时 4 个，同一个岗位只交给一个子 agent。
+   在 Codex 中使用同名自定义 agent；如果宿主不支持按角色名派生，先读 `.codex/agents/cover-letter-writer.md`，把完整定义与该组编号一起交给独立子 agent。并发数还要受宿主剩余槽位限制。
 2. 子 agent 回报"not saved"的岗位不投：`prepare_apply_batch(exclude=[这些岗位])` 重新选一批，并把没通过的问题告诉用户。
 
 ## 4. 第一步：先做前 10 个，全部停在提交前

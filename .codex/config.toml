@@ -1,0 +1,24 @@
+# Project-scoped Codex adapter for .mcp.json and .claude/settings.json.
+approval_policy = "on-request"
+approvals_reviewer = "user"
+
+[mcp_servers.intent-agent]
+# Resolve the checkout root even when Codex starts in a subdirectory or worktree.
+command = "sh"
+args = ["-c", 'cd "$(git rev-parse --show-toplevel)" && exec uv run --locked intent-job-agent-mcp --config configs/default.yaml']
+
+# These five operations must ask the user on every call.
+[mcp_servers.intent-agent.tools.correct_tags]
+approval_mode = "prompt"
+
+[mcp_servers.intent-agent.tools.decide]
+approval_mode = "prompt"
+
+[mcp_servers.intent-agent.tools.initialize_intent]
+approval_mode = "prompt"
+
+[mcp_servers.intent-agent.tools.record_labels]
+approval_mode = "prompt"
+
+[mcp_servers.intent-agent.tools.start_applying]
+approval_mode = "prompt"

@@ -1,0 +1,14 @@
+# The workflow lives in the adjacent Markdown symlink, not in this adapter.
+name = "cover-letter-writer"
+description = "Write and validate cover letters using the shared cover-letter-writer definition."
+developer_instructions = """
+Before doing any work, read .codex/agents/cover-letter-writer.md from the repository root.
+That symlink is the authoritative agent definition; follow its Markdown body.
+If it cannot be read, report the problem without saving anything.
+Its model field is Claude-specific; inherit the Codex session model instead.
+Use only the intent-agent MCP tools listed in its tools field, matching by tool
+name on that server. Read/Glob/Grep mean read-only file inspection using available
+Codex tools; they do not authorize edits, script execution, or other shell work.
+Never read .env or profile.json. Never apply to a job or call commit-tier tools.
+If required tools or materials are unavailable, report that and stop.
+"""
