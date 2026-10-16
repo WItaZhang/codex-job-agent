@@ -897,3 +897,148 @@ def test_notes_are_recorded_once_although_the_stream_repeats_the_last_message(bo
     )
     assert outcome.status == "waiting"
     assert outcome.notes == ["the posting asks for 2+ years.", "the form has no cover-letter field."]
+
+
+# --- options for the form-fill module (specs/form-fill.plan.md section 1); /apply stays as it was -------------
+
+APPLY_DISALLOWED = (
+    "mcp__gmail__draft_email,mcp__gmail__modify_email,mcp__gmail__delete_email,mcp__gmail__download_attachment,"
+    "mcp__gmail__batch_modify_emails,mcp__gmail__batch_delete_emails,mcp__gmail__create_label,"
+    "mcp__gmail__update_label,mcp__gmail__delete_label,mcp__gmail__get_or_create_label,"
+    "mcp__gmail__list_email_labels,mcp__gmail__create_filter,mcp__gmail__list_filters,mcp__gmail__get_filter,"
+    "mcp__gmail__delete_filter"
+)
+# The /apply command line as it was before the form-fill options existed (configs/default.yaml).
+APPLY_COMMAND = [
+    "claude",
+    "--model",
+    "sonnet",
+    "-p",
+    "--mcp-config",
+    "/x/mcp.json",
+    "--strict-mcp-config",
+    "--permission-mode",
+    "default",
+    "--no-session-persistence",
+    "--tools",
+    "",
+    "--allowedTools",
+    "mcp__playwright,mcp__gmail__search_emails,mcp__gmail__read_email,mcp__gmail__send_email",
+    "--disallowedTools",
+    APPLY_DISALLOWED,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "-",
+]
+FORM_FILL_DISALLOWED = (
+    "mcp__playwright__browser_run_code_unsafe",
+    "mcp__playwright__browser_close",
+    "mcp__playwright__browser_network_request",
+    "mcp__playwright__browser_network_requests",
+)
+
+
+def test_without_the_new_options_the_apply_command_and_servers_are_unchanged():
+    s = settings()
+    assert apply_bridge.claude_command(s, Path("/x/mcp.json")) == APPLY_COMMAND
+    servers = apply_bridge.mcp_config(s, 9222)["mcpServers"]
+    assert list(servers) == ["playwright", "gmail"]
+    assert servers["gmail"] == {"command": "npx", "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp@1.1.11"]}
+    assert servers["playwright"]["args"][:4] == [
+        "-y",
+        "@playwright/mcp@0.0.83",
+        "--cdp-endpoint=http://localhost:9222",
+        "--viewport-size=1280x900",
+    ]
+    assert servers["playwright"]["args"][4] == "--blocked-origins=" + ";".join(s.apply.blocked_origins)
+    assert len(servers["playwright"]["args"]) == 5
+
+
+def test_form_fill_options_drop_gmail_and_add_disallowed_tools():
+    s = settings()
+    servers = apply_bridge.mcp_config(s, 9222, gmail=False)["mcpServers"]
+    assert list(servers) == ["playwright"]
+    assert servers["playwright"] == apply_bridge.mcp_config(s, 9222)["mcpServers"]["playwright"]
+    command = apply_bridge.claude_command(s, Path("/x/mcp.json"), extra_disallowed=FORM_FILL_DISALLOWED)
+    disallowed = command[command.index("--disallowedTools") + 1]
+    assert disallowed == APPLY_DISALLOWED + "," + ",".join(FORM_FILL_DISALLOWED)
+    rest = [part for part in command if part != disallowed]
+    assert rest == [part for part in APPLY_COMMAND if part != APPLY_DISALLOWED]
+
+
+def test_an_apply_run_without_the_new_options_is_unchanged(box, tmp_path, monkeypatch):
+    write_applicant(box.data_dir)
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE)
+    profile = box._applicant().profile
+    spec = box._apply_spec(job, "stop")
+    outcome = apply_bridge.run_application(spec, box.data_dir, box.settings, profile, 9)
+    seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
+    argv = seen["argv"]
+    mcp = Path(argv[argv.index("--mcp-config") + 1])
+    assert mcp.name == ".mcp-apply-0.json"
+    assert json.loads(mcp.read_text(encoding="utf-8")) == apply_bridge.mcp_config(box.settings, 9)
+    expected = apply_bridge.claude_command(box.settings, mcp, denied=[box.data_dir, profile])
+    assert ["claude", *argv] == expected
+    assert argv[argv.index("--disallowedTools") + 1] == APPLY_DISALLOWED
+    assert seen["prompt"] == apply_bridge.build_prompt(spec, box.data_dir, box.settings, profile)
+    log = box.data_dir / box.settings.apply.logs_dir / f"{job}.jsonl"
+    assert outcome.log == str(log) and "https://jobs.example.test/j00" in log.read_text(encoding="utf-8")
+
+
+FAKE_CLAUDE_SAYS_CONTACT = """#!/usr/bin/env python3
+import json, os, sys
+prompt = sys.stdin.read()
+argv = sys.argv[1:]
+mcp = argv[argv.index("--mcp-config") + 1]
+open(os.environ["FAKE_ARGS"], "w").write(json.dumps({"argv": argv, "prompt": prompt, "mcp": open(mcp).read()}))
+def say(message):
+    print(json.dumps(message), flush=True)
+say({"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "name": "mcp__playwright__browser_type",
+     "input": {"element": "Email", "text": "sam.synthetic@example.test"}},
+    {"type": "text", "text": "Typed sam.synthetic@example.test.\\nNOTE: dry run"}]}})
+say({"type": "result", "result": "RESULT:APPLIED"})
+"""
+
+
+def test_form_fill_options_change_only_the_form_fill_run(box, tmp_path, monkeypatch):
+    write_applicant(box.data_dir)
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_SAYS_CONTACT)
+    profile = box._applicant().profile
+    spec = box._apply_spec(job, "stop")
+    apply_bridge.configure(box.data_dir, box.settings, profile)
+    from intent_job_agent.vendor.applypilot import config
+
+    apply_mcp = config.APP_DIR / ".mcp-apply-0.json"
+    apply_mcp.write_text("left alone", encoding="utf-8")
+    log_path = tmp_path / "runs" / "r1" / job / "log.jsonl"
+    outcome = apply_bridge.run_application(
+        spec,
+        box.data_dir,
+        box.settings,
+        profile,
+        9,
+        log_path=log_path,
+        mask=lambda text: text.replace("sam.synthetic@example.test", "[email]"),
+        extra_prompt="\n\n== ANSWER SHEET ==\n- name.first -> Sam",
+        gmail=False,
+        extra_disallowed=FORM_FILL_DISALLOWED,
+    )
+    seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
+    argv = seen["argv"]
+    assert Path(argv[argv.index("--mcp-config") + 1]).name == ".mcp-form-fill-0.json"
+    assert list(json.loads(seen["mcp"])["mcpServers"]) == ["playwright"]
+    assert apply_mcp.read_text(encoding="utf-8") == "left alone"  # /apply's file is untouched
+    assert argv[argv.index("--disallowedTools") + 1].endswith(",".join(FORM_FILL_DISALLOWED))
+    base = apply_bridge.build_prompt(spec, box.data_dir, box.settings, profile)
+    assert seen["prompt"] == base + "\n\n== ANSWER SHEET ==\n- name.first -> Sam"
+    written = log_path.read_text(encoding="utf-8")
+    assert outcome.log == str(log_path) and "[email]" in written and "sam.synthetic" not in written
+    assert len(written.splitlines()) == 2
+    assert not (box.data_dir / box.settings.apply.logs_dir / f"{job}.jsonl").exists()
+    assert outcome.status == "waiting" and outcome.notes == ["dry run"]

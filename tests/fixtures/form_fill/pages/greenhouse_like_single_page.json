@@ -1,0 +1,93 @@
+{
+  "synthetic": true,
+  "note": "SYNTHETIC raw nodes in EXTRACT_JS's shape: a single-page Greenhouse-like form, as read after filling. Invented applicant and company.",
+  "url": "https://boards.synthetic.example.test/acme/jobs/1000001",
+  "frames": [
+    {
+      "url": "https://boards.synthetic.example.test/acme/jobs/1000001",
+      "controls": [
+        {
+          "order": 10, "tag": "input", "type": "text", "role": "", "id": "first_name", "name": "first_name",
+          "labels": {"label_for": "First  Name\n *", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Apply for this job", "placeholder": ""},
+          "value": "Sam", "required": true
+        },
+        {
+          "order": 14, "tag": "input", "type": "text", "role": "", "id": "last_name", "name": "last_name",
+          "labels": {"label_for": "Last Name", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "First Name *", "placeholder": ""},
+          "value": "Example", "required": true
+        },
+        {
+          "order": 18, "tag": "input", "type": "email", "role": "", "id": "email", "name": "email",
+          "labels": {"label_for": "Email", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Last Name", "placeholder": ""},
+          "value": " sam.synthetic@example.test ", "required": true
+        },
+        {
+          "order": 22, "tag": "input", "type": "file", "role": "", "id": "", "name": "resume",
+          "labels": {"label_for": "", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Resume/CV *", "placeholder": ""},
+          "value": "resume_synthetic.pdf", "required": false
+        },
+        {
+          "order": 30, "tag": "select", "type": "select-one", "role": "", "id": "q_auth", "name": "q_auth",
+          "labels": {"label_for": "Are you legally authorized to work in the United States?", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Resume/CV *", "placeholder": ""},
+          "value": "Yes",
+          "options": [
+            {"text": "Select...", "value": "", "selected": false},
+            {"text": "Yes", "value": "1", "selected": true},
+            {"text": "No", "value": "0", "selected": false}
+          ],
+          "required": true
+        },
+        {
+          "order": 40, "tag": "input", "type": "radio", "role": "", "id": "spons_yes", "name": "q_sponsorship", "group": "n:q_sponsorship",
+          "labels": {"label_for": "Yes", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "Will you now or in the future require sponsorship for employment visa status?", "preceding": "Are you legally authorized to work in the United States?", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "Yes", "checked": false, "value": "", "required": true
+        },
+        {
+          "order": 43, "tag": "input", "type": "radio", "role": "", "id": "spons_no", "name": "q_sponsorship", "group": "n:q_sponsorship",
+          "labels": {"label_for": "No", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "Will you now or in the future require sponsorship for employment visa status?", "preceding": "Yes", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "No", "checked": true, "value": "", "required": true
+        },
+        {
+          "order": 50, "tag": "input", "type": "checkbox", "role": "", "id": "loc_austin", "name": "q_offices[]", "group": "n:q_offices[]",
+          "labels": {"label_for": "", "labelledby": "", "aria_label": "", "wrapping": "Austin", "legend": "Which offices could you work from?", "preceding": "No", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "Austin", "checked": true, "value": "", "required": false
+        },
+        {
+          "order": 52, "tag": "input", "type": "checkbox", "role": "", "id": "loc_remote", "name": "q_offices[]", "group": "n:q_offices[]",
+          "labels": {"label_for": "", "labelledby": "", "aria_label": "", "wrapping": "Remote (US)", "legend": "Which offices could you work from?", "preceding": "Austin", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "Remote (US)", "checked": true, "value": "", "required": false
+        },
+        {
+          "order": 54, "tag": "input", "type": "checkbox", "role": "", "id": "loc_ny", "name": "q_offices[]", "group": "n:q_offices[]",
+          "labels": {"label_for": "", "labelledby": "", "aria_label": "", "wrapping": "New York", "legend": "Which offices could you work from?", "preceding": "Remote (US)", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "New York", "checked": false, "value": "", "required": false
+        },
+        {
+          "order": 60, "tag": "textarea", "type": "textarea", "role": "", "id": "q_why", "name": "q_why",
+          "labels": {"label_for": "Why do you want to work here?", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "New York", "placeholder": "Tell us"},
+          "value": "  Because the team\n\n  builds   developer tools. ", "required": false
+        },
+        {
+          "order": 66, "tag": "input", "type": "url", "role": "", "id": "q_linkedin", "name": "q_linkedin",
+          "labels": {"label_for": "", "labelledby": "LinkedIn Profile", "aria_label": "linkedin url", "wrapping": "", "legend": "", "preceding": "Why do you want to work here?", "placeholder": "https://"},
+          "value": "", "required": false
+        },
+        {
+          "order": 70, "tag": "input", "type": "checkbox", "role": "", "id": "consent", "name": "consent", "group": "n:consent",
+          "labels": {"label_for": "", "labelledby": "", "aria_label": "", "wrapping": "I agree to the synthetic privacy notice", "legend": "", "preceding": "LinkedIn Profile", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "I agree to the synthetic privacy notice", "checked": true, "value": "", "required": false
+        }
+      ],
+      "pairs": [
+        {"order": 5, "question": "Location:", "value": "Austin, TX", "source": "label"},
+        {"order": 68, "question": "LinkedIn Profile:", "value": "", "source": "label"}
+      ]
+    }
+  ]
+}

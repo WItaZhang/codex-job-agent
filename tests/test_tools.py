@@ -66,7 +66,14 @@ def test_every_tool_has_exactly_one_tier():
 
 
 def test_commit_tier_is_what_spec_5_1_lists():
-    assert COMMIT_TOOLS == {"record_labels", "decide", "correct_tags", "initialize_intent", "start_applying"}
+    assert COMMIT_TOOLS == {
+        "record_labels",
+        "decide",
+        "correct_tags",
+        "initialize_intent",
+        "start_applying",
+        "start_form_fill",
+    }
 
 
 def test_scheduled_runs_get_reads_and_user_independent_preparation_only():

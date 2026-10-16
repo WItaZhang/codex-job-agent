@@ -1,0 +1,70 @@
+{
+  "synthetic": true,
+  "note": "SYNTHETIC raw nodes in EXTRACT_JS's shape: the last step of a LinkedIn-Easy-Apply-like dialog, mixing a review summary of earlier steps with a few controls. The second frame could not be read. Invented applicant and company.",
+  "url": "https://www.synthetic-network.example.test/jobs/view/4000001/",
+  "frames": [
+    {
+      "url": "https://www.synthetic-network.example.test/jobs/view/4000001/",
+      "controls": [
+        {
+          "order": 110, "tag": "select", "type": "select-one", "role": "", "id": "contact-email", "name": "",
+          "labels": {"label_for": "Email address", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Contact info", "placeholder": ""},
+          "value": "sam.synthetic@example.test",
+          "options": [
+            {"text": "Select an option", "value": "Select an option", "selected": false},
+            {"text": "sam.synthetic@example.test", "value": "sam.synthetic@example.test", "selected": true}
+          ],
+          "required": true
+        },
+        {
+          "order": 120, "tag": "input", "type": "text", "role": "combobox", "id": "city-typeahead", "name": "",
+          "labels": {"label_for": "Location (city)", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Email address", "placeholder": ""},
+          "value": "Austin, Texas, United States", "display": "", "options": [], "required": true
+        },
+        {
+          "order": 130, "tag": "input", "type": "text", "role": "", "id": "q-years-python", "name": "",
+          "labels": {"label_for": "How many years of work experience do you have with Python?", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Additional Questions", "placeholder": ""},
+          "value": "3", "required": true
+        },
+        {
+          "order": 140, "tag": "input", "type": "radio", "role": "", "id": "q-commute-yes", "name": "urn:synthetic:q-commute", "group": "n:urn:synthetic:q-commute",
+          "labels": {"label_for": "Yes", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "Are you comfortable commuting to this job's location?", "preceding": "How many years of work experience do you have with Python?", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "Yes", "checked": true, "value": "", "required": true
+        },
+        {
+          "order": 142, "tag": "input", "type": "radio", "role": "", "id": "q-commute-no", "name": "urn:synthetic:q-commute", "group": "n:urn:synthetic:q-commute",
+          "labels": {"label_for": "No", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "Are you comfortable commuting to this job's location?", "preceding": "Yes", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "No", "checked": false, "value": "", "required": true
+        },
+        {
+          "order": 150, "tag": "div", "type": "", "role": "radiogroup", "id": "", "name": "",
+          "labels": {"label_for": "", "labelledby": "Do you have a Master's degree?", "aria_label": "", "wrapping": "", "legend": "", "preceding": "No", "placeholder": ""},
+          "value": "Yes",
+          "options": [
+            {"text": "Yes", "value": "", "selected": true},
+            {"text": "No", "value": "", "selected": false}
+          ],
+          "required": false
+        },
+        {
+          "order": 160, "tag": "input", "type": "checkbox", "role": "", "id": "follow-company", "name": "", "group": "",
+          "labels": {"label_for": "Follow Acme Synthetic to stay up to date with their page.", "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": "Review your application", "placeholder": ""},
+          "group_labels": {"labelledby": "", "aria_label": ""},
+          "option_label": "Follow Acme Synthetic to stay up to date with their page.", "checked": false, "value": "", "required": false
+        }
+      ],
+      "pairs": [
+        {"order": 20, "question": "Email address", "value": "sam.synthetic@example.test", "source": "dt"},
+        {"order": 24, "question": "Mobile phone number", "value": "555-0100", "source": "dt"},
+        {"order": 30, "question": "Resume", "value": "resume_synthetic.pdf", "source": "dt"},
+        {"order": 145, "question": "Are you comfortable commuting to this job's location?", "value": "Yes", "source": "label"}
+      ]
+    },
+    {
+      "url": "https://ads.synthetic.example.test/frame",
+      "error": "Frame was detached"
+    }
+  ]
+}

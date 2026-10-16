@@ -1,0 +1,26 @@
+{
+  "synthetic": true,
+  "note": "SYNTHETIC raw nodes in EXTRACT_JS's shape: a Workday-like Review step, answers shown as question/value text only (no controls). Invented applicant and company.",
+  "url": "https://synthetic.wd1.example.test/en-US/careers/job/Austin/ML-Engineer_R-0001/apply",
+  "frames": [
+    {
+      "url": "https://synthetic.wd1.example.test/en-US/careers/job/Austin/ML-Engineer_R-0001/apply",
+      "controls": [],
+      "pairs": [
+        {"order": 12, "question": "How Did You Hear About Us?", "value": "  Company \n Website ", "source": "label"},
+        {"order": 15, "question": "Have you previously worked for Acme Synthetic?", "value": "No", "source": "label"},
+        {"order": 20, "question": "Legal Name", "value": "Sam Example", "source": "dt"},
+        {"order": 24, "question": "Email Address:", "value": "sam.synthetic@example.test", "source": "label"},
+        {"order": 27, "question": "Phone Number:", "value": "555-0100", "source": "label"},
+        {"order": 30, "question": "Previous Worker?", "value": "", "source": "label"},
+        {"order": 33, "question": "", "value": "Orphan text with no question", "source": "label"},
+        {"order": 40, "question": "School or University", "value": "Synthetic State University", "source": "th"},
+        {"order": 43, "question": "Degree", "value": "Master's Degree", "source": "th"},
+        {"order": 46, "question": "From", "value": "08/2025", "source": "th"},
+        {"order": 50, "question": "Are you legally authorized to work in the United States?", "value": "Yes", "source": "label"},
+        {"order": 53, "question": "Will you now or in the future require sponsorship?", "value": "No", "source": "label"},
+        {"order": 60, "question": "Resume/CV", "value": "resume_synthetic.pdf", "source": "dt"}
+      ]
+    }
+  ]
+}
