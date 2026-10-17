@@ -56,7 +56,7 @@ class AnswerEntry(_Model):
     source: str | None = None
     record: dict[str, str] = Field(default_factory=dict)  # school/degree/major or company/title, start/end, city
     record_accept: dict[str, tuple[str, ...]] = Field(default_factory=dict)
-    record_otherwise: dict[str, str] = Field(default_factory=dict)  # what to pick when the page lacks the value
+    record_otherwise: dict[str, tuple[str, ...]] = Field(default_factory=dict)  # picks when the page lacks the value
     aliases: tuple[str, ...] = ()
 
     @property

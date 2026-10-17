@@ -280,6 +280,15 @@ def test_record_major_with_and_without_otherwise(sheet, key, value, want):
     assert (v.result, v.severity) == want
 
 
+def test_record_otherwise_may_name_several_fallbacks(tmp_path):
+    entry = dict(ERRORS["answers"]["education.beng_nru"])
+    entry["otherwise"] = {"major": ["Computer Science", "Computer and Information Science"]}
+    record = load(tmp_path, {"education.beng_nru": entry})["education.beng_nru"]
+    for value in ("Computer Science", "Computer and Information Science"):
+        assert compare_part(record, "major", value).result == "correct"
+    assert compare_part(record, "major", "Information").result == "not_reviewed"
+
+
 @pytest.mark.parametrize(
     ("part", "value", "want"),
     [

@@ -297,16 +297,23 @@ def _record(key: str, category: str, raw: dict, problems: list[str]) -> dict:
                 problems.append(f"{key}: accept names {name!r}, which is not a field of this record")
             record_accept[str(name)] = _strings(key, f"accept.{name}", values, problems)
     otherwise = raw.get("otherwise")
-    record_otherwise: dict[str, str] = {}
+    record_otherwise: dict[str, tuple[str, ...]] = {}
     if otherwise is not None and not isinstance(otherwise, dict):
         problems.append(f"{key}: otherwise of a record must map record fields to text, e.g. major: Computer Science")
     elif otherwise:
         for name, value in otherwise.items():
             if name not in fields:
                 problems.append(f"{key}: otherwise names {name!r}, which is not a field of this record")
-            text = _string(key, f"otherwise.{name}", _text(value), problems)
-            if text is not None:
-                record_otherwise[str(name)] = text
+            value = _text(value)
+            if isinstance(value, list):
+                picks = _strings(key, f"otherwise.{name}", value, problems)
+            elif isinstance(value, str):
+                picks = tuple(text for text in [_string(key, f"otherwise.{name}", value, problems)] if text)
+            else:
+                problems.append(f"{key}: otherwise.{name} must be text or a list of text")
+                picks = ()
+            if picks:
+                record_otherwise[str(name)] = picks
     return {
         "kind": "record",
         "record": record,

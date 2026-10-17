@@ -289,3 +289,11 @@
   - 10-15 领英"邮箱下拉选错了一项"这类错误，原来的占位分不出是不是申请人自己的邮箱。
   - 超时、页面出错的岗位既不是门槛也不是读不出，计划里的四种结论放不下（10-17 的 Salesforce）。
   - 都是实现细节，不改变用户定下的规则。
+
+## 2026-10-17 决定 18（用户）：专业的回退可以有几个，Skills 也写自己的技能
+
+- 决定：
+  - 武大的专业在下拉里找不到时，选 Computer Science 或 Computer and Information Science 都算对。用户原话："如果 wuhan university 的专业没有，就选 computer science 或者这个"（附 Workday Field of Study 选中 "Computer and Information Science" 的截图）。为此 record 子栏的 `otherwise` 可以写几个值（规格 2.3）。
+  - Skills 栏：JD 要求的技能全写上，申请人自己的技能也都写上。用户原话："Skills 栏把 JD 要求的全写上，也要把我的技能都写上去"。改写要求清单里的 `skills_from_jd`。决定 16 里"JD 要求的全写"这一条仍然有效，这里只是加上了自己的技能。
+  - 用户说"领英填了"：Stealth Startup 那个用户已经自己提交，标签页不在了，报告照 10-16 存下的页不变。
+- 原因：Workday 的 Field of Study 是可搜索的选项表，没有 Computer Science 时，"Computer and Information Science" 是最接近的一项。代码判不了"最相近"，用户点名的这一项就写成标准答案。

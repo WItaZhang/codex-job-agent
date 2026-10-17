@@ -263,7 +263,7 @@ def test_records_take_a_city_and_per_field_otherwise(tmp_path):
         "start": "2021-09",
         "end": "2025-06",
         "city": "Riverton",
-        "otherwise": {"major": "Computer Science"},
+        "otherwise": {"major": ["Computer Science", "Computer and Information Science"]},
     }
     job = {
         "kind": "record",
@@ -275,7 +275,13 @@ def test_records_take_a_city_and_per_field_otherwise(tmp_path):
     }
     loaded = answers(tmp_path, {**NAMES, "education.nru": entry, "experience.vista": job})
     assert loaded["education.nru"].record["city"] == "Riverton"
-    assert loaded["education.nru"].record_otherwise == {"major": "Computer Science"}
+    assert loaded["education.nru"].record_otherwise == {
+        "major": ("Computer Science", "Computer and Information Science")
+    }
+    one = {**entry, "otherwise": {"major": "Computer Science"}}
+    assert answers(tmp_path, {**NAMES, "education.nru": one})["education.nru"].record_otherwise == {
+        "major": ("Computer Science",)
+    }
     assert loaded["experience.vista"].record["city"] == "San Jose" and loaded["experience.vista"].record_otherwise == {}
 
 
@@ -283,7 +289,8 @@ def test_records_take_a_city_and_per_field_otherwise(tmp_path):
     ("otherwise", "expected"),
     [
         ({"title": "Engineer"}, "otherwise names 'title', which is not a field of this record"),
-        ({"major": ["Computer Science"]}, "otherwise.major must be text"),
+        ({"major": {"first": "Computer Science"}}, "otherwise.major must be text or a list of text"),
+        ({"major": ["Computer Science", ""]}, "every item of otherwise.major must be non-empty text"),
         ("Computer Science", "otherwise of a record must map record fields to text"),
     ],
 )

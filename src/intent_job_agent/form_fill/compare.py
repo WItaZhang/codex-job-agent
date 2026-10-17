@@ -282,13 +282,14 @@ def compare_part(entry: AnswerEntry, part: str, value: str) -> Verdict:
         names = (*names, *entry.aliases)
     if _same(value, names):
         return Verdict("correct")
-    otherwise = entry.record_otherwise.get(part)
-    if otherwise and _same(value, [otherwise]):
+    otherwise = entry.record_otherwise.get(part, ())
+    if _same(value, otherwise):
         return Verdict("correct", note="按 otherwise")
     if is_empty(value):
         return _missing(expected)
     if otherwise:
-        return Verdict("not_reviewed", note=f"可能是最相近的选项；原值 {expected}，找不到时选 {otherwise}")
+        picks = " 或 ".join(otherwise)
+        return Verdict("not_reviewed", note=f"可能是最相近的选项；原值 {expected}，找不到时选 {picks}")
     return Verdict("wrong", "fact", expected)
 
 

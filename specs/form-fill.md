@@ -120,7 +120,7 @@ jobs:
   - 例外：一条可以写 `overrides: [其他键]`。它和列出的条目同时对上时，以它为准，不算歧义。用于"题目点名某种情况时答案不同"的题，例如"现在或将来是否需要担保？如果在 F-1/OPT 上请选 Yes"。`overrides` 不能互相指向，代码校验。
 - **教育和工作经历逐段写**：每段写学校、学位、专业、起止月份，或者公司、职位、起止月份；城市可选。
   - 每个子栏可以写自己的 `accept`，例如学位写 "M.S."、"MS"。
-  - 每个子栏也可以写自己的 `otherwise`：页面上没有原值这个选项时应该选哪个。例如下拉里没有原专业时选 Computer Science。
+  - 每个子栏也可以写自己的 `otherwise`：页面上没有原值这个选项时应该选哪个，可以写一个或几个，选其中任何一个都算对。例如下拉里没有原专业时选 Computer Science 或 Computer and Information Science（用户 2026-10-17）。
     - 确认页上看不到下拉的选项，所以填的是 `otherwise` 就算对。
     - 写了 `otherwise` 的子栏，填了原值、`accept` 和 `otherwise` 以外的值，记"未审查"。它可能是要求清单允许的"最相近的选项"，由评审判断。
     - 空着，或停在 "No Response"、"Select One" 这类占位上，算缺漏。
@@ -175,7 +175,7 @@ entries:
     accept:
       degree: ["M.S.", "MS"]
     otherwise:
-      major: Computer Science                # 下拉里没有原专业时选这个
+      major: [Computer Science, Computer and Information Science]   # 下拉里没有原专业时选其中一个
     source: '简历："M.S. Data Science, Example State University, Aug 2025 – Expected May 2027"'
   compensation.expected:
     answer: 95000

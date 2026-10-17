@@ -215,7 +215,8 @@ def _sheet_line(key: str, entry: AnswerEntry) -> str:
             also = (*(entry.aliases if n == 0 else ()), *entry.record_accept.get(name, ()))
             part = f"{name} {entry.record[name]}" + (f" (also: {', '.join(also)})" if also else "")
             if name in entry.record_otherwise:
-                part += f' (if the page has no such option: "{entry.record_otherwise[name]}")'
+                picks = " or ".join(f'"{pick}"' for pick in entry.record_otherwise[name])
+                part += f" (if the page has no such option: {picks})"
             parts.append(part)
         return f"{head} (one {entry.category} entry) -> " + "; ".join(parts)
     extras = []
