@@ -93,7 +93,7 @@ pages:
       - [Degree, Bachelor of Engineering, review]
       - [Major / Field of study, Remote Sensing Science and Technology, review]
       - [Dates attended, 9 / 2021 - 6 / 2025, review]
-      - [Do you agree to allow Example Corp to contact you about job opportunities for up to 2 years?, "", checkbox]
+      - ["Do you agree to allow Example Corp to contact you about job opportunities for up to 2 years?", "", checkbox]
       - [Follow Example Corp to stay up to date with their page, "Yes", checkbox]
     expect:
       p1.1: {key: name.first, result: correct}
@@ -179,10 +179,10 @@ pages:
       - [Email, "[email]", text]
       - [Phone Number, "[phone]", text]
       - [Location, "", combobox]
-      - [Are you open to relocation?, "Yes", radio]
+      - ["Are you open to relocation?", "Yes", radio]
       - [Preferred location, Bay Area, text]
-      - [Do you agree to allow Example Corp to contact you about job opportunities for up to 2 years?, "", checkbox]
-      - [What excites you about Example Corp?, "", textarea]
+      - ["Do you agree to allow Example Corp to contact you about job opportunities for up to 2 years?", "", checkbox]
+      - ["What excites you about Example Corp?", "", textarea]
     expect:
       p1.1: {key: name.legal, result: correct}
       p1.2: {key: contact.email, result: correct}

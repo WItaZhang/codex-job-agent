@@ -22,7 +22,7 @@ KINDS = get_args(Kind)
 VALUE_FIELDS = ("answer", "from_profile", "from_applicant")
 ENTRY_FIELDS = (*VALUE_FIELDS, "kind", "accept", "otherwise", "asks", "overrides", "source")
 CONTACT_FIELDS = ("from_profile", "asks", "source")
-RECORD_ENTRY_FIELDS = ("kind", "accept", "aliases", "source", *RECORD_FIELDS)
+RECORD_ENTRY_FIELDS = ("kind", "accept", "otherwise", "aliases", "source", *RECORD_FIELDS)
 EDUCATION_FIELDS = ("school", "degree", "major")
 EXPERIENCE_FIELDS = ("company", "title")
 KEY = re.compile(r"^([a-z_]+)\.([a-z0-9_]+)$")
@@ -284,19 +284,34 @@ def _record(key: str, category: str, raw: dict, problems: list[str]) -> dict:
             problems.append(f"{key}: record needs {name}")
         else:
             record[name] = _string(key, name, raw[name], problems)
+    if raw.get("city") is not None:
+        record["city"] = _string(key, "city", raw["city"], problems)
+    fields = (*own, "start", "end", "city")
     accept = raw.get("accept")
     record_accept: dict[str, tuple[str, ...]] = {}
     if accept is not None and not isinstance(accept, dict):
         problems.append(f"{key}: accept of a record must map record fields to lists, e.g. degree: [M.S., MS]")
     elif accept:
         for name, values in accept.items():
-            if name not in own and name not in ("start", "end"):
+            if name not in fields:
                 problems.append(f"{key}: accept names {name!r}, which is not a field of this record")
             record_accept[str(name)] = _strings(key, f"accept.{name}", values, problems)
+    otherwise = raw.get("otherwise")
+    record_otherwise: dict[str, str] = {}
+    if otherwise is not None and not isinstance(otherwise, dict):
+        problems.append(f"{key}: otherwise of a record must map record fields to text, e.g. major: Computer Science")
+    elif otherwise:
+        for name, value in otherwise.items():
+            if name not in fields:
+                problems.append(f"{key}: otherwise names {name!r}, which is not a field of this record")
+            text = _string(key, f"otherwise.{name}", _text(value), problems)
+            if text is not None:
+                record_otherwise[str(name)] = text
     return {
         "kind": "record",
         "record": record,
         "record_accept": record_accept,
+        "record_otherwise": record_otherwise,
         "aliases": _strings(key, "aliases", raw.get("aliases"), problems),
         "source": _string(key, "source", raw.get("source"), problems),
     }

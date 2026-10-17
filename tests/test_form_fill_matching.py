@@ -128,7 +128,7 @@ def test_equal_phrases_on_two_entries_are_ambiguous(tmp_path):
     )
     found = match_question("Are you willing to relocate or work overtime?", answers)
     assert found.key is None
-    assert found.ambiguous == ("screening.relocate", "screening.overtime")
+    assert set(found.ambiguous) == {"screening.relocate", "screening.overtime"}
 
 
 def test_overrides_win_even_with_a_shorter_phrase(tmp_path):

@@ -213,7 +213,10 @@ def _sheet_line(key: str, entry: AnswerEntry) -> str:
         parts = []
         for n, name in enumerate(field for field in RECORD_FIELDS if field in entry.record):
             also = (*(entry.aliases if n == 0 else ()), *entry.record_accept.get(name, ()))
-            parts.append(f"{name} {entry.record[name]}" + (f" (also: {', '.join(also)})" if also else ""))
+            part = f"{name} {entry.record[name]}" + (f" (also: {', '.join(also)})" if also else "")
+            if name in entry.record_otherwise:
+                part += f' (if the page has no such option: "{entry.record_otherwise[name]}")'
+            parts.append(part)
         return f"{head} (one {entry.category} entry) -> " + "; ".join(parts)
     extras = []
     if entry.kind == "number_min":

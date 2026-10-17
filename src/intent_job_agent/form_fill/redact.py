@@ -20,8 +20,8 @@ PLACEHOLDER = {
     "postal_code": "[postal_code]",
     "url": "[url]",
     "password": "[已填]",
-    "other_email": "[email]",
-    "other_phone": "[phone]",
+    "other_email": "[other email]",  # someone else's, so a check can tell it from the applicant's own
+    "other_phone": "[other phone]",
 }
 FIELDS = {  # personal.<field> in ApplyPilot's profile format -> kind
     "email": "email",

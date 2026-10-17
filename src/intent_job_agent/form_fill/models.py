@@ -17,7 +17,7 @@ CATEGORIES = (
     "screening",
 )
 Kind = Literal["text", "choice", "yes_no", "date", "month", "number_min", "url", "record"]
-RECORD_FIELDS = ("school", "degree", "major", "company", "title", "start", "end")
+RECORD_FIELDS = ("school", "degree", "major", "company", "title", "start", "end", "city")
 
 
 class _Model(BaseModel):
@@ -54,8 +54,9 @@ class AnswerEntry(_Model):
     asks: tuple[str, ...] = ()
     overrides: tuple[str, ...] = ()
     source: str | None = None
-    record: dict[str, str] = Field(default_factory=dict)  # school/degree/major or company/title, start/end
+    record: dict[str, str] = Field(default_factory=dict)  # school/degree/major or company/title, start/end, city
     record_accept: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    record_otherwise: dict[str, str] = Field(default_factory=dict)  # what to pick when the page lacks the value
     aliases: tuple[str, ...] = ()
 
     @property
@@ -101,18 +102,33 @@ Severity = Literal["fact", "guess", "missing", "format", "none"]
 
 
 class CheckResult(_Model):
+    """One field checked against the answer sheet. A record segment the page lacks has an empty `field_id`. `value`
+    and `expected` are as saved: contact values are placeholders, never the values themselves."""
+
     field_id: str
+    question: str = ""
+    value: str = ""
     key: str | None
     result: Result
-    expected: str | None = None  # already redacted for contact entries
+    expected: str | None = None
     severity: Severity = "none"
     note: str = ""
 
 
+Conclusion = Literal["maybe_submitted", "do_not_submit", "check_then_submit", "not_filled", "unreadable"]
+
+
 class JobReport(_Model):
+    """One job's report (specs/form-fill.md 3.2; slice-1 plan section 1). `not_filled_reason` says why a form was
+    not filled up to the final submit button (gate, needs_answer, stuck, page_error ...)."""
+
     job_id: str
+    company: str = ""
+    title: str = ""
     status: Literal["filled", "gate", "tab_lost", "readback_failed", "system_error"]
-    conclusion: Literal["do_not_submit", "check_then_submit", "blocked", "unreadable"]
+    agent_result: str | None = None
+    conclusion: Conclusion
+    not_filled_reason: str | None = None
     fields: tuple[CheckResult, ...] = ()
     todo: tuple[str, ...] = ()
     page_dir: str | None = None

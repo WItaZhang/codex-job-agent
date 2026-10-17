@@ -165,6 +165,11 @@ cli.py        本机命令：report <运行编号>
 3. 写可行性验证要用的代码，测试通过后提交。
 4. 可行性验证：3 个岗位，每次你批准。结果表给你看。
 5. 写对题、核对、报告和本机命令，测试通过后，在 3 份存下的页上出报告，提交。3 份页是 Perplexity（`20261016-173245-2f5e`）、Stealth（`20261016-221207-d659`）和 Salesforce（`20261017-085904-a375`，没填完）。
+   - 2026-10-17 写完，在这 3 份页上出了报告（每个运行目录下的 `<岗位>.json` 和 `summary.md`，打码扫描 0 次命中）：
+     - Perplexity：没填完，缺标准答案（原运行里填表 agent 的结果）。查出 Location 没填、同意联系的勾选框没勾，都是缺漏。
+     - Stealth：检查后可提交。
+     - Salesforce：10-16 没填完（页面出错，网站在维护）；10-17 没填完（超时）。查出 UCSD 的 Field of Study 空着，两段工作经历的 Location 多写了州和国家。
+   - 按决定 16，你确认的条目已补进 `answers.yaml`（四段经历的城市、武大专业的 otherwise、`screening.contact_consent`）和 `checklist.yaml`（`city_only`、`major_fallback_closest`、`skills_from_jd`）。
 6. 你检查。
 
 每次提交前都跑：`uv sync --locked`、`uv run ruff check src tests`、`uv run ruff format --check src tests`、`uv run python -m pytest -q`。
