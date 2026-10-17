@@ -9,7 +9,7 @@ import yaml
 
 from intent_job_agent.form_fill.compare import check_page, compare_part, compare_value
 from intent_job_agent.form_fill.inputs import load_answers
-from intent_job_agent.form_fill.models import ReadField
+from intent_job_agent.form_fill.models import AnswerEntry, ReadField
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/form_fill"
@@ -308,3 +308,161 @@ def test_record_otherwise_may_name_several_fallbacks(tmp_path):
 )
 def test_record_parts(sheet, part, value, want):
     assert compare_part(sheet["education.ms_esu"], part, value).result == want
+
+
+# --- review round 1 (decision 19) -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["No Response", "No answer provided"])
+@pytest.mark.parametrize("answer", ["Yes", "No"])
+def test_a_yes_no_left_on_a_placeholder_is_missing_never_no(tmp_path, value, answer):
+    answers = load(tmp_path, {"work_auth.sponsorship_now": {"answer": answer, "kind": "yes_no"}})
+    v = compare_value(answers["work_auth.sponsorship_now"], value, control="select")
+    assert (v.result, v.severity) == ("wrong", "missing")
+
+
+CONTACTS = {
+    "contact.email": {"from_profile": "personal.email"},
+    "contact.phone": {"from_profile": "personal.phone"},
+    "contact.address": {"from_profile": "personal.address"},
+    "contact.city": {"from_profile": "personal.city"},
+    "contact.linkedin": {"from_profile": "personal.linkedin_url"},
+}
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "want"),
+    [
+        ("contact.linkedin", "[linkedin]", "correct"),
+        ("contact.linkedin", "[github]", "wrong"),
+        ("contact.linkedin", "[linkedin]/details/experience", "wrong"),
+        ("contact.city", "[city]", "correct"),
+        ("contact.city", "[city], California, United States", "correct"),
+        ("contact.city", "[address]", "wrong"),
+        ("contact.city", "[address], [city]", "wrong"),
+        ("contact.address", "[address] [city], CA [postal_code] United States of America", "correct"),
+        ("contact.address", "[city], TX", "wrong"),
+        ("contact.phone", "[phone] (Mobile)", "correct"),
+        ("contact.phone", "[phone] [phone]", "wrong"),
+        ("contact.email", "[email]", "correct"),
+    ],
+)
+def test_each_contact_field_wants_its_own_placeholder(tmp_path, key, value, want):
+    fields = PROFILE_FIELDS | {"personal.linkedin_url"}
+    path = tmp_path / "answers.yaml"
+    path.write_text(yaml.safe_dump({"version": 1, "entries": {**NAMES, **CONTACTS}}), "utf-8")
+    answers = load_answers(path, fields, set())
+    assert compare_value(answers[key], value).result == want
+
+
+@pytest.mark.parametrize(
+    ("answer", "value", "want"),
+    [
+        ("TX", "Texas", "correct"),
+        ("Texas", "TX", "correct"),
+        ("United States", "United States of America", "correct"),
+        ("United States", "USA", "correct"),
+        ("TX", "Oregon", "wrong"),
+        ("TX", "Lone Star", "not_reviewed"),
+        ("Ely", "Ely, Cambridgeshire", "correct"),
+        ("TX", "", "wrong"),
+    ],
+)
+def test_contact_values_never_masked_compare_as_places(answer, value, want):
+    entry = AnswerEntry(key="contact.state", from_profile="personal.province_state", answer=answer, kind="text")
+    assert compare_value(entry, value).result == want
+
+
+def test_a_record_otherwise_is_wrong_when_the_page_offers_the_original(sheet):
+    options = ("Computer Science", "Geographic Information System", "Geography")
+    v = compare_part(sheet["education.beng_nru"], "major", "Computer Science", options=options)
+    assert (v.result, v.severity) == ("wrong", "fact")
+    v = compare_part(sheet["education.beng_nru"], "major", "Computer Science", options=("Computer Science", "Art"))
+    assert v.result == "correct"
+
+
+def test_record_accept_and_otherwise_count_for_dates_and_city(tmp_path):
+    entry = {
+        "kind": "record",
+        "company": "Acme",
+        "title": "Analyst",
+        "start": "2024-06",
+        "end": "2025-06",
+        "city": "Riverton",
+        "accept": {"end": ["Present"]},
+        "otherwise": {"city": ["Greater Riverton Area"]},
+    }
+    record = load(tmp_path, {"experience.acme": entry})["experience.acme"]
+    assert compare_part(record, "end", "Present").result == "correct"
+    assert compare_part(record, "range", "Jun 2024 - Present").result == "correct"
+    assert compare_part(record, "city", "Greater Riverton Area").result == "correct"
+
+
+@pytest.mark.parametrize("value", ["12-14-2026", "12/14/26", "Dec. 14, 2026", "December 14th, 2026"])
+def test_more_date_spellings(tmp_path, value):
+    entry = load(tmp_path, {"availability.start": {"answer": "2026-12-14", "kind": "date"}})["availability.start"]
+    assert compare_value(entry, value).result == "correct"
+
+
+def test_sept_is_september(tmp_path):
+    entry = load(tmp_path, {"availability.start": {"answer": "2026-09-14", "kind": "date"}})["availability.start"]
+    assert compare_value(entry, "Sept 14, 2026").result == "correct"
+
+
+def test_a_value_the_code_cannot_read_is_not_reviewed_never_wrong(sheet):
+    assert compare_value(sheet["availability.start_date"], "the first Monday after graduation").result == "not_reviewed"
+    assert compare_value(sheet["availability.grad_month"], "end of next year").result == "not_reviewed"
+    assert compare_part(sheet["education.ms_esu"], "range", "since my second year").result == "not_reviewed"
+
+
+@pytest.mark.parametrize("value", ["09/2025-12/2026", "Sep 2025-Dec 2026", "2025-09 - 2026-12"])
+def test_ranges_without_spaces(sheet, value):
+    assert compare_part(sheet["education.ms_esu"], "range", value).result == "correct"
+
+
+def test_a_month_with_a_note_in_brackets(sheet):
+    assert compare_value(sheet["availability.grad_month"], "Dec 2026 (expected)").result == "correct"
+
+
+@pytest.mark.parametrize("value", ["95000USD", "95kUSD", "USD 95,000"])
+def test_number_min_with_a_currency_stuck_on(sheet, value):
+    assert compare_value(sheet["compensation.expected"], value).result == "correct"
+
+
+def test_two_records_at_one_school_are_both_checked(tmp_path):
+    ms = {k: v for k, v in ERRORS["answers"]["education.beng_nru"].items() if k not in ("accept", "otherwise")}
+    ms.update({"degree": "Master of Science", "start": "2025-09", "end": "2027-05"})
+    answers = load(tmp_path, {"education.ms_nru": ms, "education.beng_nru": ERRORS["answers"]["education.beng_nru"]})
+    rows = [
+        ("School", "Northern River University", "review"),
+        ("Degree", "Master of Science", "review"),
+        ("Dates attended", "9 / 2025 - 12 / 2030", "review"),
+        ("School", "Northern River University", "review"),
+        ("Degree", "Bachelor of Engineering", "review"),
+        ("Dates attended", "9 / 2021 - 6 / 2025", "review"),
+    ]
+    results = check_page(page(rows), answers)
+    got = {r.field_id: (r.key, r.result) for r in results}
+    assert got["p1.3"] == ("education.ms_nru", "wrong") and got["p1.6"] == ("education.beng_nru", "correct")
+    assert all(r.field_id for r in results), "no segment reported missing"
+
+
+def test_an_empty_school_is_missing_inside_its_segment(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    rows = [("School or University", "No Response", "review"), ("Degree", "Master of Science", "review")]
+    got = by_id(check_page(page(rows), answers))
+    assert (got["p1.1"].key, got["p1.1"].result, got["p1.1"].severity) == ("education.ms_esu", "wrong", "missing")
+    assert got["p1.2"].result == "correct"
+
+
+def test_a_contact_fields_unmasked_value_is_hidden_in_results(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    rows = [("Mobile phone number", "5550109999", "text"), ("Email", "[other email]", "text")]
+    got = by_id(check_page(page(rows), answers))
+    assert got["p1.1"].value == "[其他值，已隐去]" and got["p1.1"].result == "wrong"
+    assert got["p1.2"].value == "[other email]"
+
+
+def test_a_missing_option_is_named_with_the_choices(sheet):
+    v = compare_value(sheet["eeo.race"], "", options=("Select...", "Asian", "White"))
+    assert v.result == "no_answer" and "Asian、White" in v.note

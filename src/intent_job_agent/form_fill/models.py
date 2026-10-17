@@ -113,6 +113,8 @@ class CheckResult(_Model):
     expected: str | None = None
     severity: Severity = "none"
     note: str = ""
+    segment: int | None = None  # the education or work segment the field belongs to, in page order
+    candidates: tuple[str, ...] = ()  # the entries an ambiguous field matched
 
 
 Conclusion = Literal["maybe_submitted", "do_not_submit", "check_then_submit", "not_filled", "unreadable"]

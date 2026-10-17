@@ -23,7 +23,7 @@ PLACEHOLDER = {
     "other_email": "[other email]",  # someone else's, so a check can tell it from the applicant's own
     "other_phone": "[other phone]",
 }
-FIELDS = {  # personal.<field> in ApplyPilot's profile format -> kind
+FIELDS = {  # personal.<field> in ApplyPilot's profile format -> kind (how the value is matched, and scan totals)
     "email": "email",
     "phone": "phone",
     "address": "address",
@@ -34,6 +34,20 @@ FIELDS = {  # personal.<field> in ApplyPilot's profile format -> kind
     "portfolio_url": "url",
     "website_url": "url",
     "password": "password",
+}
+# Each field has its own placeholder, so a check of a saved page can tell the city from the street address, or the
+# LinkedIn URL from the GitHub one (decision 19).
+FIELD_PLACEHOLDER = {
+    "email": "[email]",
+    "phone": "[phone]",
+    "address": "[address]",
+    "city": "[city]",
+    "postal_code": "[postal_code]",
+    "linkedin_url": "[linkedin]",
+    "github_url": "[github]",
+    "portfolio_url": "[portfolio]",
+    "website_url": "[website]",
+    "password": "[已填]",
 }
 MIN_LEN = 4
 MIN_PHONE_DIGITS = 7
@@ -124,8 +138,9 @@ _BUILD: dict[str, Callable[[str], str | None]] = {
 class Redactor:
     """Masks the applicant's contact values and password, plus any e-mail- or phone-shaped text."""
 
-    def __init__(self, patterns: list[tuple[str, re.Pattern[str]]]):
+    def __init__(self, patterns: list[tuple[str, re.Pattern[str]]], marks: list[str] | None = None):
         self._patterns = patterns
+        self._marks = marks or [PLACEHOLDER[kind] for kind, _ in patterns]
 
     def __repr__(self) -> str:
         return f"Redactor({len(self._patterns)} patterns)"
@@ -147,14 +162,14 @@ class Redactor:
                 continue
             pattern = _BUILD[kind](value)
             if pattern:
-                found.append((len(value), kind, pattern))
+                found.append((len(value), kind, pattern, FIELD_PLACEHOLDER[field]))
         found.sort(key=lambda item: -item[0])  # longer values first, so a city inside an address goes with it
-        return cls([(kind, re.compile(pattern, re.I)) for _, kind, pattern in found])
+        return cls([(kind, re.compile(pattern, re.I)) for _, kind, pattern, _ in found], [mark for *_, mark in found])
 
     def _apply(self, text: str) -> tuple[str, Counter]:
         hits: Counter = Counter()
-        for kind, pattern in self._patterns:
-            text, n = pattern.subn(PLACEHOLDER[kind], text)
+        for (kind, pattern), mark in zip(self._patterns, self._marks, strict=True):
+            text, n = pattern.subn(mark, text)
             hits[kind] += n
         text, n = _OTHER_EMAIL.subn(PLACEHOLDER["other_email"], text)
         hits["other_email"] += n

@@ -484,3 +484,9 @@ def test_examples_load(tmp_path):
             write(letter, "Synthetic letter.")
             write(letter.with_suffix(".pdf"), "%PDF synthetic")
     assert len(load_list(path, {"main", "research"}).jobs) >= 2
+
+
+@pytest.mark.parametrize("bad", ["Present", "2025-9", "Sep 2025", "2025-13"])
+def test_record_start_and_end_are_months(tmp_path, bad):
+    entry = {"kind": "record", "company": "Acme", "title": "Analyst", "start": "2024-06", "end": bad}
+    assert "end must be a month like 2025-09" in answers_error(tmp_path, {**NAMES, "experience.acme": entry})

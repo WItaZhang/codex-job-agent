@@ -12,6 +12,8 @@ import json
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .. import applicant as applicant_files
 from ..config import Settings
 from ..domain import InvariantError
@@ -25,37 +27,79 @@ from .report import job_report, write_reports
 META_FILE, READBACK_FILE = runner.META_FILE, "readback.json"
 
 
-def plain_contacts(answers: dict[str, AnswerEntry], profile: dict) -> dict[str, AnswerEntry]:
-    """Contact entries whose profile field is never masked get its value as their answer, compared as text."""
+def plain_contacts(answers: dict[str, AnswerEntry], profile: dict, redactor: Redactor) -> dict[str, AnswerEntry]:
+    """Contact entries whose profile value saved pages never mask (state, country, a city too short to mask) get the
+    value as their answer, compared as text."""
     out = dict(answers)
     for key, entry in answers.items():
-        if entry.category == "contact" and entry.from_profile and placeholder(entry.from_profile) is None:
-            value = runner._profile_value(profile, entry.from_profile)
-            if value and value.strip():
-                out[key] = entry.model_copy(update={"answer": value.strip(), "kind": "text"})
+        if entry.category != "contact" or not entry.from_profile:
+            continue
+        value = runner._profile_value(profile, entry.from_profile)
+        if value and value.strip() and (placeholder(entry.from_profile) is None or redactor.mask(value) == value):
+            out[key] = entry.model_copy(update={"answer": value.strip(), "kind": "text"})
     return out
 
 
+def _mask(redactor: Redactor, value):
+    if isinstance(value, str):
+        return redactor.mask(value)
+    if isinstance(value, tuple):
+        return tuple(redactor.mask(v) for v in value)
+    if isinstance(value, dict):
+        return {k: _mask(redactor, v) for k, v in value.items()}
+    return value
+
+
+def mask_sheet(answers: dict[str, AnswerEntry], redactor: Redactor) -> dict[str, AnswerEntry]:
+    """The answer sheet masked as the saved pages are, so both sides compare alike: the applicant's city inside a
+    school name ("University of California, [city]") or as a job's city ("[city]")."""
+    fields = ("answer", "accept", "otherwise", "record", "record_accept", "record_otherwise", "aliases")
+    return {
+        key: entry.model_copy(update={name: _mask(redactor, getattr(entry, name)) for name in fields})
+        for key, entry in answers.items()
+    }
+
+
 def load_sheet(data_dir: Path, settings: Settings) -> tuple[dict[str, AnswerEntry], Redactor]:
-    """answers.yaml checked and resolved as for a run, and the redactor built from profile.json."""
+    """answers.yaml checked and resolved as for a run, masked like the saved pages, and the redactor built from
+    profile.json."""
     applicant = applicant_files.load(Path(data_dir), settings.apply.applicant_dir)
     fields = profile_field_paths(applicant.profile)
     profile = json.loads(applicant.profile.read_text(encoding="utf-8"))
+    redactor = Redactor.from_profile(profile)
     values = runner.applicant_values(applicant)
     answers = load_answers(applicant.folder / settings.form_fill.answers_file, fields, set(values))
-    answers = runner.resolve(answers, profile, values)
-    return plain_contacts(answers, profile), Redactor.from_profile(profile)
+    answers = mask_sheet(runner.resolve(answers, profile, values), redactor)
+    return plain_contacts(answers, profile, redactor), redactor
+
+
+def _broken(job_dir: Path, why: str) -> tuple[dict, tuple[ReadField, ...]]:
+    return {"job_id": job_dir.name, "status": "system_error", "notes": [why]}, ()
 
 
 def _job(job_dir: Path) -> tuple[dict, tuple[ReadField, ...]]:
-    meta = json.loads((job_dir / META_FILE).read_text(encoding="utf-8"))
+    """A job folder's meta.json and read-back fields. A folder without a readable meta.json is still reported: the
+    run may have stopped while this job was being filled."""
+    if not (job_dir / META_FILE).is_file():
+        return _broken(
+            job_dir, f"没有 {META_FILE}：这个岗位可能还在填，或者运行中途断了。标签页可能停在任何一步，请你自己看。"
+        )
+    try:
+        meta = json.loads((job_dir / META_FILE).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return _broken(job_dir, f"{META_FILE} 读不出来。请你自己看标签页。")
+    if not isinstance(meta, dict):
+        return _broken(job_dir, f"{META_FILE} 读不出来。请你自己看标签页。")
     meta.setdefault("job_id", job_dir.name)
-    meta.setdefault("page_dir", str(job_dir))
     readback = job_dir / READBACK_FILE
     if not readback.is_file():
         return meta, ()
-    rows = json.loads(readback.read_text(encoding="utf-8"))
-    return meta, tuple(ReadField.model_validate(row) for row in rows)
+    meta.setdefault("page_dir", str(job_dir))
+    try:
+        rows = json.loads(readback.read_text(encoding="utf-8"))
+        return meta, tuple(ReadField.model_validate(row) for row in rows)
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValidationError):
+        return {**meta, "status": "readback_failed", "notes": [*meta.get("notes", []), f"{READBACK_FILE} 读不出来"]}, ()
 
 
 def run_report(run_id: str, data_dir: Path, settings: Settings) -> Path:
@@ -65,9 +109,9 @@ def run_report(run_id: str, data_dir: Path, settings: Settings) -> Path:
     run_dir = Path(data_dir) / settings.form_fill.dir / "runs" / run_id
     if not run_dir.is_dir():
         raise InvariantError(f"no run {run_id} under {run_dir.parent}")
-    jobs = [_job(job_dir) for job_dir in sorted(run_dir.iterdir()) if (job_dir / META_FILE).is_file()]
+    jobs = [_job(job_dir) for job_dir in sorted(run_dir.iterdir()) if job_dir.is_dir()]
     if not jobs:
-        raise InvariantError(f"run {run_id} has no job folders with {META_FILE}")
+        raise InvariantError(f"run {run_id} has no job folders")
     jobs.sort(key=lambda job: str(job[0].get("started", "")))
     answers, redactor = load_sheet(data_dir, settings)
     return write_reports(run_dir, [job_report(meta, fields, answers) for meta, fields in jobs], redactor)

@@ -207,11 +207,11 @@ def test_fields_outside_segments_are_matched_as_questions(tmp_path):
     answers = load(tmp_path, ERRORS["answers"])
     fields = page(
         [
-            ["City", "[address]", "text"],
+            ["City", "[city]", "text"],
             ["School", "ESU", "review"],
             ["City", "Springfield", "review"],
             ["Do you agree to let us contact you about job opportunities?", "Yes", "checkbox"],
-            ["City", "[address]", "text"],
+            ["City", "[city]", "text"],
         ]
     )
     found = match_page(fields, answers)
@@ -229,3 +229,126 @@ def test_a_page_without_segments_misses_no_record(tmp_path):
     answers = load(tmp_path, ERRORS["answers"])
     found = match_page(page([["Email", "[email]", "text"]]), answers)
     assert found.missing == ()
+
+
+# --- review round 1 (decision 19) -------------------------------------------------------------------------------
+
+
+def test_asks_win_over_record_labels(tmp_path):
+    answers = load(
+        tmp_path,
+        {
+            **ERRORS["answers"],
+            "availability.start": {"answer": "2026-12-14", "kind": "date", "asks": ["start date"]},
+            "screening.degree_level": {"answer": "Master's", "kind": "choice", "asks": ["degree"]},
+        },
+    )
+    fields = page(
+        [
+            ["School", "ESU", "review"],
+            ["Graduation Date", "12/2026", "review"],
+            ["Start Date", "12/14/2026", "review"],
+            ["First name", "Sam", "review"],
+            ["Degree", "Master's", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert found.fields["p1.3"].key == "availability.start" and found.fields["p1.3"].segment is None
+    assert found.fields["p1.5"].key == "screening.degree_level" and not found.fields["p1.5"].extra
+    assert found.missing == ("education.beng_nru",)
+
+
+def test_one_unrelated_field_inside_a_segment_keeps_it_open(tmp_path):
+    answers = load(tmp_path, {**ERRORS["answers"], "education.gpa": {"answer": "3.6", "kind": "text", "asks": ["gpa"]}})
+    fields = page(
+        [
+            ["School or University", "Example State University", "review"],
+            ["Degree", "MS", "review"],
+            ["Overall Result (GPA)", "3.6", "review"],
+            ["From", "2025", "review"],
+            ["To (Actual or Expected)", "2030", "review"],
+            ["Are you willing to travel?", "Yes", "review"],
+            ["Do you agree to let us contact you about job opportunities?", "Yes", "review"],
+            ["City", "[city]", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert found.fields["p1.3"].key == "education.gpa" and found.fields["p1.3"].segment is None
+    assert [found.fields[f"p1.{n}"].part for n in (4, 5)] == ["start", "end"]
+    assert found.fields["p1.8"].segment is None and found.fields["p1.8"].key == "contact.city", "two fields end it"
+
+
+def test_record_labels_keep_their_meaning_with_an_optional_suffix(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [["Company", "Lumen", "review"], ["City (optional)", "Hangzhou", "review"], ["To", "08/2024", "review"]]
+    )
+    found = match_page(fields, answers)
+    assert [found.fields[f"p1.{n}"].part for n in (1, 2, 3)] == ["company", "city", "end"]
+
+
+def test_an_exact_name_later_on_the_page_beats_an_earlier_partial_one(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [
+            ["Your title", "Volunteer Tutor", "review"],
+            ["Company", "Lumen Labs Foundation", "review"],
+            ["Your title", "Machine Learning Engineer Intern", "review"],
+            ["Company", "Lumen Search (China) Co., Ltd.", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert found.fields["p1.1"].extra and found.fields["p1.3"].key == "experience.lumen"
+
+
+def test_two_records_at_one_school_are_told_apart_by_the_degree(tmp_path):
+    two = {
+        "education.ms_nru": {**ERRORS["answers"]["education.beng_nru"], "degree": "Master of Science"},
+        "education.beng_nru": ERRORS["answers"]["education.beng_nru"],
+    }
+    two["education.ms_nru"] = {k: v for k, v in two["education.ms_nru"].items() if k not in ("accept", "otherwise")}
+    answers = load(tmp_path, two)
+    fields = page(
+        [
+            ["School", "Northern River University", "review"],
+            ["Degree", "Master of Science", "review"],
+            ["School", "Northern River University", "review"],
+            ["Degree", "Bachelor of Engineering", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert [found.fields[f"p1.{n}"].key for n in (1, 3)] == ["education.ms_nru", "education.beng_nru"]
+    assert found.missing == ()
+
+
+def test_records_that_stay_tied_are_ambiguous_but_not_missing(tmp_path):
+    twin = {k: v for k, v in ERRORS["answers"]["education.beng_nru"].items() if k not in ("accept", "otherwise")}
+    answers = load(tmp_path, {"education.a": twin, "education.b": {**twin, "start": "2019-09"}})
+    found = match_page(page([["School", "Northern River University", "review"]]), answers)
+    assert set(found.fields["p1.1"].ambiguous) == {"education.a", "education.b"} and found.missing == ()
+
+
+def test_a_segment_with_its_school_left_empty_is_matched_by_its_other_fields(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [
+            ["School or University", "No Response", "review"],
+            ["Degree", "Master of Science", "review"],
+            ["Field of Study", "Statistics", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert found.fields["p1.1"].key == "education.ms_esu" and not found.fields["p1.1"].extra
+
+
+def test_a_school_left_empty_with_nothing_else_matching_is_neither_extra_nor_matched(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    found = match_page(page([["School", "", "review"], ["Degree", "Doctor of Music", "review"]]), answers)
+    assert found.fields["p1.2"].unanchored and not found.fields["p1.2"].extra and found.fields["p1.2"].key is None
+
+
+def test_the_schools_otherwise_finds_the_segment(tmp_path):
+    entry = {**ERRORS["answers"]["education.ms_esu"], "otherwise": {"school": "Other"}}
+    answers = load(tmp_path, {"education.ms_esu": entry})
+    found = match_page(page([["School", "Other", "review"], ["Degree", "MS", "review"]]), answers)
+    assert found.fields["p1.1"].key == "education.ms_esu" and found.missing == ()

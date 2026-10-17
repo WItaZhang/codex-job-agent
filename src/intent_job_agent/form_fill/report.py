@@ -8,11 +8,10 @@ guess); check_then_submit (everything else: slice 1 has no reviewer, so code nev
 """
 
 import json
-import re
 from collections import defaultdict
 from pathlib import Path
 
-from .compare import EXTRA, NAV_NOTE, check_page, is_empty
+from .compare import EMPTY_BLOCK, EXTRA, NAV_NOTE, check_page, is_empty
 from .models import JobReport
 from .runner import GATE_REASONS
 
@@ -34,24 +33,41 @@ REASONS = {
     "wrong_job": "跳到了别的岗位",
     "email_only": "只收邮件",
 }
-AGENT_REASONS = {"timeout": "stuck", "no_result_line": "stuck", "system_error": "page_error"}
+AGENT_REASONS = {
+    "timeout": "stuck",
+    "no_result_line": "stuck",
+    "system_error": "page_error",
+    "login_issue": "login_failed",  # could not sign in nor register: not a gate (spec 5.5)
+}
+ADVICE = {  # what the user does next, by why the form was not filled (spec 5.5)
+    "gate": "请你自己在标签页里过了这一关（不填 SSN、付款，不接受仲裁），再说“重跑 {job}”。",
+    "needs_answer": "请补上标准答案，再在标签页里自己填，或者说“重跑 {job}”。",
+    "stuck": "请在标签页里接着填，或者说“重跑 {job}”。",
+    "page_error": "请在标签页里看看页面怎么了，好了以后说“重跑 {job}”。",
+    "login_failed": "登录和注册都没成功：请你自己在标签页里登录，再说“重跑 {job}”。",
+    "expired": "岗位已经下架，不用再填。",
+    "already_applied": "你已经申请过这个岗位，不用再填。",
+    "wrong_job": "页面跳到了别的岗位，请确认清单里的地址。",
+    "email_only": "这个岗位只收邮件投递，请看备注里的地址。",
+}
 UNREADABLE = ("tab_lost", "readback_failed", "system_error")
-EXTRA_LABEL = re.compile(rf"^{EXTRA}（(.*)）")
 SEVERITIES = {"fact": "错的事实", "guess": "无依据的猜测", "missing": "缺漏", "format": "格式与写法"}
 
 
 def conclude(meta: dict, results) -> tuple[str, str | None]:
     """(conclusion, why not filled) from the job's meta.json and its check results."""
     checks, page = meta.get("checks") or {}, meta.get("page") or {}
-    if checks.get("not_submitted") is False or page.get("received"):
-        return "maybe_submitted", None
     status, agent = meta.get("status") or "filled", meta.get("agent_result")
+    if page.get("received") or (checks.get("not_submitted") is False and agent != "already_applied"):
+        return "maybe_submitted", None
+    if agent in AGENT_REASONS or agent in REASONS:
+        return "not_filled", AGENT_REASONS.get(agent, agent)
     if status == "gate" or agent in GATE_REASONS:
         return "not_filled", "gate"
     if status in UNREADABLE:
         return "unreadable", None
     if agent not in (None, "dry_run"):
-        return "not_filled", AGENT_REASONS.get(agent, agent)
+        return "not_filled", agent
     if not any(r.field_id for r in results):
         return "unreadable", None
     if any(r.severity in ("fact", "guess") for r in results):
@@ -71,12 +87,13 @@ def _headline(meta: dict, conclusion: str, reason: str | None, results) -> str:
         return f"可能已提交：{why}。请先打开标签页确认，再决定怎么办。"
     if conclusion == "not_filled":
         agent = meta.get("agent_result") or meta.get("status")
-        return (
-            f"没填完：{REASONS.get(reason or '', reason)}（填表 agent 的结果：{agent}）。"
-            f"请在标签页里接着填，或者说“重跑 {job}”。下面是已经填了的部分的核对结果。"
-        )
+        advice = ADVICE.get(reason or "", "请在标签页里看一眼，再决定接着填还是说“重跑 {job}”。").format(job=job)
+        tail = "下面是已经填了的部分的核对结果。" if any(r.field_id for r in results) else ""
+        return f"没填完：{REASONS.get(reason or '', reason)}（填表 agent 的结果：{agent}）。{advice}{tail}"
     if conclusion == "unreadable":
-        return f"读不出：{meta.get('status') or '一栏都没读到'}。标签页可能还在，请你自己打开看。"
+        status = meta.get("status")
+        why = status if status in UNREADABLE else "一栏都没读到"
+        return f"读不出：{why}。标签页可能还在，请你自己打开看。"
     if conclusion == "do_not_submit":
         return (
             f"不能提交：{_count(results, 'fact')} 个错的事实、{_count(results, 'guess')} 个无依据的猜测。"
@@ -89,38 +106,69 @@ def _span(ids: list[str]) -> str:
     return ids[0] if len(ids) == 1 else f"{ids[0]}–{ids[-1]}"
 
 
+def _per_segment(r) -> bool:
+    """Results reported once per segment rather than per field: extra, empty and tied segments."""
+    return r.segment is not None and (
+        r.note.startswith(EXTRA) or r.note == EMPTY_BLOCK or (r.result == "ambiguous" and bool(r.candidates))
+    )
+
+
+def _segment_items(results) -> list[str]:
+    """One item per extra or tied segment, in page order. An extra segment with nothing filled in is not a wrong
+    fact: it is an empty block the user may delete or fill."""
+    by_segment: dict[int, list] = defaultdict(list)
+    for r in results:
+        if _per_segment(r):
+            by_segment[r.segment].append(r)
+    items = []
+    for rows in by_segment.values():
+        span = _span([r.field_id for r in rows])
+        if rows[0].result == "ambiguous":
+            keys = "、".join(rows[0].candidates)
+            items.append(f"{span} 这一段对到了 {keys}，代码分不出是哪一条，所以没有核对。请你在标签页里看一眼。")
+        elif any(r.result == "wrong" for r in rows):
+            label = rows[0].note.split("（", 1)[1].rsplit("）", 1)[0]
+            items.append(f"{span} {EXTRA}：{label}，标准答案里没有这一段。请在标签页里删掉这一段。")
+        else:
+            items.append(f"{span} 是空着的一段，对不上标准答案里的哪一段。可以删掉；如果是给少了的那段留的，请填上。")
+    return items
+
+
 def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tuple[str, ...]:
     """The headline, then one item per problem, worst first; fields nobody checked are listed together."""
     items = [_headline(meta, conclusion, reason, results)]
-    extra: dict[str, list[str]] = {}
     groups: dict[str, list[str]] = defaultdict(list)
     for r in results:
         where = f"{r.field_id} {r.question}" if r.field_id else r.question
-        if segment := EXTRA_LABEL.match(r.note):
-            extra.setdefault(segment[1], []).append(r.field_id)
-        elif r.result == "wrong" and r.severity == "fact":
+        if _per_segment(r):
+            continue  # one item per segment, below
+        if r.result == "wrong" and r.severity == "fact":
             groups["fact"].append(f"{where}：现在是「{r.value}」，应为「{r.expected}」（{r.key}）。请在标签页里改。")
         elif r.severity == "guess":
-            groups["guess"].append(f"{where}：没有标准答案，却填了「{r.value}」。请确认，或补标准答案（{r.key}）。")
-        elif r.severity == "missing" and r.field_id:
+            groups["guess"].append(f"{where}：{r.note}「{r.value}」。请确认，或补标准答案（{r.key}）。")
+        elif r.severity == "missing" and r.field_id and r.expected:
             groups["missing"].append(f"{where}：{r.note or '空着'}，应为「{r.expected}」（{r.key}）。")
+        elif r.severity == "missing" and r.field_id:
+            groups["missing"].append(f"{where}：{r.note or '空着'}。")
         elif r.severity == "missing":
             groups["missing"].append(f"页面上少了一段：{r.expected}（{r.key}）。")
         elif r.severity == "format":
             groups["format"].append(f"{where}：「{r.value}」应写成「{r.expected}」，{r.note}。")
         elif r.result == "ambiguous":
             groups["ambiguous"].append(f"{where}：{r.note}，代码没判。请在其中一条的 asks 里补能区分的短语。")
+        elif r.result == "no_answer" and r.key and r.note.startswith("页面上没有标准答案的选项"):
+            groups["no_option"].append(
+                f"{where}：{r.note}，空着。请补这一条（{r.key}）的 otherwise，或在标签页里自己选。"
+            )
         elif r.result == "no_answer" and r.key and not is_empty(r.value):
             groups["spelling"].append(f"{where}：「{r.value}」对不上 {r.key} 的写法。{r.note}，请补 accept。")
         elif r.result == "not_reviewed":
             groups["not_reviewed"].append(f"{r.field_id} {r.question[:60]}「{r.value[:40]}」")
         elif r.result == "no_answer" and r.note != NAV_NOTE and r.key is None and r.field_id:
             groups["empty"].append(f"{r.field_id} {r.question[:60]}")
-    items += groups["fact"]
-    items += [
-        f"{_span(ids)} {EXTRA}：{label}，标准答案里没有这一段。请在标签页里删掉这一段。" for label, ids in extra.items()
-    ]
-    items += groups["guess"] + groups["missing"] + groups["format"] + groups["ambiguous"] + groups["spelling"]
+    items += groups["fact"] + _segment_items(results)
+    items += groups["guess"] + groups["missing"] + groups["format"] + groups["ambiguous"]
+    items += groups["no_option"] + groups["spelling"]
     if groups["not_reviewed"]:
         items.append(
             f"未审查 {len(groups['not_reviewed'])} 栏（代码判断不了，请在标签页里看一眼）："
@@ -165,7 +213,8 @@ def _tally(report: JobReport) -> str:
 
 
 def _problems(report: JobReport) -> set[str]:
-    return {r.key for r in report.fields if r.key and (r.severity != "none" or r.result == "ambiguous")}
+    keys = {r.key for r in report.fields if r.key and r.severity != "none"}
+    return keys | {key for r in report.fields if r.result == "ambiguous" for key in r.candidates}
 
 
 def summary_md(run_id: str, reports) -> str:

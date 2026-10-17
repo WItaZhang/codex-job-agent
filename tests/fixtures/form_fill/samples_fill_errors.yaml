@@ -63,7 +63,7 @@ pages:
       - [Last name, Synthetic, review]
       - [Email address, "[email]", review]
       - [Mobile phone number, "[phone]", review]
-      - [Location (city), "[address], Texas, United States", review]
+      - [Location (city), "[city], Texas, United States", review]
       - [Your title, Software Engineer Intern, review]
       - [Company, Vista Video Inc., review]
       - [Dates of employment, 6 / 2026 - 9 / 2026, review]

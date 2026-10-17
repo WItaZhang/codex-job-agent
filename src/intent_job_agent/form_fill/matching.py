@@ -6,10 +6,15 @@ Without an `asks` hit, a few common labels built into the code match when they a
 name", "Email", "Location"); contact labels go to the entry whose from_profile names that profile field.
 
 Education and work history come in segments: consecutive fields whose labels are record fields (School, Degree,
-Company, Job Title, From, To, City, Description ...). A label seen again starts the next segment. A segment is
-matched to a record entry by its school or company, equal to the entry's name or an alias, or holding one of them as
-whole words ("百度（Baidu）" finds the alias Baidu). A segment that matches no entry is extra: a job or school the
-answer sheet does not have. Entries of a kind the page shows segments of, but that no segment matched, are missing.
+Company, Job Title, From, To, City, Description ...). A label seen again starts the next segment. A label that hits
+an `asks` phrase is a question, not a record field; one unrelated field inside a segment (Workday's "Overall Result
+(GPA)") does not end it.
+
+Segments are matched to record entries over the whole page: exact school or company names and aliases (and the
+anchor's otherwise) first, then names held as whole words ("百度（Baidu）" finds the alias Baidu). Records tied on
+the name are told apart by the segment's other fields (degree or title, dates), and a segment whose school or company
+is left empty is matched by those fields alone. A segment no entry matches is extra: a job or school the answer sheet
+does not have. Entries of a kind the page shows segments of, that no segment matched or might be, are missing.
 """
 
 import re
@@ -77,26 +82,50 @@ KIND_OF_PART["title"] = "experience"
 ANCHOR = {"education": "school", "experience": "company"}
 SECOND = {"education": "degree", "experience": "title"}
 NAVIGATION = re.compile(r"^((completed|current) )?step \d+ of \d+$")
+# Normalized values that mean nothing was chosen.
+EMPTY = frozenset(
+    {
+        "",
+        "n a",
+        "na",
+        "none",
+        "no response",
+        "select",
+        "select one",
+        "select an option",
+        "please select",
+        "choose one",
+        "choose an option",
+        "no answer provided",
+        "not provided",
+    }
+)
+
+
+def is_empty(value: str) -> bool:
+    return norm(value) in EMPTY
 
 
 @dataclass(frozen=True)
 class FieldMatch:
     """Where one field went. `key` is the answer-sheet entry (None: no entry, or ambiguous between `ambiguous`).
     Inside a segment, `part` is the record field it shows and `segment` the segment's number; `extra` marks a segment
-    no entry matches. `navigation` marks a step indicator ("step 2 of 6"), not a question."""
+    no entry matches, `unanchored` one whose school or company is empty and that no entry fits by its other fields.
+    `navigation` marks a step indicator ("step 2 of 6"), not a question."""
 
     key: str | None = None
     ambiguous: tuple[str, ...] = ()
     part: str | None = None
     segment: int | None = None
     extra: bool = False
+    unanchored: bool = False
     navigation: bool = False
 
 
 @dataclass(frozen=True)
 class Segment:
-    """One education or work segment of the page: its fields in order, the entry it matched, and a short label
-    (school or company, then degree or title) for the report."""
+    """One education or work segment of the page: its fields in order, the entry it matched (or the tied entries),
+    and a short label (school or company, then degree or title) for the report."""
 
     index: int
     kind: str
@@ -104,10 +133,11 @@ class Segment:
     key: str | None
     ambiguous: tuple[str, ...]
     label: str
+    unanchored: bool = False
 
     @property
     def extra(self) -> bool:
-        return self.key is None and not self.ambiguous
+        return self.key is None and not self.ambiguous and not self.unanchored
 
 
 @dataclass(frozen=True)
@@ -118,6 +148,17 @@ class PageMatch:
 
 
 # --- one question -----------------------------------------------------------------------------------------------
+
+
+def _asks_hits(question: str, answers: dict[str, AnswerEntry]) -> dict[str, int]:
+    """Entries whose asks phrases appear as whole words in the (normalized) question, with the longest one's length."""
+    hits: dict[str, int] = {}
+    for key, entry in answers.items():
+        for phrase in entry.asks:
+            p = norm(phrase)
+            if _contains(question, p):
+                hits[key] = max(hits.get(key, 0), len(p))
+    return hits
 
 
 def _pick(hits: dict[str, int], answers: dict[str, AnswerEntry]) -> FieldMatch:
@@ -148,12 +189,7 @@ def match_question(question: str, answers: dict[str, AnswerEntry]) -> FieldMatch
     q = norm(question)
     if NAVIGATION.match(q):
         return FieldMatch(navigation=True)
-    hits: dict[str, int] = {}
-    for key, entry in answers.items():
-        for phrase in entry.asks:
-            p = norm(phrase)
-            if _contains(q, p):
-                hits[key] = max(hits.get(key, 0), len(p))
+    hits = _asks_hits(q, answers)
     return _pick(hits, answers) if hits else _built_in(q, answers)
 
 
@@ -167,22 +203,39 @@ class _Draft:
     indexes: list[int] = field(default_factory=list)
 
 
-def _segments(fields) -> list[_Draft]:
+def part_of(question: str, answers: dict[str, AnswerEntry]) -> str | None:
+    """The record field a label names, unless an asks phrase claims the question (asks win over built-in labels)."""
+    q = norm(question)
+    part = PART_OF.get(TRAILING.sub("", q))
+    return None if part is None or _asks_hits(q, answers) else part
+
+
+def _fits(draft: _Draft, part: str | None) -> bool:
+    """Whether a field naming `part` would join this segment (rather than start the next or end it)."""
+    if part is None:
+        return False
+    kind = KIND_OF_PART.get(part)
+    if kind is not None:
+        return kind == draft.kind and part not in draft.parts
+    return part not in draft.parts or part == "other"
+
+
+def _segments(fields, answers) -> list[_Draft]:
+    parts = [part_of(f.question, answers) for f in fields]
     drafts: list[_Draft] = []
     current: _Draft | None = None
-    for i, f in enumerate(fields):
-        part = PART_OF.get(norm(f.question))
-        if part is None:
-            current = None
+    for i, part in enumerate(parts):
+        if part is None:  # one unrelated field inside a segment does not end it
+            if current is not None and not _fits(current, parts[i + 1] if i + 1 < len(parts) else None):
+                current = None
             continue
-        kind = KIND_OF_PART.get(part)
-        if kind is not None:
-            if current is None or current.kind != kind or part in current.parts:
-                current = _Draft(kind)
+        if KIND_OF_PART.get(part) is not None:
+            if current is None or not _fits(current, part):
+                current = _Draft(KIND_OF_PART[part])
                 drafts.append(current)
         elif current is None:
             continue
-        elif part in current.parts and part != "other":
+        elif not _fits(current, part):
             current = None
             continue
         current.parts.setdefault(part, i)
@@ -191,29 +244,22 @@ def _segments(fields) -> list[_Draft]:
 
 
 def _names(entry: AnswerEntry, part: str) -> list[str]:
-    names = [entry.record.get(part, ""), *entry.aliases, *entry.record_accept.get(part, ())]
+    names = [
+        entry.record.get(part, ""),
+        *entry.aliases,
+        *entry.record_accept.get(part, ()),
+        *entry.record_otherwise.get(part, ()),
+    ]
     return [n for n in (norm(name) for name in names) if n]
 
 
-def _record_for(value: str, kind: str, answers: dict[str, AnswerEntry]) -> tuple[str, ...]:
-    """Entries of this kind whose school or company is the value, or appears in it as whole words."""
+def _strength(value: str, entry: AnswerEntry, part: str) -> int:
+    """2: the value is the school or company (or an alias); 1: it holds one as whole words; 0: neither."""
     v = norm(value)
-    if not v:
-        return ()
-    part = ANCHOR[kind]
-    entries = [(key, e) for key, e in answers.items() if e.kind == "record" and e.category == kind]
-    exact = tuple(key for key, e in entries if v in _names(e, part))
-    if exact:
-        return exact
-    found = {}
-    for key, e in entries:
-        lengths = [len(n) for n in _names(e, part) if _contains(v, n)]
-        if lengths:
-            found[key] = max(lengths)
-    if not found:
-        return ()
-    best = max(found.values())
-    return tuple(key for key, length in found.items() if length == best)
+    names = _names(entry, part)
+    if v in names:
+        return 2
+    return 1 if any(_contains(v, n) for n in names) else 0
 
 
 def _label(draft: _Draft, fields) -> str:
@@ -221,31 +267,84 @@ def _label(draft: _Draft, fields) -> str:
     return " · ".join(fields[draft.parts[p]].value for p in parts if p in draft.parts and fields[draft.parts[p]].value)
 
 
-def match_page(fields, answers: dict[str, AnswerEntry]) -> PageMatch:
-    """Every field of the page matched (fields are ReadFields in page order)."""
+def _same_second(entry: AnswerEntry, values: dict[str, str]) -> int:
+    """The default tie-break: how many of degree/title and major agree as text."""
+    return sum(
+        1
+        for part, value in values.items()
+        if part in ("degree", "major", "title") and norm(value) and norm(value) in _names(entry, part)
+    )
+
+
+def _assign(drafts, fields, answers, score) -> tuple[dict[int, str], dict[int, tuple[str, ...]], set[int]]:
+    """Segments -> entries over the whole page: (assigned, ambiguous, unanchored segment numbers)."""
+    candidates: dict[int, list[tuple[int, int, str]]] = {}
+    unanchored: set[int] = set()
+    for n, draft in enumerate(drafts):
+        anchor = draft.parts.get(ANCHOR[draft.kind])
+        value = fields[anchor].value if anchor is not None else ""
+        values = {part: fields[i].value for part, i in draft.parts.items() if part != ANCHOR[draft.kind]}
+        records = [(key, e) for key, e in answers.items() if e.kind == "record" and e.category == draft.kind]
+        if is_empty(value):
+            unanchored.add(n)
+            found = [(0, score(e, values), key) for key, e in records]
+            candidates[n] = [c for c in found if c[1] >= 1]
+        else:
+            found = [(_strength(value, e, ANCHOR[draft.kind]), key, e) for key, e in records]
+            candidates[n] = [(st, score(e, values), key) for st, key, e in found if st]
+    pairs = sorted(
+        ((st, sc, n, key) for n, cands in candidates.items() for st, sc, key in cands),
+        key=lambda item: (-item[0], -item[1], item[2]),
+    )
+    assigned: dict[int, str] = {}
+    ambiguous: dict[int, tuple[str, ...]] = {}
+    for st, sc, n, key in pairs:
+        if n in assigned or n in ambiguous or key in assigned.values():
+            continue
+        rivals = [
+            k for st2, sc2, k in candidates[n] if (st2, sc2) == (st, sc) and k != key and k not in assigned.values()
+        ]
+        if rivals:
+            ambiguous[n] = tuple(sorted({key, *rivals}))
+        else:
+            assigned[n] = key
+    return assigned, ambiguous, {n for n in unanchored if n not in assigned and n not in ambiguous}
+
+
+def match_page(fields, answers: dict[str, AnswerEntry], score=None) -> PageMatch:
+    """Every field of the page matched (fields are ReadFields in page order). `score(entry, values)` counts how many
+    of a segment's fields (record field -> value, without the school or company) agree with a record entry; it breaks
+    ties between records and matches a segment whose school or company is empty. Without it, degree/title and major
+    are compared as text."""
     fields = list(fields)
+    score = score or _same_second
+    drafts = _segments(fields, answers)
+    assigned, ambiguous, unanchored = _assign(drafts, fields, answers, score)
     out: dict[str, FieldMatch] = {}
     segments: list[Segment] = []
-    used: set[str] = set()
-    for n, draft in enumerate(_segments(fields)):
-        anchor = draft.parts.get(ANCHOR[draft.kind])
-        keys = _record_for(fields[anchor].value, draft.kind, answers) if anchor is not None else ()
-        key, ambiguous = (keys[0], ()) if len(keys) == 1 else (None, keys)
-        if key in used:
-            key = None
-        if key:
-            used.add(key)
+    for n, draft in enumerate(drafts):
+        key, tied = assigned.get(n), ambiguous.get(n, ())
         segment = Segment(
-            n, draft.kind, tuple(fields[i].id for i in draft.indexes), key, ambiguous, _label(draft, fields)
+            n, draft.kind, tuple(fields[i].id for i in draft.indexes), key, tied, _label(draft, fields), n in unanchored
         )
         segments.append(segment)
         parts = {i: part for part, i in draft.parts.items()}
         for i in draft.indexes:
-            part = parts.get(i) or PART_OF[norm(fields[i].question)]
-            out[fields[i].id] = FieldMatch(key=key, ambiguous=ambiguous, part=part, segment=n, extra=segment.extra)
+            part = parts.get(i) or PART_OF[TRAILING.sub("", norm(fields[i].question))]
+            out[fields[i].id] = FieldMatch(
+                key=key,
+                ambiguous=tied,
+                part=part,
+                segment=n,
+                extra=segment.extra,
+                unanchored=segment.unanchored,
+            )
     for f in fields:
         if f.id not in out:
             out[f.id] = match_question(f.question, answers)
     kinds = {segment.kind for segment in segments}
-    missing = tuple(key for key, e in answers.items() if e.kind == "record" and e.category in kinds and key not in used)
+    present = set(assigned.values()) | {key for keys in ambiguous.values() for key in keys}
+    missing = tuple(
+        key for key, e in answers.items() if e.kind == "record" and e.category in kinds and key not in present
+    )
     return PageMatch(out, tuple(segments), missing)

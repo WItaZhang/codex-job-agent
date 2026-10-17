@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from intent_job_agent.form_fill import cli, readback
-from intent_job_agent.form_fill.models import JobReport
+from intent_job_agent.form_fill.models import AnswerEntry, JobReport
+from intent_job_agent.form_fill.redact import Redactor
 
 from .conftest import settings
 from .test_form_fill_runner import ANSWERS, CHECKLIST, RELOCATION
@@ -97,3 +98,67 @@ def test_a_job_folder_without_a_readback_is_reported_unreadable(data):
     summary = cli.run_report(RUN, data, settings())
     report = JobReport.model_validate_json((summary.parent / "lost-tab.json").read_text(encoding="utf-8"))
     assert report.conclusion == "unreadable" and report.fields == ()
+
+
+def test_a_job_folder_without_meta_json_is_still_reported(data):
+    job = data / "form-fill/runs" / RUN / "half-done"
+    job.mkdir()
+    (job / "readback.json").write_text("[]", encoding="utf-8")
+    broken = data / "form-fill/runs" / RUN / "broken"
+    broken.mkdir()
+    (broken / "meta.json").write_text("{not json", encoding="utf-8")
+    summary = cli.run_report(RUN, data, settings())
+    for name in ("half-done", "broken"):
+        report = JobReport.model_validate_json((summary.parent / f"{name}.json").read_text(encoding="utf-8"))
+        assert report.conclusion == "unreadable" and report.notes
+    assert "- 岗位 3 个" in summary.read_text(encoding="utf-8")
+
+
+def test_a_job_without_a_saved_page_has_no_page_folder(data):
+    job = data / "form-fill/runs" / RUN / "lost-tab"
+    job.mkdir()
+    (job / "meta.json").write_text(json.dumps({"job_id": "lost-tab", "status": "tab_lost"}), encoding="utf-8")
+    summary = cli.run_report(RUN, data, settings())
+    report = JobReport.model_validate_json((summary.parent / "lost-tab.json").read_text(encoding="utf-8"))
+    assert report.page_dir is None
+
+
+def test_the_answer_sheet_is_masked_like_the_saved_page(data):
+    """The synthetic applicant lives in Austin; the school's name holds the city, masked on the saved page."""
+    answers = ANSWERS.replace(
+        '    school: Example State University\n    aliases: ["ESU"]\n',
+        '    school: University of Texas at Austin\n    aliases: ["UT Austin"]\n    city: Austin\n',
+    )
+    (data / "applicant/answers.yaml").write_text(answers, encoding="utf-8")
+    rows = [
+        {
+            "id": "p1.1",
+            "question": "School",
+            "origin": "review_text",
+            "control": "review",
+            "value": "University of Texas at [city]",
+        },
+        {"id": "p1.2", "question": "City", "origin": "review_text", "control": "review", "value": "[city]"},
+        {"id": "p1.3", "question": "Degree", "origin": "review_text", "control": "review", "value": "MS"},
+    ]
+    (data / "form-fill/runs" / RUN / "acme-ml/readback.json").write_text(json.dumps(rows), encoding="utf-8")
+    summary = cli.run_report(RUN, data, settings())
+    report = JobReport.model_validate_json((summary.parent / "acme-ml.json").read_text(encoding="utf-8"))
+    assert [(r.field_id, r.key, r.result) for r in report.fields] == [
+        ("p1.1", "education.ms", "correct"),
+        ("p1.2", "education.ms", "correct"),
+        ("p1.3", "education.ms", "correct"),
+    ]
+
+
+def test_a_contact_value_too_short_to_mask_is_compared_as_text():
+    profile = {"personal": {"email": "sam.synthetic@example.test", "city": "Ely", "province_state": "TX"}}
+    redactor = Redactor.from_profile(profile)
+    entries = {
+        "contact.city": AnswerEntry(key="contact.city", from_profile="personal.city"),
+        "contact.email": AnswerEntry(key="contact.email", from_profile="personal.email"),
+        "contact.state": AnswerEntry(key="contact.state", from_profile="personal.province_state"),
+    }
+    plain = cli.plain_contacts(entries, profile, redactor)
+    assert plain["contact.city"].answer == "Ely" and plain["contact.state"].answer == "TX"
+    assert plain["contact.email"].answer is None, "masked values stay references"

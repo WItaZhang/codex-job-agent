@@ -27,6 +27,7 @@ EDUCATION_FIELDS = ("school", "degree", "major")
 EXPERIENCE_FIELDS = ("company", "title")
 KEY = re.compile(r"^([a-z_]+)\.([a-z0-9_]+)$")
 NUMBER = re.compile(r"\d")
+MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 # Scalars that YAML would turn into numbers, booleans or dates stay text as written ("3.60", "Yes", "2027-05").
 _TEXT_TAGS = {"tag:yaml.org,2002:" + name for name in ("bool", "int", "float", "timestamp")}
 
@@ -284,6 +285,9 @@ def _record(key: str, category: str, raw: dict, problems: list[str]) -> dict:
             problems.append(f"{key}: record needs {name}")
         else:
             record[name] = _string(key, name, raw[name], problems)
+    for name in ("start", "end"):
+        if isinstance(record.get(name), str) and not MONTH.match(record[name]):
+            problems.append(f"{key}: {name} must be a month like 2025-09 (other spellings go in accept)")
     if raw.get("city") is not None:
         record["city"] = _string(key, "city", raw["city"], problems)
     fields = (*own, "start", "end", "city")

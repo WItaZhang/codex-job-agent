@@ -149,3 +149,85 @@ def test_reports_carry_values_as_read(tmp_path):
     report = job_report(meta(), fields, answers)
     (row,) = report.fields
     assert (row.question, row.value, row.expected, row.result) == ("Email", "[other email]", "[email]", "wrong")
+
+
+# --- review round 1 (decision 19) -------------------------------------------------------------------------------
+
+
+def test_login_issue_is_a_login_failure_not_a_gate():
+    job = meta(status="gate", agent_result="login_issue")
+    assert conclude(job, [result()]) == ("not_filled", "login_failed")
+
+
+def test_already_applied_is_not_reported_as_maybe_submitted():
+    job = meta(agent_result="already_applied", checks={"not_submitted": False})
+    assert conclude(job, [result()]) == ("not_filled", "already_applied")
+
+
+@pytest.mark.parametrize("agent", ["expired", "already_applied", "wrong_job", "email_only"])
+def test_jobs_that_should_not_be_filled_are_not_told_to_keep_filling(tmp_path, agent):
+    answers = load(tmp_path, ERRORS["answers"])
+    report = job_report(meta(agent_result=agent), (), answers)
+    assert report.conclusion == "not_filled" and "接着填" not in report.todo[0] and "重跑" not in report.todo[0]
+
+
+def test_a_filled_job_with_nothing_read_says_so(tmp_path):
+    report = job_report(meta(), (), load(tmp_path, ERRORS["answers"]))
+    assert report.todo[0].startswith("读不出：一栏都没读到")
+
+
+def test_extra_segments_are_one_item_each_and_empty_ones_are_not_called_wrong(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    rows = [
+        ["Your title", "Intern", "review"],
+        ["Company", "Beta Inc", "review"],
+        ["Your title", "Machine Learning Engineer Intern", "review"],
+        ["Company", "Lumen Search (China) Co., Ltd.", "review"],
+        ["Your title", "Intern", "review"],
+        ["Company", "Beta Inc", "review"],
+        ["School", "", "review"],
+        ["Degree", "", "review"],
+    ]
+    todo = job_report(meta(), page(rows), answers).todo
+    deletes = [item for item in todo if "请在标签页里删掉这一段" in item]
+    assert [item.split(" ", 1)[0] for item in deletes] == ["p1.1–p1.2", "p1.5–p1.6"]
+    assert any(item.startswith("p1.7–p1.8 是空着的一段") for item in todo)
+
+
+def test_a_tied_segment_is_one_item_without_asks_advice(tmp_path):
+    twin = {k: v for k, v in ERRORS["answers"]["education.beng_nru"].items() if k not in ("accept", "otherwise")}
+    answers = load(tmp_path, {"education.a": twin, "education.b": {**twin, "start": "2019-09"}})
+    rows = [["School", "Northern River University", "review"], ["Degree", "Bachelor of Engineering", "review"]]
+    todo = job_report(meta(), page(rows), answers).todo
+    tied = [item for item in todo if "分不出" in item]
+    assert len(tied) == 1 and tied[0].startswith("p1.1–p1.2") and "asks" not in tied[0]
+
+
+def test_a_missing_option_is_listed_with_the_choices(tmp_path):
+    answers = load(tmp_path, {"work_auth.visa": {"answer": "F-1 OPT", "kind": "choice", "asks": ["visa status"]}})
+    fields = (
+        ReadField(
+            id="p1.1",
+            question="What is your visa status?",
+            value="",
+            control="select",
+            origin="control",
+            options=("H-1B", "Green card", "Citizen"),
+        ),
+    )
+    todo = "\n".join(job_report(meta(), fields, answers).todo)
+    assert "p1.1 What is your visa status?" in todo and "H-1B、Green card、Citizen" in todo and "otherwise" in todo
+
+
+def test_ambiguous_questions_count_toward_problems_seen_in_two_jobs(tmp_path):
+    answers = load(
+        tmp_path,
+        {
+            "work_auth.now": {"answer": "No", "kind": "yes_no", "asks": ["require sponsorship"]},
+            "work_auth.later": {"answer": "Yes", "kind": "yes_no", "asks": ["require sponsorship"]},
+        },
+    )
+    rows = [["Do you require sponsorship?", "No", "radio"]]
+    reports = [job_report(meta(job_id=j), page(rows), answers) for j in ("j1", "j2")]
+    repeated = summary_md("r", reports).split("## 在两个以上岗位出现的问题")[1]
+    assert "work_auth.now：j1、j2" in repeated and "work_auth.later：j1、j2" in repeated
