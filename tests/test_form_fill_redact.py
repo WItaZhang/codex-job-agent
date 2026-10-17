@@ -69,7 +69,14 @@ def test_other_emails_and_phones_are_masked_by_format(redactor):
     out = redactor.mask(text)
     assert "@" not in out
     assert "555-0199" not in out and "555-0123" not in out
-    assert out.count("[email]") == 2 and out.count("[phone]") == 2
+    assert out.count("[other email]") == 2 and out.count("[other phone]") == 2, "never the applicant's own placeholder"
+    assert "[email]" not in out and "[phone]" not in out
+
+
+def test_own_and_other_values_keep_apart(redactor):
+    out = redactor.mask("robin.synthetic@example.test or other.person@mail.example")
+    assert out == "[email] or [other email]"
+    assert redactor.mask(out) == out
 
 
 def test_masking_is_idempotent(redactor):

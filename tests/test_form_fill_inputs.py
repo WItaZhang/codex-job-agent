@@ -254,6 +254,44 @@ def test_record_errors(tmp_path, entry, expected):
     assert "education.ms" in message and expected in message
 
 
+def test_records_take_a_city_and_per_field_otherwise(tmp_path):
+    entry = {
+        "kind": "record",
+        "school": "Northern River University",
+        "degree": "Bachelor of Engineering",
+        "major": "Geographic Information System",
+        "start": "2021-09",
+        "end": "2025-06",
+        "city": "Riverton",
+        "otherwise": {"major": "Computer Science"},
+    }
+    job = {
+        "kind": "record",
+        "company": "Vista",
+        "title": "Intern",
+        "start": "2026-06",
+        "end": "2026-09",
+        "city": "San Jose",
+    }
+    loaded = answers(tmp_path, {**NAMES, "education.nru": entry, "experience.vista": job})
+    assert loaded["education.nru"].record["city"] == "Riverton"
+    assert loaded["education.nru"].record_otherwise == {"major": "Computer Science"}
+    assert loaded["experience.vista"].record["city"] == "San Jose" and loaded["experience.vista"].record_otherwise == {}
+
+
+@pytest.mark.parametrize(
+    ("otherwise", "expected"),
+    [
+        ({"title": "Engineer"}, "otherwise names 'title', which is not a field of this record"),
+        ({"major": ["Computer Science"]}, "otherwise.major must be text"),
+        ("Computer Science", "otherwise of a record must map record fields to text"),
+    ],
+)
+def test_record_otherwise_errors(tmp_path, otherwise, expected):
+    entry = {"kind": "record", "school": "NRU", "degree": "BS", "major": "GIS", "start": "2021-09", "end": "2025-06"}
+    assert expected in answers_error(tmp_path, {**NAMES, "education.nru": {**entry, "otherwise": otherwise}})
+
+
 def test_experience_record_needs_company_and_title(tmp_path):
     entry = {"kind": "record", "school": "ESU", "degree": "MS", "major": "Stats", "start": "a", "end": "b"}
     assert "an experience record needs company, title" in answers_error(tmp_path, {**NAMES, "experience.x": entry})

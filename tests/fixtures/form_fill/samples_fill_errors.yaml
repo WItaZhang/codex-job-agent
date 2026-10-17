@@ -1,0 +1,208 @@
+# SYNTHETIC: invented applicant, companies and schools. The page shapes and the mistakes copy what the user marked on
+# real tabs (decisions 15 and 16): a LinkedIn Easy Apply review step with company and city written in Chinese and two
+# experiences the answer sheet does not have (a research assistant job, a job missing from the resumes); a Workday
+# review page with a country after the city and Field of Study left on "No Response"; an Ashby single page with
+# Location empty and the "may we contact you" box unticked; contact values as the saved pages show them (masked).
+# Each page: fields in page order as [question, value, control]; ids are p1.1, p1.2 ... in that order.
+# expect: field id -> key (null when no entry applies), result, severity (none when left out).
+# missing: record entries the page should have had (it shows that kind of segment, but not this one).
+synthetic: true
+answers:
+  name.legal: {answer: Sam Synthetic, kind: text}
+  name.first: {answer: Sam, kind: text}
+  name.last: {answer: Synthetic, kind: text}
+  contact.email: {from_profile: personal.email}
+  contact.phone: {from_profile: personal.phone}
+  contact.city: {from_profile: personal.city}
+  screening.contact_consent:
+    answer: "Yes"
+    kind: yes_no
+    asks: ["contact you about job opportunities", "contact you about future opportunities"]
+  experience.vista:
+    kind: record
+    company: Vista Video Inc.
+    aliases: ["Vista"]
+    title: Software Engineer Intern
+    start: 2026-06
+    end: 2026-09
+    city: San Jose
+  experience.lumen:
+    kind: record
+    company: Lumen Search (China) Co., Ltd.
+    aliases: ["Lumen"]
+    title: Machine Learning Engineer Intern
+    start: 2024-06
+    end: 2024-08
+    city: Hangzhou
+  education.ms_esu:
+    kind: record
+    school: Example State University
+    aliases: ["ESU"]
+    degree: Master of Science
+    major: Statistics
+    start: 2025-09
+    end: 2026-12
+    city: Springfield
+    accept: {degree: ["MS", "M.S."]}
+  education.beng_nru:
+    kind: record
+    school: Northern River University
+    aliases: ["NRU"]
+    degree: Bachelor of Engineering
+    major: Geographic Information System
+    start: 2021-09
+    end: 2025-06
+    city: Riverton
+    accept: {degree: ["BS", "B.Eng."], major: ["Remote Sensing Science and Technology"]}
+    otherwise: {major: Computer Science}
+pages:
+  - name: linkedin_like_review
+    note: the review step of an Easy Apply dialog, values carried over from the site profile
+    fields:
+      - [First name, Sam, review]
+      - [Last name, Synthetic, review]
+      - [Email address, "[email]", review]
+      - [Mobile phone number, "[phone]", review]
+      - [Location (city), "[address], Texas, United States", review]
+      - [Your title, Software Engineer Intern, review]
+      - [Company, Vista Video Inc., review]
+      - [Dates of employment, 6 / 2026 - 9 / 2026, review]
+      - [City, "圣何塞, CA", review]
+      - [Description, Built a video ranking service., review]
+      - [Your title, Research Assistant, review]
+      - [Company, Example State University, review]
+      - [Dates of employment, 1 / 2025 - 12 / 2025, review]
+      - [City, N/A, review]
+      - [Description, Research in image quality assessment., review]
+      - [Your title, Machine Learning Engineer Intern, review]
+      - [Company, 鲁门（Lumen）, review]
+      - [Dates of employment, 6 / 2024 - 8 / 2024, review]
+      - [City, "杭州市, 中国", review]
+      - [Description, Built credit risk models., review]
+      - [Your title, Intern, review]
+      - [Company, Orbit Tech, review]
+      - [Dates of employment, 7 / 2023 - 8 / 2023, review]
+      - [City, N/A, review]
+      - [School, ESU, review]
+      - [City, N/A, review]
+      - [Degree, Master of Science, review]
+      - [Major / Field of study, Statistics, review]
+      - [Dates attended, 9 / 2025 - 3 / 2027, review]
+      - [School, Northern River University, review]
+      - [City, Riverton, review]
+      - [Degree, Bachelor of Engineering, review]
+      - [Major / Field of study, Remote Sensing Science and Technology, review]
+      - [Dates attended, 9 / 2021 - 6 / 2025, review]
+      - [Do you agree to allow Example Corp to contact you about job opportunities for up to 2 years?, "", checkbox]
+      - [Follow Example Corp to stay up to date with their page, "Yes", checkbox]
+    expect:
+      p1.1: {key: name.first, result: correct}
+      p1.2: {key: name.last, result: correct}
+      p1.3: {key: contact.email, result: correct}
+      p1.4: {key: contact.phone, result: correct}
+      p1.5: {key: contact.city, result: correct}
+      p1.6: {key: experience.vista, result: correct}
+      p1.7: {key: experience.vista, result: correct}
+      p1.8: {key: experience.vista, result: correct}
+      p1.9: {key: experience.vista, result: wrong, severity: fact, note: the city written in Chinese and with the state}
+      p1.10: {key: experience.vista, result: not_reviewed}
+      p1.11: {key: null, result: wrong, severity: fact, note: a research assistant job is not on the answer sheet}
+      p1.12: {key: null, result: wrong, severity: fact}
+      p1.13: {key: null, result: wrong, severity: fact}
+      p1.14: {key: null, result: no_answer}
+      p1.15: {key: null, result: wrong, severity: fact}
+      p1.16: {key: experience.lumen, result: correct}
+      p1.17: {key: experience.lumen, result: wrong, severity: fact, note: the company written in Chinese still finds its entry by the alias}
+      p1.18: {key: experience.lumen, result: correct}
+      p1.19: {key: experience.lumen, result: wrong, severity: fact}
+      p1.20: {key: experience.lumen, result: not_reviewed}
+      p1.21: {key: null, result: wrong, severity: fact, note: a job missing from the resumes is an extra segment too}
+      p1.22: {key: null, result: wrong, severity: fact}
+      p1.23: {key: null, result: wrong, severity: fact}
+      p1.24: {key: null, result: no_answer}
+      p1.25: {key: education.ms_esu, result: correct}
+      p1.26: {key: education.ms_esu, result: wrong, severity: missing, note: N/A is empty}
+      p1.27: {key: education.ms_esu, result: correct}
+      p1.28: {key: education.ms_esu, result: correct}
+      p1.29: {key: education.ms_esu, result: wrong, severity: fact, note: the end month differs}
+      p1.30: {key: education.beng_nru, result: correct}
+      p1.31: {key: education.beng_nru, result: correct}
+      p1.32: {key: education.beng_nru, result: correct}
+      p1.33: {key: education.beng_nru, result: correct}
+      p1.34: {key: education.beng_nru, result: correct}
+      p1.35: {key: screening.contact_consent, result: wrong, severity: missing}
+      p1.36: {key: null, result: not_reviewed}
+    missing: []
+  - name: workday_like_review
+    note: the Review step of a multi-step form; dates of a school are years only
+    fields:
+      - [Job Title, Machine Learning Engineer Intern, review]
+      - [Company, "Lumen Search (China) Co., Ltd.", review]
+      - [Location, "Hangzhou, China", review]
+      - [I currently work here, "No", review]
+      - [From, 06/2024, review]
+      - [To, 08/2024, review]
+      - [Role Description, "• Built credit risk models.", review]
+      - [School or University, Northern River University, review]
+      - [Degree, BS, review]
+      - [Field of Study, No Response, review]
+      - [From, "2021", review]
+      - [To (Actual or Expected), "2025", review]
+      - [School or University, Example State University, review]
+      - [Degree, MS, review]
+      - [Field of Study, Statistics, review]
+      - [From, "2025", review]
+      - [To (Actual or Expected), "2027", review]
+    expect:
+      p1.1: {key: experience.lumen, result: correct}
+      p1.2: {key: experience.lumen, result: correct}
+      p1.3: {key: experience.lumen, result: wrong, severity: format, note: the country after the city}
+      p1.4: {key: experience.lumen, result: not_reviewed}
+      p1.5: {key: experience.lumen, result: correct}
+      p1.6: {key: experience.lumen, result: correct}
+      p1.7: {key: experience.lumen, result: not_reviewed}
+      p1.8: {key: education.beng_nru, result: correct}
+      p1.9: {key: education.beng_nru, result: correct}
+      p1.10: {key: education.beng_nru, result: wrong, severity: missing, note: left on the drop-down's placeholder}
+      p1.11: {key: education.beng_nru, result: correct, note: years only on the page}
+      p1.12: {key: education.beng_nru, result: correct}
+      p1.13: {key: education.ms_esu, result: correct}
+      p1.14: {key: education.ms_esu, result: correct}
+      p1.15: {key: education.ms_esu, result: correct}
+      p1.16: {key: education.ms_esu, result: correct}
+      p1.17: {key: education.ms_esu, result: wrong, severity: fact}
+    missing: [experience.vista]
+  - name: ashby_like_single_page
+    note: one page of controls
+    fields:
+      - [Name, Sam Synthetic, text]
+      - [Email, "[email]", text]
+      - [Phone Number, "[phone]", text]
+      - [Location, "", combobox]
+      - [Are you open to relocation?, "Yes", radio]
+      - [Preferred location, Bay Area, text]
+      - [Do you agree to allow Example Corp to contact you about job opportunities for up to 2 years?, "", checkbox]
+      - [What excites you about Example Corp?, "", textarea]
+    expect:
+      p1.1: {key: name.legal, result: correct}
+      p1.2: {key: contact.email, result: correct}
+      p1.3: {key: contact.phone, result: correct}
+      p1.4: {key: contact.city, result: wrong, severity: missing}
+      p1.5: {key: null, result: not_reviewed, note: '"location" must not match "relocation"'}
+      p1.6: {key: null, result: not_reviewed, note: a preferred location is not where the applicant lives}
+      p1.7: {key: screening.contact_consent, result: wrong, severity: missing}
+      p1.8: {key: null, result: no_answer}
+    missing: []
+  - name: contact_placeholders
+    note: someone else's e-mail chosen from a drop-down, an empty e-mail, the applicant's phone with a label
+    fields:
+      - [Email, "[other email]", select]
+      - [Email address, "", text]
+      - [Phone, "[phone] (Mobile)", review]
+      - [Mobile phone number, "[other phone]", review]
+    expect:
+      p1.1: {key: contact.email, result: wrong, severity: fact}
+      p1.2: {key: contact.email, result: wrong, severity: missing}
+      p1.3: {key: contact.phone, result: correct}
+      p1.4: {key: contact.phone, result: wrong, severity: fact}
+    missing: []

@@ -1,0 +1,231 @@
+"""Form-fill matching (specs/form-fill.md 4.4, slice-1 plan section 5): which answer-sheet entry each field read back
+answers. The 29 confirmed samples, the pages of decisions 15 and 16, and the rules: asks before the built-in labels,
+the longest phrase, ties, overrides, whole words, and record segments. All data here is SYNTHETIC."""
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+from intent_job_agent.form_fill.inputs import load_answers
+from intent_job_agent.form_fill.matching import match_page, match_question
+from intent_job_agent.form_fill.models import ReadField
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "tests/fixtures/form_fill"
+PROFILE_FIELDS = {"personal.full_name", "personal.email", "personal.phone", "personal.city", "personal.address"}
+NAMES = {"name.first": {"answer": "Sam", "kind": "text"}, "name.last": {"answer": "Synthetic", "kind": "text"}}
+
+
+def fixture(name: str) -> dict:
+    data = yaml.safe_load((FIXTURES / name).read_text(encoding="utf-8"))
+    assert data["synthetic"] is True
+    return data
+
+
+def load(tmp_path: Path, entries: dict) -> dict:
+    path = tmp_path / "answers.yaml"
+    path.write_text(yaml.safe_dump({"version": 1, "entries": {**NAMES, **entries}}, allow_unicode=True), "utf-8")
+    return load_answers(path, PROFILE_FIELDS, {"relocation"})
+
+
+def page(rows) -> tuple[ReadField, ...]:
+    """[question, value, control] rows -> ReadFields p1.1, p1.2 ... ("review" rows are review-page text)."""
+    return tuple(
+        ReadField(
+            id=f"p1.{n}",
+            question=question,
+            value=value,
+            control=control,
+            origin="review_text" if control == "review" else "control",
+        )
+        for n, (question, value, control) in enumerate(rows, start=1)
+    )
+
+
+WORK_AUTH = fixture("samples_work_auth.yaml")
+PROFILE = fixture("samples_profile.yaml")
+ERRORS = fixture("samples_fill_errors.yaml")
+
+
+# --- the 29 confirmed samples -----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("case", WORK_AUTH["cases"], ids=lambda c: c["question"][:50])
+def test_work_auth_samples_map_to_their_entry(tmp_path, case):
+    answers = load(tmp_path, WORK_AUTH["answers"])
+    found = match_question(case["question"], answers)
+    assert found.key == case["entry"] and not found.ambiguous
+
+
+@pytest.mark.parametrize("case", [c for c in PROFILE["cases"] if "record" not in c], ids=lambda c: c["question"][:50])
+def test_profile_samples_map_to_their_entry(tmp_path, case):
+    answers = load(tmp_path, PROFILE["answers"])
+    assert match_question(case["question"], answers).key == case["entry"]
+
+
+RECORD_LABELS = {"school": "School", "degree": "Degree", "major": "Field of Study", "start": "From", "end": "To"}
+
+
+@pytest.mark.parametrize("case", [c for c in PROFILE["cases"] if "record" in c], ids=lambda c: c["note"][:40])
+def test_profile_record_samples_map_every_field_of_the_segment(tmp_path, case):
+    answers = load(tmp_path, PROFILE["answers"])
+    fields = page([(RECORD_LABELS[name], value, "review") for name, value in case["record"].items()])
+    found = match_page(fields, answers)
+    assert {m.key for m in found.fields.values()} == {case["entry"]}
+    assert [found.fields[f.id].part for f in fields] == list(case["record"])
+    assert found.missing == ()
+
+
+def test_the_samples_cover_29_cases():
+    assert len(WORK_AUTH["cases"]) + len(PROFILE["cases"]) == 29
+
+
+# --- pages from decisions 15 and 16 ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("sample", ERRORS["pages"], ids=lambda p: p["name"])
+def test_fill_error_pages_map_each_field(tmp_path, sample):
+    answers = load(tmp_path, ERRORS["answers"])
+    found = match_page(page(sample["fields"]), answers)
+    assert {fid: m.key for fid, m in found.fields.items()} == {fid: e["key"] for fid, e in sample["expect"].items()}
+    assert list(found.missing) == sample["missing"]
+
+
+def test_extra_segments_are_marked_and_keep_their_parts(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    sample = ERRORS["pages"][0]
+    found = match_page(page(sample["fields"]), answers)
+    extra = [fid for fid, m in found.fields.items() if m.extra]
+    assert extra == [f"p1.{n}" for n in (*range(11, 16), *range(21, 25))]
+    assert [found.fields[f"p1.{n}"].part for n in range(11, 16)] == ["title", "company", "range", "city", "other"]
+    segments = [found.fields[f"p1.{n}"].segment for n in (6, 11, 16, 21, 25, 30)]
+    assert segments == sorted(set(segments)), "six segments, in page order"
+
+
+# --- rules ------------------------------------------------------------------------------------------------------
+
+
+def test_the_longest_phrase_wins(tmp_path):
+    answers = load(
+        tmp_path,
+        {
+            "work_auth.sponsorship_now": {"answer": "No", "kind": "yes_no", "asks": ["require sponsorship"]},
+            "work_auth.sponsorship_future": {"answer": "Yes", "kind": "yes_no", "asks": ["now or in the future"]},
+        },
+    )
+    found = match_question("Will you now or in the future require sponsorship?", answers)
+    assert found.key == "work_auth.sponsorship_future"
+
+
+def test_equal_phrases_on_two_entries_are_ambiguous(tmp_path):
+    answers = load(
+        tmp_path,
+        {
+            "screening.relocate": {"answer": "Yes", "kind": "yes_no", "asks": ["relocate"]},
+            "screening.overtime": {"answer": "No", "kind": "yes_no", "asks": ["overtime"]},
+        },
+    )
+    found = match_question("Are you willing to relocate or work overtime?", answers)
+    assert found.key is None
+    assert found.ambiguous == ("screening.relocate", "screening.overtime")
+
+
+def test_overrides_win_even_with_a_shorter_phrase(tmp_path):
+    answers = load(tmp_path, WORK_AUTH["answers"])
+    question = "Will you now or in the future require sponsorship? If you are on F-1/OPT/STEM OPT, please select Yes."
+    assert match_question(question, answers).key == "work_auth.sponsorship_opt_named"
+
+
+def test_asks_come_before_the_built_in_labels(tmp_path):
+    answers = load(
+        tmp_path,
+        {
+            "contact.email": {"from_profile": "personal.email"},
+            "screening.email_updates": {"answer": "No", "kind": "yes_no", "asks": ["email"]},
+        },
+    )
+    assert match_question("Email", answers).key == "screening.email_updates"
+
+
+def test_phrases_match_whole_words_only(tmp_path):
+    answers = load(tmp_path, {"screening.location_ok": {"answer": "Yes", "kind": "yes_no", "asks": ["location"]}})
+    assert match_question("Are you open to relocation?", answers).key is None
+    assert match_question("Is the location OK for you?", answers).key == "screening.location_ok"
+
+
+@pytest.mark.parametrize(
+    ("question", "key"),
+    [
+        ("First name", "name.first"),
+        ("Legal Last Name", "name.last"),
+        ("E-mail address", "contact.mail"),
+        ("Mobile phone number (optional)", "contact.cell"),
+        ("Location", "contact.town"),
+        ("City", "contact.town"),
+        ("Current location", "contact.town"),
+        ("Preferred location", None),
+        ("What city would you like to work in?", None),
+        ("What is your first name and nickname?", None),
+    ],
+)
+def test_built_in_labels_match_the_whole_question_and_follow_from_profile(tmp_path, question, key):
+    answers = load(
+        tmp_path,
+        {
+            "contact.mail": {"from_profile": "personal.email"},
+            "contact.cell": {"from_profile": "personal.phone"},
+            "contact.town": {"from_profile": "personal.city"},
+        },
+    )
+    assert match_question(question, answers).key == key
+
+
+def test_a_segment_finds_its_record_by_an_alias_inside_the_value(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page([["Company", "鲁门（Lumen）", "review"], ["Job Title", "ML Intern", "review"]])
+    found = match_page(fields, answers)
+    assert found.fields["p1.1"].key == "experience.lumen" and not found.fields["p1.1"].extra
+
+
+def test_the_same_record_twice_makes_the_second_segment_extra(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [
+            ["School", "Northern River University", "review"],
+            ["Degree", "BS", "review"],
+            ["School", "NRU", "review"],
+            ["Degree", "BS", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert [found.fields[f"p1.{n}"].extra for n in range(1, 5)] == [False, False, True, True]
+    assert found.missing == ("education.ms_esu",)
+
+
+def test_fields_outside_segments_are_matched_as_questions(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [
+            ["City", "[address]", "text"],
+            ["School", "ESU", "review"],
+            ["City", "Springfield", "review"],
+            ["Do you agree to let us contact you about job opportunities?", "Yes", "checkbox"],
+            ["City", "[address]", "text"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert [found.fields[f"p1.{n}"].key for n in range(1, 6)] == [
+        "contact.city",
+        "education.ms_esu",
+        "education.ms_esu",
+        "screening.contact_consent",
+        "contact.city",
+    ]
+    assert found.fields["p1.3"].part == "city" and found.fields["p1.5"].part is None
+
+
+def test_a_page_without_segments_misses_no_record(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    found = match_page(page([["Email", "[email]", "text"]]), answers)
+    assert found.missing == ()
