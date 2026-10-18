@@ -13,5 +13,19 @@
       "Read(./data/local/applicant/profile.json)",
       "Read(./data/local/form-fill/runs/*/*/log.jsonl)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/code_owner.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

@@ -23,6 +23,15 @@
 每个阶段结束都要等用户确认。在用户确认切片计划之前，不写实现代码。
 不要为了让测试通过而针对特定样例写特殊逻辑。
 
+### 只有一个会话改代码
+
+- 代码只在用户指定的一个会话里改，直接改 `main`；不开 worktree，也不开功能分支。
+  其他会话（每日的 `/fetch-jobs`、`/today`、`/apply` 等，也包括 Codex）不改代码、不切分支、不提交、不改依赖；需要改代码时，告诉用户去那个会话。
+- 指定的会话记在 git 公共目录下的锁文件 `code-owner` 里，不进 git。`.claude/hooks/code_owner.py` 作为 PreToolUse hook，
+  拒绝其他 Claude Code 会话写 git 不忽略的路径、执行会改状态的 git 或 `uv add/remove/lock`；`data/local/` 等被忽略的路径照常可写。
+- 换会话由用户决定：在新会话里运行 `python3 .claude/hooks/code_owner.py claim <名字>`；`status` 查看，`release` 解除。
+  Codex 不执行这个 hook，靠这条约定约束。
+
 ## 不可违反的设计决定
 
 - **两层档案**：每日反馈只能修改意图层；背景层只能由用户的显式命令修改。背景层不参与打分。
