@@ -29,3 +29,12 @@
    - 没选的：只读"地区 - 城市"；不改预打标签。
 
 **规则写在** `spec.md` §10 第 18、19、31 条。
+
+## 决定 2（2026-10-18）：地点读法的样例 A1–A10，以及几个地方的 work_mode
+
+- 用户请 agent 先给出 10 条地点原文的预期读法，逐条核对后回复"对"。样例见 `tests/fixtures/` 里的地点读法样例（合成）。
+- 由此新定一条规则：一条地点里有几个地方、只有一部分写了 Remote 时（样例 A2："US, CA, Santa Clara; US, CA, Remote; US, NY, New York; US, WA, Seattle"），work_mode 不从地点读，交给子 agent。原来的代码只要文字里出现 Remote 就读成 remote，并且算有把握。
+- 同时确认样例 A10："San Francisco, CA - New York, NY" 算认不出。原来的代码会只读出 San Francisco，并且算有把握。
+- 核对时主目录数据库里没有一条地点写了几个地方，所以新规则只影响以后的 Workday 多地点岗位。
+
+**规则写在** `spec.md` §10 第 31 条。
