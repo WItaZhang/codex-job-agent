@@ -117,7 +117,9 @@ class CheckResult(_Model):
     candidates: tuple[str, ...] = ()  # the entries an ambiguous field matched
 
 
-Conclusion = Literal["maybe_submitted", "do_not_submit", "check_then_submit", "not_filled", "unreadable"]
+Conclusion = Literal[
+    "maybe_submitted", "not_eligible", "do_not_submit", "check_then_submit", "not_filled", "unreadable"
+]
 
 
 class JobReport(_Model):

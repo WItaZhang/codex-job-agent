@@ -467,7 +467,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 1. **对题**：把每一栏对到一条标准答案。
    - 用题目原文去匹配各条的 `asks` 和代码自带的常见写法，忽略大小写和标点。`asks` 优先于代码自带的写法。
      - `asks` 的短语要作为完整的词出现在题目里，例如 "location" 不匹配 "relocation"。
-     - 没有任何一条整词对上时，再放宽一次：短语里的词按顺序出现、中间一共最多夹 2 个词，也算对上。例如 "years of experience" 对上 "years of engineering experience"（用户 2026-10-17）。放宽只用在对题上；分段时判断一个栏名是不是题目，只看整词。
+     - 整词对不上、代码自带的常见写法也对不上时，再放宽一次：短语里的词按顺序出现、中间一共最多夹 2 个词，也算对上。例如 "years of experience" 对上 "years of engineering experience"（用户 2026-10-17）。放宽只用在对题上；分段时判断一个栏名是不是题目，只看整词。
      - 代码自带的常见写法要和题目整句一样才算，例如 First name、Email、Phone、Address、LinkedIn。它们对到 `name.*`，或者 `from_profile` 指向对应字段的 `contact.*` 条目。
      - 题目整句就是 Location、City、Current location 这类写法、又不在经历段里的，对到 `from_profile` 指向城市的那条（用户 2026-10-17）。"Preferred location" 这类问偏好地点的题不算。
    - 能匹配上几条时，取匹配到的最长短语，因为它最具体。例如 "now or in the future" 比 "require sponsorship" 更具体。

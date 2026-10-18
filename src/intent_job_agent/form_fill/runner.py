@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import get_args
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
@@ -54,6 +55,7 @@ LOG_FILE = "log.jsonl"
 META_FILE = "meta.json"
 REPORT_FILE = "feasibility.md"
 CELL_CHARS = 300
+NOTE_CHARS = 2000  # long enough for the agent's reason, such as the eligibility statement it quotes (decision 23)
 
 SHEET_RULES = """Rules for the sheet (where they differ from the APPLICANT PROFILE, SCREENING, SALARY or any other
 answering rule above, these win):
@@ -75,6 +77,9 @@ RUN_RULES = """
   line naming the site, and output RESULT:FAILED:email_verification
 - Do not try to solve a CAPTCHA: stop on that page, write a "NOTE:" line, and output RESULT:CAPTCHA
 - Single sign-on (Google, Microsoft, Apple, Okta and the like): stop and output RESULT:FAILED:sso_required
+- If the page says applicants like this one are not accepted or are rejected automatically (for example "not open
+  to current students") and the true answer would be rejected: stop on that page, write a "NOTE:" line quoting the
+  statement, and output RESULT:FAILED:not_eligible. Never give an untrue answer to get past it.
 - Never close a tab, and never use the tabs that were open before you started."""
 
 NO_LETTER = """
@@ -323,6 +328,20 @@ def _pages(targets: list[dict]) -> list[dict]:
     ]
 
 
+def personal_tabs(targets: list[dict], blocked_origins) -> list[str]:
+    """Origins of the open tabs that hold the user's own accounts: mail, banks, payments, password managers
+    (apply.blocked_origins) and school systems (.edu). Only the origin, never the path (decision 23)."""
+    blocked = {origin.rstrip("/").lower() for origin in blocked_origins}
+    found: list[str] = []
+    for tab in _pages(targets):
+        parts = urlsplit(str(tab.get("url", "")))
+        host = (parts.hostname or "").lower()
+        origin = f"{parts.scheme}://{host}"
+        if host and (origin in blocked or host.endswith(".edu")) and origin not in found:
+            found.append(origin)
+    return found
+
+
 def other_tabs(before: list[dict], after: list[dict]) -> list[str]:
     """Addresses of the tabs open before the run that are gone or now show another address (plan item 5)."""
     now = {t.get("id"): t.get("url") for t in after}
@@ -417,7 +436,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         status=status,
         page_dir=page_dir,
         fields=len(seen.fields),
-        notes=tuple(ctx.redactor.mask(note)[:500] for note in notes),
+        notes=tuple(ctx.redactor.mask(note)[:NOTE_CHARS] for note in notes),
         agent_result=agent,
         checks=checks,
     )
@@ -605,8 +624,14 @@ def new_run_id() -> str:
     return f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}"
 
 
-def begin_feasibility(ctx: RunContext, list_path: str | Path, jobs: JobList) -> Path:
-    """Create the run folder and the head of feasibility.md."""
+PERSONAL_TABS_WARNING = (
+    "投递用的 Chrome 里开着这些网站的标签页：{tabs}。填表 agent 和你共用这个 Chrome，它被要求不碰原来的标签页，"
+    "但这拦不住它读。下次开始前请先关掉；这次照常运行。"
+)
+
+
+def begin_feasibility(ctx: RunContext, list_path: str | Path, jobs: JobList, personal=()) -> Path:
+    """Create the run folder and the head of feasibility.md. `personal`: the origins of personal_tabs at the start."""
     ctx.run_dir.mkdir(parents=True, exist_ok=False)
     path = ctx.run_dir / REPORT_FILE
     head = [
@@ -615,6 +640,7 @@ def begin_feasibility(ctx: RunContext, list_path: str | Path, jobs: JobList) -> 
         f"- 清单：{Path(list_path).expanduser().resolve()}",
         f"- 开始：{_now()}",
         f"- 岗位：{len(jobs.jobs)} 个：{'、'.join(entry.id for entry in jobs.jobs)}",
+        *([f"- {PERSONAL_TABS_WARNING.format(tabs='、'.join(personal))}"] if personal else []),
         "",
         "每个岗位一节。逐栏表的最后一列请你对照标签页填：一致 / 不一致 / 漏。标签页上有、表里没有的栏，写在表下面的"
         "“漏掉的栏”里。自动检查是计划 B 第 2 节的第 1、3、4、5 项；第 2 项由你判断。本模块从不点提交。",

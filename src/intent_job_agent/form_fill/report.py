@@ -2,6 +2,7 @@
 user has to do, the per-job JSON and the run's summary.md.
 
 Conclusions, first match wins: maybe_submitted (check 4 failed, or the last page says the application was received);
+not_eligible (the page says applicants like this one are rejected, and the filling agent stopped: decision 23);
 not_filled (a gate, or the filling agent stopped before the final page: needs_answer, stuck, page_error ...);
 unreadable (the tab was lost, the read failed, or nothing was read); do_not_submit (a wrong fact or an unfounded
 guess); check_then_submit (everything else: slice 1 has no reviewer, so code never says a form is fine as it is).
@@ -17,6 +18,7 @@ from .runner import GATE_REASONS
 
 CONCLUSIONS = {
     "maybe_submitted": "可能已提交",
+    "not_eligible": "不符合申请资格",
     "do_not_submit": "不能提交",
     "check_then_submit": "检查后可提交",
     "not_filled": "没填完",
@@ -62,6 +64,8 @@ def conclude(meta: dict, results) -> tuple[str, str | None]:
     status, agent = meta.get("status") or "filled", meta.get("agent_result")
     if page.get("received") or (checks.get("not_submitted") is False and agent != "already_applied"):
         return "maybe_submitted", None
+    if agent == "not_eligible":
+        return "not_eligible", None
     if agent in AGENT_REASONS or agent in REASONS:
         return "not_filled", AGENT_REASONS.get(agent, agent)
     if status == "gate" or agent in GATE_REASONS:
@@ -87,6 +91,11 @@ def _headline(meta: dict, conclusion: str, reason: str | None, results) -> str:
         said = (meta.get("page") or {}).get("received")
         why = f"最后一页写着「{said}」" if said else "第 4 项（没有提交）没通过"
         return f"可能已提交：{why}。请先打开标签页确认，再决定怎么办。"
+    if conclusion == "not_eligible":
+        return (
+            "不符合申请资格：页面写明不收这类申请人，如实作答会被系统自动拒（填表 agent 的结果：not_eligible），"
+            "原文见下面的备注。这个岗位不用再填，投不投由你决定。"
+        )
     if conclusion == "not_filled":
         agent = meta.get("agent_result") or meta.get("status")
         advice = ADVICE.get(reason or "", "请在标签页里看一眼，再决定接着填还是说“重跑 {job}”。").format(job=job)
@@ -100,6 +109,8 @@ def _headline(meta: dict, conclusion: str, reason: str | None, results) -> str:
         facts = sum(1 for r in results if r.severity == "fact" and not _per_segment(r))
         facts += len({r.segment for r in results if r.severity == "fact" and _per_segment(r)})
         return f"不能提交：{facts} 个错的事实、{_count(results, 'guess')} 个无依据的猜测。下面这些改好之前不要提交。"
+    if not any(r.field_id and r.result == "correct" for r in results):
+        return "检查后可提交：没有查到错的事实，但没有一栏由代码核对为对，请逐栏看一遍标签页再提交。"
     return "检查后可提交：没有查到错的事实。请按下面几条看一遍标签页再提交。"
 
 
@@ -136,8 +147,11 @@ def _segment_items(results) -> list[str]:
 
 
 def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tuple[str, ...]:
-    """The headline, then one item per problem, worst first; fields nobody checked are listed together."""
+    """The headline, then one item per problem, worst first; fields nobody checked are listed together. A job the
+    applicant is not eligible for gets the headline alone: there is nothing to fill in (decision 23)."""
     items = [_headline(meta, conclusion, reason, results)]
+    if conclusion == "not_eligible":
+        return tuple(items)
     groups: dict[str, list[str]] = defaultdict(list)
     for r in results:
         where = f"{r.field_id} {r.question}" if r.field_id else r.question
@@ -205,7 +219,7 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
 def job_report(meta: dict, fields, answers, contacts: bool = True) -> JobReport:
     """One job's report from its meta.json and the fields read back from its last page. `contacts=False` for a page
     saved before redact.VERSION (see compare.check_page)."""
-    results = check_page(fields, answers, contacts=contacts) if fields else ()
+    results = check_page(fields, answers, contacts=contacts, company=meta.get("company", "")) if fields else ()
     conclusion, reason = conclude(meta, results)
     return JobReport(
         job_id=meta.get("job_id", ""),
@@ -272,7 +286,7 @@ def summary_md(run_id: str, reports) -> str:
             lines += [f"{n}) {item}" for n, item in enumerate(report.todo[1:], start=1)]
             lines.append("")
     seen: dict[str, list[str]] = defaultdict(list)
-    for report in reports:
+    for report in (r for r in reports if r.conclusion != "not_eligible"):  # nothing was filled there on purpose
         for key in sorted(_problems(report)):
             seen[key].append(report.job_id)
     repeated = [f"- {key}：{'、'.join(jobs)}" for key, jobs in seen.items() if len(jobs) >= 2]

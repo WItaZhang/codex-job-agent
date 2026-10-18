@@ -244,7 +244,7 @@ def test_a_saved_page_drops_page_chrome_but_keeps_its_numbers(data):
     """Decision 23: step bars and empty widget text saved before the rule are left out when the run is checked
     again; the other fields keep the numbers the saved page and its screenshot use."""
     chrome = [
-        {"id": "p1.4", "question": "completed step 1 of 6", "origin": "review_text", "control": "review", "value": "Me"},
+        {"id": "p1.4", "question": "step 1 of 6", "origin": "review_text", "control": "review", "value": "Me"},
         {"id": "p1.5", "question": "items selected", "origin": "control", "control": "select", "value": ""},
     ]
     readback_file = data / "form-fill/runs" / RUN / "acme-ml/readback.json"

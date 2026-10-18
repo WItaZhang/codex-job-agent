@@ -93,6 +93,32 @@ def _same(value: str, candidates) -> bool:
     return any(v == norm(c) and marks == MARK.findall(c) for c in candidates if c is not None and norm(c))
 
 
+TRAILING_BRACKET = re.compile(r"\s*\([^()]*\)\s*$")
+SITE_WORDS = {"careers": "career", "jobs": "job", "website": "site", "page": "site", "portal": "site"}
+
+
+def _site_form(text: str, company: str) -> str:
+    """A "how did you hear" option in one spelling: the job's company name as "company", "corporate" and "company's"
+    as "company", careers/career, and website, site, page and portal as one word (decision 23)."""
+    t = f" {norm(text)} "
+    if norm(company):
+        t = t.replace(f" {norm(company)} ", " company ")
+    t = t.replace(" web site ", " site ").replace(" corporate ", " company ").replace(" company s ", " company ")
+    return " ".join(SITE_WORDS.get(word, word) for word in t.split())
+
+
+def _same_meaning(value: str, candidates, company: str = "") -> bool:
+    """Equal as written; or without a trailing bracket ("I prefer not to disclose (United States of America)"); or,
+    for a site, the same once the job's company name is read as "company" (decision 23)."""
+    if _same(value, candidates):
+        return True
+    core = TRAILING_BRACKET.sub("", value or "")
+    if core != (value or "") and norm(core) and _same(core, candidates):
+        return True
+    form = _site_form(value, company)
+    return "site" in form.split() and any(c and form == _site_form(c, company) for c in candidates)
+
+
 def _missing(expected: str | None, note: str = "空着") -> Verdict:
     return Verdict("wrong", "missing", expected, note)
 
@@ -254,12 +280,13 @@ def _choices(options) -> str:
     return "、".join(o for o in options[:10] if not is_empty(o))
 
 
-def _text(entry: AnswerEntry, value: str, options) -> Verdict:
-    """text and choice: the answer or an accepted spelling; `otherwise` only when the page lacks the answer."""
+def _text(entry: AnswerEntry, value: str, options, company: str = "") -> Verdict:
+    """text and choice: the answer or an accepted spelling (or one meaning the same, see _same_meaning); `otherwise`
+    only when the page lacks the answer."""
     answers = (entry.answer, *entry.accept)
-    if _same(value, answers):
+    if _same_meaning(value, answers, company):
         return Verdict("correct")
-    offered = any(_same(option, answers) for option in options) if options else None
+    offered = any(_same_meaning(option, answers, company) for option in options) if options else None
     if entry.otherwise and _same(value, [entry.otherwise]):
         if offered:
             return Verdict("wrong", "fact", entry.answer, "页面上有标准答案的选项，不该选 otherwise")
@@ -354,8 +381,9 @@ def _number_min(entry: AnswerEntry, value: str) -> Verdict:
     return Verdict("correct") if ok else Verdict("wrong", "fact", f"不低于 {entry.answer}")
 
 
-def compare_value(entry: AnswerEntry, value: str, *, options=(), control: str = "text") -> Verdict:
-    """One field outside a segment against its entry."""
+def compare_value(entry: AnswerEntry, value: str, *, options=(), control: str = "text", company: str = "") -> Verdict:
+    """One field outside a segment against its entry. `company` is the job's company, for "<company> Careers
+    Website" (decision 23)."""
     value = str(value or "")
     if entry.category == "contact":
         return _contact(entry, value)
@@ -380,7 +408,7 @@ def compare_value(entry: AnswerEntry, value: str, *, options=(), control: str = 
             return _missing(entry.answer)
         ok = _url(value) in {_url(a) for a in (entry.answer, *entry.accept) if a}
         return Verdict("correct") if ok else Verdict("wrong", "fact", entry.answer)
-    return _text(entry, value, tuple(options))
+    return _text(entry, value, tuple(options), company)
 
 
 # --- record segments --------------------------------------------------------------------------------------------
@@ -497,9 +525,12 @@ def _shown(value: str, entry: AnswerEntry | None, ambiguous) -> str:
     return "".join(kept)
 
 
-def check_page(fields, answers: dict[str, AnswerEntry], contacts: bool = True) -> tuple[CheckResult, ...]:
+def check_page(
+    fields, answers: dict[str, AnswerEntry], contacts: bool = True, company: str = ""
+) -> tuple[CheckResult, ...]:
     """Every field of the page checked, in page order, then one result per record segment the page lacks.
-    `contacts=False` for a page saved before redact.VERSION: its contact fields are not reviewed (decision 20)."""
+    `contacts=False` for a page saved before redact.VERSION: its contact fields are not reviewed (decision 20).
+    `company` is the job's company (decision 23)."""
     fields = list(fields)
     found = match_page(fields, answers, score=segment_score)
     labels = {segment.index: segment.label for segment in found.segments}
@@ -555,7 +586,7 @@ def check_page(fields, answers: dict[str, AnswerEntry], contacts: bool = True) -
             if verdict == Verdict("no_answer") and f.required:
                 verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY + _choices_note(f.options))
         elif entry is not None:
-            verdict = compare_value(entry, f.value, options=f.options, control=f.control)
+            verdict = compare_value(entry, f.value, options=f.options, control=f.control, company=company)
         elif is_empty(f.value) and f.required:
             verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY + _choices_note(f.options))
         elif is_empty(f.value):
