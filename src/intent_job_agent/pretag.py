@@ -45,6 +45,9 @@ _SENIORITY = [
     (re.compile(r"\b(junior|jr\.?)\b"), "junior"),
     (re.compile(r"\b(new grad|new graduate|entry[- ]level|early career)\b"), "new_grad"),
 ]
+# No stated level: "Manager" means senior, except in PM titles where it names the role (spec §10 item 31).
+_PM_TITLE = re.compile(r"\b(product marketing|product|program|project) manager\b")
+_MANAGER = re.compile(r"\bmanager\b")
 _INTERN = re.compile(r"\b(intern|internship|co-op)\b")
 _TITLE_DIMENSIONS = ("role", "specialty", "domain", "tech_stack")
 
@@ -139,11 +142,12 @@ def pretag(job: Job, vocab: Vocabulary) -> Pretag:
     if employment:
         tags.add(f"employment_type.{employment}")
         confident.add("employment_type")
-    for pattern, level in _SENIORITY:
-        if pattern.search(title):
-            tags.add(f"seniority.{level}")
-            confident.add("seniority")
-            break
+    level = next((level for pattern, level in _SENIORITY if pattern.search(title)), None)
+    if level is None and _MANAGER.search(_PM_TITLE.sub(" ", title)):
+        level = "senior"
+    if level:
+        tags.add(f"seniority.{level}")
+        confident.add("seniority")
 
     tags |= _title_suggestions(job.title, vocab)
     canonical = []

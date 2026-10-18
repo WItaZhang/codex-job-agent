@@ -70,6 +70,30 @@ def test_title_aliases_suggest_keys_without_confidence():
     assert "role" not in result.confident  # suggestions for ranking, never for exclusion
 
 
+@pytest.mark.parametrize(
+    ("title", "level"),
+    [
+        ("Manager, Data Science and Machine Learning (Risk and Fraud)", "senior"),
+        ("Engineering Manager, ML", "senior"),
+        ("Manager, Product Management", "senior"),  # manages PMs; not a PM title
+        ("Senior Product Manager", "senior"),  # from "Senior", not from "Manager"
+        ("Area Manager - New Grad", "new_grad"),  # a stated level beats "Manager"
+        ("Product Manager", None),
+        ("Technical Product Manager - Core Models", None),
+        ("Product Manager (New Grad)", "new_grad"),
+        ("Technical Program Manager, AI Infrastructure", None),
+        ("Project Manager, Data Platform", None),
+        ("Technical Product Marketing Manager", None),
+        ("Data Management Engineer", None),
+        ("Machine Learning Engineer", None),
+    ],
+)
+def test_manager_in_the_title_means_senior_except_for_pm_titles(title, level):
+    result = pretag(job(title), VOCAB)
+    assert {t for t in result.tags if t.startswith("seniority.")} == ({f"seniority.{level}"} if level else set())
+    assert ("seniority" in result.confident) == (level is not None)
+
+
 # --- toolbox: funnel, budget, rules and status ------------------------------------------------------
 
 
@@ -108,6 +132,19 @@ def test_jobs_violating_confident_hard_constraints_are_held_back(box):
     assert listed["prefiltered"] == 2
     ok = next(j for j in listed["jobs"] if j["job_id"] == "ok")
     assert "location.us.austin" in ok["suggested_tags"] and "location" in ok["confident_dimensions"]
+
+
+def test_manager_titles_are_held_back_when_senior_is_excluded(box):
+    add_jobs(
+        box,
+        [
+            {"id": "em", "title": "Engineering Manager, ML", "location": "Austin, TX"},
+            {"id": "pm", "title": "Product Manager, ML Platform", "location": "Austin, TX"},
+        ],
+    )
+    listed = box.list_untagged_jobs(limit=10)  # BASE_INTENT excludes seniority.senior
+    assert [j["job_id"] for j in listed["jobs"]] == ["pm"]
+    assert listed["prefiltered"] == 1
 
 
 def test_held_back_jobs_return_when_the_intent_changes(box):
@@ -157,6 +194,12 @@ def test_tagging_rules_cover_every_dimension(box):
     assert set(rules["dimensions"]) == set(rules["per_dimension"])
     assert "untrusted" in rules["general"].lower() or "instructions" in rules["general"].lower()
     assert rules["known_keys"]["work_mode"] == ["hybrid", "onsite", "remote"]
+
+
+def test_seniority_rule_tells_the_tagger_about_manager_titles(box):
+    rule = box.get_tagging_rules()["per_dimension"]["seniority"]
+    for phrase in ("Manager", "Product Manager", "Program Manager", "Project Manager", "Product Marketing Manager"):
+        assert phrase in rule
 
 
 def test_fetch_status_reports_the_day(box):
