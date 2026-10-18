@@ -13,6 +13,7 @@ import datetime
 import re
 from typing import NamedTuple
 
+from ..duplicates import COMPANY_WORDS
 from .matching import is_empty, match_page, norm
 from .models import AnswerEntry, CheckResult
 from .redact import FIELD_PLACEHOLDER, PLACEHOLDER
@@ -93,27 +94,44 @@ def _same(value: str, candidates) -> bool:
     return any(v == norm(c) and marks == MARK.findall(c) for c in candidates if c is not None and norm(c))
 
 
-TRAILING_BRACKET = re.compile(r"\s*\([^()]*\)\s*$")
-SITE_WORDS = {"careers": "career", "jobs": "job", "website": "site", "page": "site", "portal": "site"}
+TRAILING_BRACKET = re.compile(r"\s*\(([^()]*)\)\s*$")
+SITE_WORDS = {"website": "site", "page": "site", "portal": "site"}
+SITE_DROPPED = frozenset({"career", "careers", "job", "jobs"})
+
+
+def _without_place(text: str) -> str:
+    """The text without a trailing bracket that names a place ("No (United States of America)"); other brackets
+    stay, since they tell options apart ("Master's Degree (in progress)")."""
+    m = TRAILING_BRACKET.search(text)
+    return text[: m.start()] if m and _place_key(m[1]) else text
+
+
+def _company_names(company: str) -> list[str]:
+    """The job's company name without legal words (inc, llc ...), then ever shorter from the end: "Perplexity AI",
+    "Perplexity"."""
+    words = [w for w in norm(company).split() if w not in COMPANY_WORDS]
+    return [" ".join(words[:n]) for n in range(len(words), 0, -1)]
 
 
 def _site_form(text: str, company: str) -> str:
-    """A "how did you hear" option in one spelling: the job's company name as "company", "corporate" and "company's"
-    as "company", careers/career, and website, site, page and portal as one word (decision 23)."""
-    t = f" {norm(text)} "
-    if norm(company):
-        t = t.replace(f" {norm(company)} ", " company ")
+    """A "how did you hear" option in one spelling (decision 23): any trailing bracket left out; the job's company
+    name, "corporate" and "company's" as "company"; careers and jobs left out; website, page and portal as "site"."""
+    t = f" {norm(TRAILING_BRACKET.sub('', text or ''))} "
+    name = next((n for n in _company_names(company) if f" {n} " in t), None)
+    if name:
+        t = t.replace(f" {name} ", " company ", 1)
     t = t.replace(" web site ", " site ").replace(" corporate ", " company ").replace(" company s ", " company ")
-    return " ".join(SITE_WORDS.get(word, word) for word in t.split())
+    return " ".join(SITE_WORDS.get(word, word) for word in t.split() if word not in SITE_DROPPED)
 
 
 def _same_meaning(value: str, candidates, company: str = "") -> bool:
-    """Equal as written; or without a trailing bracket ("I prefer not to disclose (United States of America)"); or,
-    for a site, the same once the job's company name is read as "company" (decision 23)."""
+    """Equal as written; or without a trailing place in brackets ("I prefer not to disclose (United States of
+    America)"); or, for a site, the same once the job's company name is read as "company" (decision 23)."""
+    value = value or ""
     if _same(value, candidates):
         return True
-    core = TRAILING_BRACKET.sub("", value or "")
-    if core != (value or "") and norm(core) and _same(core, candidates):
+    core = _without_place(value)
+    if core != value and norm(core) and _same(core, candidates):
         return True
     form = _site_form(value, company)
     return "site" in form.split() and any(c and form == _site_form(c, company) for c in candidates)
@@ -287,7 +305,7 @@ def _text(entry: AnswerEntry, value: str, options, company: str = "") -> Verdict
     if _same_meaning(value, answers, company):
         return Verdict("correct")
     offered = any(_same_meaning(option, answers, company) for option in options) if options else None
-    if entry.otherwise and _same(value, [entry.otherwise]):
+    if entry.otherwise and _same_meaning(value, [entry.otherwise], company):
         if offered:
             return Verdict("wrong", "fact", entry.answer, "页面上有标准答案的选项，不该选 otherwise")
         return Verdict("correct", note="看不到选项，按 otherwise 算对" if offered is None else "页面上没有答案的选项")

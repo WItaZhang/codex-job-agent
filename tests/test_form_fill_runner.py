@@ -141,6 +141,11 @@ class FakeBrowser:
     def targets(self) -> list[dict]:
         return [dict(tab) for tab in self.tabs]
 
+    running = True  # whether the applying Chrome already runs when a run starts (open_tabs never starts it)
+
+    def open_tabs(self) -> list[dict] | None:
+        return self.targets() if self.running else None
+
     def fill(self, spec, **options):
         if self.release is not None:
             assert self.release.wait(5)
@@ -712,8 +717,26 @@ def test_no_personal_tabs_no_warning(ff):
 def test_personal_tabs_rule():
     tabs = [
         {"type": "page", "url": "https://www.chase.com/personal"},
+        {"type": "page", "url": "https://secure05a.chase.com/web/auth"},  # a subdomain of a listed site
         {"type": "page", "url": "https://jobs.example.test/apply"},
         {"type": "service_worker", "url": "https://mail.google.com/sw.js"},
         {"type": "page", "url": "chrome://newtab/"},
+        {"type": "page", "url": "https://my.synthetic.edu.cn/student"},  # an "edu" label, not only a .edu ending
+        {"type": "page", "url": "https://www.education.example.test/"},  # "education" is not an edu label
+        {"type": "page", "url": "https://careers.synthetic.edu/jobs/42/apply"},  # a job on the list
     ]
-    assert runner.personal_tabs(tabs, ["https://www.chase.com", "https://mail.google.com"]) == ["https://www.chase.com"]
+    found = runner.personal_tabs(
+        tabs, ["https://www.chase.com", "https://mail.google.com"], skip=["https://careers.synthetic.edu/jobs/42"]
+    )
+    assert found == ["https://www.chase.com", "https://secure05a.chase.com", "https://my.synthetic.edu.cn"]
+
+
+def test_a_chrome_not_running_yet_is_not_started_for_the_tab_check(ff):
+    box, path = ff
+    fake = FakeBrowser()
+    fake.running = False
+    box.form_fill_runner = fake
+    result = box.start_form_fill(path)
+    assert result["personal_tabs"] == [] and "没能检查" in result["warning"]
+    assert box.form_fill_status()["personal_tabs_checked"] is False and len(fake.calls) == 2
+    assert "没能检查" in (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")

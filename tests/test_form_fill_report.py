@@ -315,6 +315,8 @@ def test_a_filled_no_option_field_is_not_called_empty(tmp_path):
 
 def test_not_eligible_comes_right_after_maybe_submitted():
     assert conclude(meta(agent_result="not_eligible"), [result("missing")]) == ("not_eligible", None)
+    # the result ApplyPilot's own prompt offers for a work-authorization bar means the same here
+    assert conclude(meta(agent_result="not_eligible_work_auth"), [result("missing")]) == ("not_eligible", None)
     received = meta(agent_result="not_eligible", page={"actions": [], "received": "Thank you for applying!"})
     assert conclude(received, [])[0] == "maybe_submitted"
 

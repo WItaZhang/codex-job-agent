@@ -792,6 +792,51 @@ def test_the_company_careers_site_counts_as_the_company_website(tmp_path):
     assert (row.key, row.result) == ("screening.how_heard", "correct")
 
 
+@pytest.mark.parametrize(
+    ("company", "value"),
+    [
+        ("Acme Synthetic, Inc.", "Acme Synthetic Careers Website"),  # legal words left out of the name
+        ("Acme Synthetic AI", "Acme Synthetic Careers Page"),  # a shorter name from the end
+        ("Acme Synthetic", "Acme Synthetic Careers Website (Workday)"),  # a bracket after the site
+    ],
+)
+def test_company_name_variants_still_count_as_the_company_website(tmp_path, company, value):
+    answers = load(tmp_path, {"screening.how_heard": {"answer": "Company website", "kind": "choice", "asks": ["how"]}})
+    row = by_id(check_page([field("How did you hear about this job?", value, "select")], answers, company=company))
+    assert row["p1.1"].result == "correct"
+
+
+def test_a_bracket_that_tells_options_apart_is_kept(tmp_path):
+    """Review round (decision 23): only a trailing place in brackets is left out, so "(in progress)" and
+    "(completed)" stay different, and picking `otherwise` is still right when the plain answer is not offered."""
+    answers = load(
+        tmp_path,
+        {"education.level": {"answer": "Master's Degree", "kind": "choice", "otherwise": "Other", "asks": ["level"]}},
+    )
+    options = ("Master's Degree (in progress)", "Master's Degree (completed)", "Other")
+    picked = by_id(check_page([field("Education level", options[0], "select", options)], answers))["p1.1"]
+    assert picked.result != "correct"
+    other = by_id(check_page([field("Education level", "Other", "select", options)], answers))["p1.1"]
+    assert other.result == "correct"
+
+
+def test_otherwise_with_a_trailing_place_counts(tmp_path):
+    answers = load(
+        tmp_path,
+        {
+            "eeo.hispanic_latino": {
+                "answer": "Decline to self-identify",
+                "kind": "choice",
+                "otherwise": "No",
+                "asks": ["hispanic"],
+            }
+        },
+    )
+    options = ("Yes (United States of America)", "No (United States of America)")
+    row = by_id(check_page([field("Are you Hispanic or Latino?", options[1], "select", options)], answers))["p1.1"]
+    assert row.result == "correct"
+
+
 @pytest.mark.parametrize("value", ["LinkedIn Careers Page", "Beta Health Careers Website"])
 def test_another_sites_careers_page_is_not_the_company_website(tmp_path, value):
     answers = load(tmp_path, HOW_HEARD)

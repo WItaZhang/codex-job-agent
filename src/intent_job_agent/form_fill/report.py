@@ -55,6 +55,8 @@ ADVICE = {  # what the user does next, by why the form was not filled (spec 5.5)
     "email_only": "这个岗位只收邮件投递。备注里的邮箱地址已经打码，请到岗位页面上看。",
 }
 UNREADABLE = ("tab_lost", "readback_failed", "system_error")
+# RUN_RULES' result, and the one ApplyPilot's own prompt offers for a work-authorization bar (decision 23)
+NOT_ELIGIBLE = ("not_eligible", "not_eligible_work_auth")
 SEVERITIES = {"fact": "错的事实", "guess": "无依据的猜测", "missing": "缺漏", "format": "格式与写法"}
 
 
@@ -64,7 +66,7 @@ def conclude(meta: dict, results) -> tuple[str, str | None]:
     status, agent = meta.get("status") or "filled", meta.get("agent_result")
     if page.get("received") or (checks.get("not_submitted") is False and agent != "already_applied"):
         return "maybe_submitted", None
-    if agent == "not_eligible":
+    if agent in NOT_ELIGIBLE:
         return "not_eligible", None
     if agent in AGENT_REASONS or agent in REASONS:
         return "not_filled", AGENT_REASONS.get(agent, agent)

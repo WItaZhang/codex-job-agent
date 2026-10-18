@@ -35,10 +35,13 @@ def _contains(text: str, phrase: str) -> bool:
 
 
 LOOSE_GAP = 2  # words a loosely matched phrase may have inside it, in all
+NEGATIONS = frozenset({"not", "no", "never", "non", "nor", "without", "cannot", "t"})  # "don't" normalizes to "don t"
 
 
 def _contains_loosely(text: str, phrase: str) -> bool:
-    """The phrase's words in order, with at most LOOSE_GAP other words between them in all; two words or more."""
+    """The phrase's words in order, with at most LOOSE_GAP other words between them in all; two words or more. A
+    negation inside never counts as a filler: "currently not require sponsorship" is not "currently require
+    sponsorship"."""
     words, want = text.split(), phrase.split()
     if len(want) < 2:
         return False
@@ -46,6 +49,9 @@ def _contains_loosely(text: str, phrase: str) -> bool:
         at, gap = start + 1, 0
         for word in want[1:]:
             while at < len(words) and words[at] != word and gap <= LOOSE_GAP:
+                if words[at] in NEGATIONS:
+                    gap = LOOSE_GAP + 1
+                    break
                 at, gap = at + 1, gap + 1
             if at >= len(words) or gap > LOOSE_GAP:
                 break

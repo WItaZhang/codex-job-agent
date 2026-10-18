@@ -505,6 +505,14 @@ def test_a_loose_match_never_beats_an_exact_one(tmp_path):
     assert match_question("How many years of ML engineering experience?", answers).key == "screening.ml_years"
 
 
+def test_a_negation_inside_is_never_a_filler(tmp_path):
+    answers = load(
+        tmp_path, {"work_auth.now": {"answer": "No", "kind": "yes_no", "asks": ["currently require sponsorship"]}}
+    )
+    assert match_question("Do you currently not require any sponsorship?", answers).key is None
+    assert match_question("Do you currently don't require sponsorship?", answers).key is None
+
+
 def test_a_loose_match_comes_after_the_built_in_labels(tmp_path):
     answers = load(tmp_path, {"contact.email": {"from_profile": "personal.email"}, **YEARS})
     assert match_question("Email", answers).key == "contact.email"

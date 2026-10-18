@@ -328,16 +328,21 @@ def _pages(targets: list[dict]) -> list[dict]:
     ]
 
 
-def personal_tabs(targets: list[dict], blocked_origins) -> list[str]:
-    """Origins of the open tabs that hold the user's own accounts: mail, banks, payments, password managers
-    (apply.blocked_origins) and school systems (.edu). Only the origin, never the path (decision 23)."""
-    blocked = {origin.rstrip("/").lower() for origin in blocked_origins}
+def personal_tabs(targets: list[dict], blocked_origins, skip=()) -> list[str]:
+    """Origins of the open tabs that hold the user's own accounts (decision 23): the sites of apply.blocked_origins
+    and their subdomains (mail, banks, payments, password managers), and school systems (an "edu" label: .edu,
+    .edu.cn). Tabs on the sites of the job list's addresses (`skip`) are left out. Only the origin, never the path."""
+    blocked = {(urlsplit(origin).hostname or "").lower().removeprefix("www.") for origin in blocked_origins}
+    skipped = {(urlsplit(url).hostname or "").lower() for url in skip}
     found: list[str] = []
     for tab in _pages(targets):
         parts = urlsplit(str(tab.get("url", "")))
         host = (parts.hostname or "").lower()
+        if not host or host in skipped:
+            continue
+        listed = any(site and (host == site or host.endswith("." + site)) for site in blocked)
         origin = f"{parts.scheme}://{host}"
-        if host and (origin in blocked or host.endswith(".edu")) and origin not in found:
+        if (listed or "edu" in host.split(".")) and origin not in found:
             found.append(origin)
     return found
 
@@ -628,10 +633,12 @@ PERSONAL_TABS_WARNING = (
     "投递用的 Chrome 里开着这些网站的标签页：{tabs}。填表 agent 和你共用这个 Chrome，它被要求不碰原来的标签页，"
     "但这拦不住它读。下次开始前请先关掉；这次照常运行。"
 )
+PERSONAL_TABS_UNCHECKED = "投递用的 Chrome 开始前还没开或连不上，没能检查里面有没有邮箱、银行、学校系统这类标签页。"
 
 
-def begin_feasibility(ctx: RunContext, list_path: str | Path, jobs: JobList, personal=()) -> Path:
-    """Create the run folder and the head of feasibility.md. `personal`: the origins of personal_tabs at the start."""
+def begin_feasibility(ctx: RunContext, list_path: str | Path, jobs: JobList, personal=(), checked=True) -> Path:
+    """Create the run folder and the head of feasibility.md. `personal`: the origins of personal_tabs at the start;
+    `checked`: whether the tabs could be listed then."""
     ctx.run_dir.mkdir(parents=True, exist_ok=False)
     path = ctx.run_dir / REPORT_FILE
     head = [
@@ -641,6 +648,7 @@ def begin_feasibility(ctx: RunContext, list_path: str | Path, jobs: JobList, per
         f"- 开始：{_now()}",
         f"- 岗位：{len(jobs.jobs)} 个：{'、'.join(entry.id for entry in jobs.jobs)}",
         *([f"- {PERSONAL_TABS_WARNING.format(tabs='、'.join(personal))}"] if personal else []),
+        *([] if checked else [f"- {PERSONAL_TABS_UNCHECKED}"]),
         "",
         "每个岗位一节。逐栏表的最后一列请你对照标签页填：一致 / 不一致 / 漏。标签页上有、表里没有的栏，写在表下面的"
         "“漏掉的栏”里。自动检查是计划 B 第 2 节的第 1、3、4、5 项；第 2 项由你判断。本模块从不点提交。",
@@ -679,7 +687,7 @@ def _dump(obj) -> str:
 
 class FormFillRunner:
     """The applying Chrome (shared with /apply), one Claude Code run per job, and the CDP read of the job's tab.
-    Tests pass a stand-in with the same four methods instead."""
+    Tests pass a stand-in with the same five methods instead."""
 
     def __init__(self, data_dir: Path, settings: Settings, profile: Path, read_dirs=()):
         self.data_dir, self.settings, self.profile = Path(data_dir).resolve(), settings, Path(profile).resolve()
@@ -694,6 +702,14 @@ class FormFillRunner:
 
     def targets(self) -> list[dict]:
         return readback.list_targets(self._port())
+
+    def open_tabs(self) -> list[dict] | None:
+        """The applying Chrome's tabs when it already runs, None when it does not. It never starts Chrome: the tool
+        server answers one call at a time, and a cold start copies the profile."""
+        from ..vendor.applypilot.apply import chrome
+
+        port = chrome.BASE_CDP_PORT  # worker 0, as ensure_chrome uses
+        return readback.list_targets(port) if apply_bridge.cdp_alive(port) else None
 
     def fill(self, spec: apply_bridge.ApplySpec, **options) -> apply_bridge.ApplyOutcome:
         return apply_bridge.run_application(
