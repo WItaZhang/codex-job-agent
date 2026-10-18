@@ -408,3 +408,30 @@ def test_real_answers_are_not_placeholders(value):
     from intent_job_agent.form_fill.matching import is_empty
 
     assert not is_empty(value)
+
+
+# --- review round 3 (decision 21) -------------------------------------------------------------------------------
+
+
+def test_dates_listed_before_the_company_join_that_companys_segment(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [
+            ["From", "06/2026", "review"],
+            ["To", "09/2026", "review"],
+            ["Employer Name", "Vista Video Inc.", "review"],
+            ["Job Title", "Software Engineer Intern", "review"],
+            ["From", "06/2024", "review"],
+            ["To", "08/2024", "review"],
+            ["Employer Name", "Lumen Search (China) Co., Ltd.", "review"],
+            ["Job Title", "Machine Learning Engineer Intern", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert [found.fields[f"p1.{n}"].key for n in range(1, 9)] == ["experience.vista"] * 4 + ["experience.lumen"] * 4
+
+
+def test_a_city_alone_before_a_school_stays_a_question(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    found = match_page(page([["City", "[city]", "text"], ["School", "ESU", "review"]]), answers)
+    assert found.fields["p1.1"].key == "contact.city" and found.fields["p1.1"].segment is None

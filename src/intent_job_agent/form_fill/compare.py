@@ -56,7 +56,6 @@ DATE_FORMATS = (
 )
 ONGOING = frozenset({"present", "current", "now", "ongoing"})
 NUMBER = re.compile(r"(?<![\d.,])(\d[\d,]*(?:\.\d+)?)(?![\d,]|\.\d)(?:\s*(k)(?=usd\b|[^a-z]|$))?", re.I)
-NUMBER_RANGE = re.compile(r"\d\s*k?\s*(?:[-–—~]|to|and)\s*\$?\s*\d", re.I)  # "$80k-$100k", "80k and 100k"
 RANGE_SEPARATOR = re.compile(r"\s+(?:-|–|—|to|until|through)\s+|\s*[–—]\s*", re.I)
 NAV_NOTE = "页面上的步骤导航，不是填写项"
 OLD_PAGE = "这一页是按旧的打码格式存的，分不出是不是你自己的联系方式；重新读这一页才能核对"
@@ -76,6 +75,9 @@ US_STATES = {
     "va": "virginia", "wa": "washington", "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming",
 }  # fmt: skip
 UNITED_STATES = frozenset({"united states", "united states of america", "usa", "us", "u s", "u s a", "america"})
+PLACE_PHRASE = re.compile(  # whole state names and US spellings, longest first, in normalized text
+    r"\b(?:" + "|".join(sorted({*US_STATES.values(), *UNITED_STATES}, key=len, reverse=True)) + r")\b"
+)
 
 
 class Verdict(NamedTuple):
@@ -133,6 +135,16 @@ def _numbers(text: str) -> list[float]:
     return [float(n.replace(",", "")) * (1000 if k else 1) for n, k in NUMBER.findall(str(text or ""))]
 
 
+def _is_range(text: str) -> bool:
+    """Two numbers joined by a dash, "~", "to" or "and", with currency and per-year words around them allowed."""
+    found = list(NUMBER.finditer(str(text or "")))
+    if len(found) < 2:
+        return False
+    between = text[found[0].end() : found[1].start()]
+    between = re.sub(r"(?i)\b(usd|dollars?|per (year|annum)|a year|annually)\b|/\s*(yr|year|y)\b|\$", " ", between)
+    return bool(re.fullmatch(r"(?i)\s*k?\s*(?:[-–—~]|to|and)\s*", between))
+
+
 def _url(text: str) -> str:
     t = re.sub(r"^[a-z][a-z0-9+.-]*://", "", str(text or "").strip().lower())
     return re.sub(r"^www\.", "", t).rstrip("/")
@@ -187,21 +199,30 @@ def _contact(entry: AnswerEntry, value: str) -> Verdict:
     if field == "address":  # the street, with the applicant's own city, state, postal code and country around it
         if not (own & set(marks) and set(marks) <= own | ADDRESS_MARKS):
             return Verdict("wrong", "fact", mark)
-        rest = [w for w in norm(MARK.sub(" ", value)).split() if not _place_key(w)]
-        rest = [w for w in rest if w not in ("united", "states", "of", "america")]
+        rest = [w for w in PLACE_PHRASE.sub(" ", norm(MARK.sub(" ", value))).split() if not _place_key(w)]
         if not rest:
             return Verdict("correct")
         if all(w in APARTMENT or w.isdigit() and len(w) <= 4 for w in rest):
             return Verdict("not_reviewed", note="住址里多了门牌、楼层这类内容，代码判断不了")
         return Verdict("wrong", "fact", mark, "住址里有不是你自己的城市或邮编")
-    if field == "city":  # the city first; a state or country after a comma is fine
-        head = value.split(",", 1)[0].strip()
-        ok = head in own and set(marks) <= own
+    if field == "city":  # the city first; the applicant's own state or country after a comma is fine
+        head, _, tail = value.partition(",")
+        if not (head.strip() in own and set(marks) <= own):
+            return Verdict("wrong", "fact", mark)
+        places = {_place_key(p) for p in entry.aliases} - {None}  # the applicant's state and country (cli)
+        named = {_place_key(p) for p in re.split(r"[,(]", MARK.sub(" ", tail))} - {None}
+        if places and named - places:
+            return Verdict("wrong", "fact", mark, "城市名对，但州或国家不是你的")
+        return Verdict("correct")
     else:  # the value itself, with at most a label in brackets: "[phone] (Mobile)"
         found = [m for m in marks if m in own]
         rest = re.sub(r"\([^()]*\)", " ", value.replace(found[0], " ", 1)) if found else value
         ok = len(marks) == 1 and bool(found) and not re.search(r"\w", rest)
     return Verdict("correct") if ok else Verdict("wrong", "fact", mark)
+
+
+def _choices(options) -> str:
+    return "、".join(o for o in options[:10] if not is_empty(o))
 
 
 def _text(entry: AnswerEntry, value: str, options) -> Verdict:
@@ -233,26 +254,37 @@ def _yes_or_no(text: str) -> str | None:
 
 
 def _yes_no(entry: AnswerEntry, value: str, control: str, options=()) -> Verdict:
+    """Yes/No questions. A lone box (no options, or one such as "I agree") says No unticked and Yes ticked; a group of
+    boxes or radios is read by the chosen option's text. `otherwise` counts only when the page lacks the answer."""
     answer = norm(entry.answer)
+    shown = [o for o in options if not is_empty(o)]
     if _same(value, entry.accept):
         return Verdict("correct")
-    if control == "checkbox":  # a box: unticked says No, ticked says Yes, whatever its label
+    if control == "checkbox" and len(shown) <= 1:  # a lone box: unticked says No, ticked says Yes, whatever its label
         said = "yes" if not is_empty(value) else "no"
         if said == answer:
             return Verdict("correct")
         return _missing(entry.answer, "没勾") if said == "no" else Verdict("wrong", "fact", entry.answer, "勾上了")
+    offered = [o for o in shown if _yes_or_no(o) == answer or _same(o, entry.accept)]
     if entry.otherwise and _same(value, [entry.otherwise]):
+        if offered:
+            return Verdict("wrong", "fact", entry.answer, "页面上有标准答案的选项，不该选 otherwise")
         return Verdict("correct", note="按 otherwise")
-    readable = [o for o in options if not is_empty(o) and (_yes_or_no(o) or _same(o, entry.accept))]
-    if options and not readable:  # the page offers no Yes/No and no accepted spelling
-        shown = "、".join(o for o in options[:10] if not is_empty(o))
-        note = f"页面上没有标准答案的选项（可选的有：{shown}），也没写 otherwise"
-        return Verdict("no_answer", note=note)
+    readable = [o for o in shown if _yes_or_no(o) or _same(o, entry.accept)]
+    if shown and not readable:  # the page offers no Yes/No and no accepted spelling
+        if is_empty(value):
+            return Verdict(
+                "no_answer", note=f"页面上没有标准答案的选项（可选的有：{_choices(shown)}），也没写 otherwise"
+            )
+        note = f"页面上没有标准答案的选项（可选的有：{_choices(shown)}），填表 agent 却选了一项"
+        return Verdict("no_answer", "guess", None, note)
     if is_empty(value):  # before the first word: "No Response" is not a No
         return _missing(entry.answer)
     said = _yes_or_no(value)
     if said:
         return Verdict("correct") if said == answer else Verdict("wrong", "fact", entry.answer)
+    if offered:  # the page offers the answer, and something else was chosen
+        return Verdict("wrong", "fact", entry.answer)
     return Verdict("no_answer", note="选项不以 Yes 或 No 开头，也不在 accept 里")
 
 
@@ -282,7 +314,7 @@ def _number_min(entry: AnswerEntry, value: str) -> Verdict:
     got = _numbers(value)
     if not got:
         return Verdict("not_reviewed", note="读不出数字")
-    if len(got) >= 2 and NUMBER_RANGE.search(value):
+    if len(got) >= 2 and _is_range(value):
         low, high = got[0], got[1]
         ok = low <= floor <= high or low >= floor
     else:
@@ -374,6 +406,13 @@ def compare_part(entry: AnswerEntry, part: str, value: str, *, options=()) -> Ve
         if options and any(_same(option, names) for option in options):
             return Verdict("wrong", "fact", expected, "页面上有原值的选项，不该选 otherwise")
         return Verdict("correct", note="按 otherwise")
+    if options and not otherwise and not any(_same(option, names) for option in options):
+        if is_empty(value):
+            return Verdict(
+                "no_answer", note=f"页面上没有标准答案的选项（可选的有：{_choices(options)}），也没写 otherwise"
+            )
+        note = f"页面上没有标准答案的选项（可选的有：{_choices(options)}），填表 agent 却选了一项"
+        return Verdict("no_answer", "guess", None, note)
     if is_empty(value):
         return _missing(expected)
     if part in ("start", "end"):
@@ -408,9 +447,16 @@ def _shown(value: str, entry: AnswerEntry | None, ambiguous) -> str:
     contact = (entry is not None and entry.category == "contact" and entry.answer is None) or any(
         key.startswith("contact.") for key in ambiguous
     )
-    if not contact or is_empty(value) or MARK.search(value):
+    if not contact or is_empty(value):
         return value
-    return HIDDEN
+    pieces = re.split(r"(\[[^\[\]]+\])", value)
+    kept = [
+        piece
+        if MARK.fullmatch(piece) or not re.search(r"\w", piece) or not PLACE_PHRASE.sub(" ", norm(piece)).strip()
+        else HIDDEN
+        for piece in pieces
+    ]
+    return "".join(kept)
 
 
 def check_page(fields, answers: dict[str, AnswerEntry], contacts: bool = True) -> tuple[CheckResult, ...]:
@@ -471,7 +517,8 @@ def check_page(fields, answers: dict[str, AnswerEntry], contacts: bool = True) -
         elif entry is not None:
             verdict = compare_value(entry, f.value, options=f.options, control=f.control)
         elif is_empty(f.value) and f.required:
-            verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY)
+            choices = f"（可选的有：{_choices(f.options)}）" if _choices(f.options) else ""
+            verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY + choices)
         elif is_empty(f.value):
             verdict = Verdict("no_answer")
         elif f.control == "file":

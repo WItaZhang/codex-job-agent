@@ -11,7 +11,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from .compare import EMPTY_BLOCK, EXTRA, NAV_NOTE, REQUIRED_EMPTY, check_page, is_empty
+from .compare import EMPTY_BLOCK, EXTRA, NAV_NOTE, OLD_PAGE, REQUIRED_EMPTY, check_page, is_empty
 from .models import JobReport
 from .runner import GATE_REASONS
 
@@ -147,8 +147,8 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
             groups["fact"].append(f"{where}：现在是「{r.value}」，应为「{r.expected}」（{r.key}）。请在标签页里改。")
         elif r.severity == "guess":
             groups["guess"].append(f"{where}：{r.note}「{r.value}」。请确认，或补标准答案（{r.key}）。")
-        elif r.note == REQUIRED_EMPTY:
-            groups["required"].append(f"{r.field_id} {r.question[:60]}")
+        elif r.note.startswith(REQUIRED_EMPTY):
+            groups["required"].append(f"{r.field_id} {r.question}{r.note.removeprefix(REQUIRED_EMPTY)}")
         elif r.severity == "missing" and r.field_id and r.expected:
             groups["missing"].append(f"{where}：{r.note or '空着'}，应为「{r.expected}」（{r.key}）。")
         elif r.severity == "missing" and r.field_id:
@@ -160,11 +160,14 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
         elif r.result == "ambiguous":
             groups["ambiguous"].append(f"{where}：{r.note}，代码没判。请在其中一条的 asks 里补能区分的短语。")
         elif r.result == "no_answer" and r.key and r.note.startswith("页面上没有标准答案的选项"):
+            state = "，空着" if is_empty(r.value) else f"，现在是「{r.value}」"
             groups["no_option"].append(
-                f"{where}：{r.note}，空着。请补这一条（{r.key}）的 otherwise，或在标签页里自己选。"
+                f"{where}：{r.note}{state}。请补这一条（{r.key}）的 otherwise，或在标签页里自己选。"
             )
         elif r.result == "no_answer" and r.key and not is_empty(r.value):
             groups["spelling"].append(f"{where}：「{r.value}」对不上 {r.key} 的写法。{r.note}，请补 accept。")
+        elif r.result == "not_reviewed" and r.note == OLD_PAGE:
+            groups["old_page"].append(f"{r.field_id} {r.question[:60]}「{r.value[:40]}」")
         elif r.result == "not_reviewed":
             groups["not_reviewed"].append(f"{r.field_id} {r.question[:60]}「{r.value[:40]}」")
         elif r.result == "no_answer" and r.note != NAV_NOTE and r.key is None and r.field_id:
@@ -178,6 +181,11 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
         )
     items += groups["format"] + groups["ambiguous"]
     items += groups["no_option"] + groups["spelling"]
+    if groups["old_page"]:
+        items.append(
+            f"联系方式 {len(groups['old_page'])} 栏没有核对：{OLD_PAGE}。请在标签页里看一眼："
+            + "；".join(groups["old_page"])
+        )
     if groups["not_reviewed"]:
         items.append(
             f"未审查 {len(groups['not_reviewed'])} 栏（代码判断不了，请在标签页里看一眼）："

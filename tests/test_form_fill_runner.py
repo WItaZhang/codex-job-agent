@@ -642,3 +642,23 @@ def test_the_agent_result_is_masked_too(ff):
     assert "sam.synthetic" not in first["agent_result"] and "[email]" in first["agent_result"]
     meta = (run_dir(box, result) / "acme-ml-01" / "meta.json").read_text(encoding="utf-8")
     assert "sam.synthetic" not in meta
+
+
+def test_input_errors_are_masked(tmp_path):
+    """An answers.yaml error may quote a contact value (decision 21)."""
+    from .test_slice6 import write_applicant as write
+
+    data = tmp_path / "data"
+    write(data, relocation=RELOCATION)
+    (data / "applicant/answers.yaml").write_text(ANSWERS + '  contact.mobile:\n    from_profile: "555-0100"\n', "utf-8")
+    (data / "applicant/checklist.yaml").write_text(CHECKLIST, encoding="utf-8")
+    listing = tmp_path / "list.yaml"
+    listing.write_text(
+        "jobs:\n  - {id: a, url: https://example.test/a, company: A, title: T, resume: ml, cover_letter: none}\n"
+    )
+    from intent_job_agent import applicant as applicant_files
+
+    applicant = applicant_files.load(data, settings().apply.applicant_dir)
+    with pytest.raises(InvariantError) as error:
+        runner.load_inputs(listing, applicant, settings())
+    assert "555-0100" not in str(error.value) and "[phone]" in str(error.value)

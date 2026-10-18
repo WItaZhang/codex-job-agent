@@ -228,12 +228,20 @@ def _fits(draft: _Draft, part: str | None) -> bool:
     return part not in draft.parts or part == "other"
 
 
+LEADING = ("start", "end", "range", "other")  # parts that may open a segment ahead of its school or company
+
+
 def _segments(fields, answers) -> list[_Draft]:
+    """Segments in page order. Dates or a description ahead of the school or company (a layout listing the dates
+    first) are held and join the segment that the next school or company opens; a City alone is never held, so it
+    stays a question (the contact city)."""
     parts = [part_of(f.question, answers) for f in fields]
     drafts: list[_Draft] = []
     current: _Draft | None = None
+    held: list[tuple[int, str]] = []
     for i, part in enumerate(parts):
         if part is None:  # one unrelated field inside a segment does not end it
+            held = []
             if current is not None and not _fits(current, parts[i + 1] if i + 1 < len(parts) else None):
                 current = None
             continue
@@ -241,10 +249,16 @@ def _segments(fields, answers) -> list[_Draft]:
             if current is None or not _fits(current, part):
                 current = _Draft(KIND_OF_PART[part])
                 drafts.append(current)
-        elif current is None:
-            continue
-        elif not _fits(current, part):
+                for j, early in held:
+                    current.parts.setdefault(early, j)
+                    current.indexes.append(j)
+            held = []
+        elif current is None or not _fits(current, part):
             current = None
+            if part in LEADING and part not in {p for _, p in held}:
+                held.append((i, part))
+            else:
+                held = []
             continue
         current.parts.setdefault(part, i)
         current.indexes.append(i)

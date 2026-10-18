@@ -586,3 +586,95 @@ def test_contact_fields_on_an_old_page_are_not_reviewed(tmp_path):
     assert got["p1.2"].result == "correct"
     (empty,) = check_page(page([("Location", "", "combobox")]), answers, contacts=False)
     assert (empty.key, empty.result, empty.severity) == ("contact.city", "wrong", "missing")
+
+
+# --- review round 3 (decision 21) -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("answer", "value", "want"),
+    [
+        ("Yes", "No", ("wrong", "fact")),
+        ("No", "No", ("correct", "none")),
+        ("No", "", ("wrong", "missing")),
+        ("Yes", "Yes", ("correct", "none")),
+    ],
+)
+def test_a_yes_no_checkbox_group_is_read_by_the_ticked_label(tmp_path, answer, value, want):
+    entry = load(tmp_path, {"work_auth.x": {"answer": answer, "kind": "yes_no"}})["work_auth.x"]
+    v = compare_value(entry, value, options=("Yes", "No"), control="checkbox")
+    assert (v.result, v.severity) == want
+
+
+def test_a_yes_no_otherwise_is_wrong_when_the_page_offers_the_answer(tmp_path):
+    entry = load(tmp_path, {"eeo.x": {"answer": "No", "kind": "yes_no", "otherwise": "I don't wish to answer"}})[
+        "eeo.x"
+    ]
+    options = ("Yes, I have a disability", "No, I do not have a disability", "I don't wish to answer")
+    v = compare_value(entry, "I don't wish to answer", options=options, control="radio")
+    assert (v.result, v.severity) == ("wrong", "fact")
+
+
+def test_a_yes_no_filled_when_no_option_is_readable_is_a_guess(tmp_path):
+    entry = load(tmp_path, {"work_auth.x": {"answer": "No", "kind": "yes_no"}})["work_auth.x"]
+    options = ("I will require sponsorship now or in the future", "I will not require sponsorship")
+    v = compare_value(entry, options[0], options=options, control="select")
+    assert (v.result, v.severity) == ("no_answer", "guess")
+
+
+def test_a_third_option_on_a_yes_no_page_is_wrong(tmp_path):
+    entry = load(tmp_path, {"screening.us_person": {"answer": "No", "kind": "yes_no"}})["screening.us_person"]
+    v = compare_value(entry, "Prefer not to answer", options=("Yes", "No", "Prefer not to answer"), control="radio")
+    assert (v.result, v.severity) == ("wrong", "fact")
+
+
+def test_a_record_part_whose_value_the_page_does_not_offer(sheet):
+    options = ("Bachelor's Degree", "Master's Degree", "Doctor of Philosophy (Ph.D.)")
+    v = compare_part(sheet["education.ms_esu"], "degree", "Master's Degree", options=options)
+    assert (v.result, v.severity) == ("no_answer", "guess") and "Master's Degree" in v.note
+    assert compare_part(sheet["education.ms_esu"], "degree", "", options=options).result == "no_answer"
+
+
+def test_the_city_must_be_in_the_applicants_own_state(tmp_path):
+    entry = address_sheet(tmp_path)["contact.city"].model_copy(update={"aliases": ("ME", "United States")})
+    assert compare_value(entry, "[city], Maine, United States").result == "correct"
+    assert compare_value(entry, "[city], Oregon, United States").result == "wrong"
+    assert compare_value(entry, "[city], OR").result == "wrong"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "[address], [city], New York [postal_code]",
+        "[address], [city], North Carolina [postal_code], United States",
+        "[address], [city], TX [postal_code], U.S.",
+    ],
+)
+def test_multi_word_states_and_us_spellings_in_an_address(tmp_path, value):
+    assert compare_value(address_sheet(tmp_path)["contact.address"], value).result == "correct"
+
+
+def test_a_contact_fields_unmasked_rest_is_hidden(tmp_path):
+    answers = load(tmp_path, {**ERRORS["answers"], "contact.address": {"from_profile": "personal.address"}})
+    (r,) = check_page(page([("Address", "742 Evergreen Terrace, Unit 3, [city], CA [postal_code]", "text")]), answers)
+    assert "Evergreen" not in r.value and "[city]" in r.value and "[其他值，已隐去]" in r.value
+
+
+@pytest.mark.parametrize("value", ["USD 75,000 - USD 100,000", "75,000 USD - 100,000 USD", "$75,000/yr - $100,000/yr"])
+def test_salary_ranges_with_currency_words(sheet, value):
+    entry = sheet["compensation.expected"].model_copy(update={"answer": "80000"})
+    assert compare_value(entry, value).result == "correct"
+
+
+def test_a_required_empty_field_lists_its_choices(tmp_path):
+    f = ReadField(
+        id="p1.1",
+        question="Have you previously been employed by Acme Corporation or any subsidiary?",
+        value="",
+        control="radio",
+        origin="control",
+        options=("Yes", "No", "Unsure"),
+        required=True,
+    )
+    (r,) = check_page([f], load(tmp_path, {}))
+    assert "Yes、No、Unsure" in r.note

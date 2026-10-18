@@ -197,7 +197,8 @@ def load_inputs(list_path: str | Path, applicant: Applicant, settings: Settings)
         except InvariantError as error:
             problems.append(str(error))
     if problems:
-        raise InvariantError("The form-fill run was not started:\n" + "\n".join(problems))
+        message = "The form-fill run was not started:\n" + "\n".join(problems)
+        raise InvariantError(redactor.mask(message) if redactor else message)  # an error may quote a contact value
     return Inputs(jobs, answers, checklist, redactor)
 
 

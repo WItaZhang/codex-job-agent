@@ -280,3 +280,31 @@ def test_required_empty_fields_get_their_own_item(tmp_path):
     )
     todo = job_report(meta(), (f,), load(tmp_path, {})).todo
     assert any(item.startswith("必填、空着") and "p1.1" in item for item in todo)
+
+
+# --- review round 3 (decision 21) -------------------------------------------------------------------------------
+
+
+def test_old_page_contacts_get_their_own_item(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    report = job_report(
+        meta(), page([("Email", "[email]", "text"), ("First name", "Sam", "text")]), answers, contacts=False
+    )
+    item = next(i for i in report.todo if i.startswith("联系方式 1 栏没有核对"))
+    assert "旧的打码格式" in item and "p1.1" in item
+
+
+def test_a_filled_no_option_field_is_not_called_empty(tmp_path):
+    answers = load(tmp_path, {"work_auth.x": {"answer": "No", "kind": "yes_no", "asks": ["require sponsorship"]}})
+    options = ("I will require sponsorship", "I will not require sponsorship")
+    f = ReadField(
+        id="p1.1",
+        question="Will you require sponsorship?",
+        value=options[0],
+        control="select",
+        origin="control",
+        options=options,
+    )
+    report = job_report(meta(), (f,), answers)
+    assert report.conclusion == "do_not_submit"
+    assert "空着" not in "".join(report.todo[1:]) and "选了一项「I will require sponsorship」" in "".join(report.todo)

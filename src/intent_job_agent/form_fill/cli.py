@@ -50,9 +50,15 @@ def plain_contacts(answers: dict[str, AnswerEntry], profile: dict, redactor: Red
         if mark is None or masked == value:
             out[key] = entry.model_copy(update={"answer": masked, "kind": "text"})
         else:
+            update = {}
             shared = tuple(m for m in MARK.findall(masked) if m != mark)
             if shared and masked.strip() in shared:
-                out[key] = entry.model_copy(update={"accept": shared})
+                update["accept"] = shared
+            if entry.from_profile == "personal.city":  # a city is right only in the applicant's own state or country
+                places = (runner._profile_value(profile, f"personal.{f}") for f in ("province_state", "country"))
+                update["aliases"] = tuple(p.strip() for p in places if p and p.strip())
+            if update:
+                out[key] = out[key].model_copy(update=update)
     return out
 
 
