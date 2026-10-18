@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Single-writer lock: while a lock exists, only the session named in it may change code.
+"""One code lock per checkout: only the session that claimed a checkout may change code in it.
 
-Hook mode (no arguments, PreToolUse JSON on stdin): refuses, for every other session, file edits that
-land on paths git does not ignore, git commands that move branches, commits, the index or the working
-tree, `uv add/remove/lock`, and shell writes (redirects, tee, rm/mv/cp/touch, sed -i) onto such paths.
-Ignored paths (data/local/, logs/, .venv/ ...) stay writable for the daily sessions.
+Hook mode (no arguments, PreToolUse JSON on stdin): refuses file edits that land on paths git does not
+ignore, git commands that move branches, commits, the index or the working tree, `uv add/remove/lock`, and
+shell writes (redirects, tee, rm/mv/cp/touch, sed -i) onto such paths, unless this session holds the lock
+of the checkout the change lands in. A checkout nobody has claimed takes no code changes at all. Commands
+that change what every checkout shares (push, branch, tag, worktree) and writes inside .git count as
+changes to the main checkout. Ignored paths (data/local/, logs/, .venv/ ...) stay writable for the daily
+sessions.
 
-The lock lives in the git common dir, so it covers every worktree and is never committed.
+Each lock lives in its checkout's own git dir (.git for the main checkout, .git/worktrees/<name> for a
+worktree), so every worktree is claimed on its own and no lock is ever committed.
 
-  python3 .claude/hooks/code_owner.py claim [label]   make this session the owner
-  python3 .claude/hooks/code_owner.py status
-  python3 .claude/hooks/code_owner.py release
+  python3 .claude/hooks/code_owner.py claim [label]   make this session the owner of the current checkout
+  python3 .claude/hooks/code_owner.py status          every checkout, its branch and who owns it
+  python3 .claude/hooks/code_owner.py release         free the current checkout (then nobody may change it)
 """
 
 import json
@@ -28,6 +32,7 @@ GIT_ALWAYS = {
     "rebase", "reset", "restore", "revert", "rm", "switch",
 }
 GIT_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+SHARED_GIT = {"push", "branch", "tag", "worktree"}  # shared by every checkout: counts as the main one
 UV_WRITES = {"add", "remove", "lock"}
 WRITE_ALL_ARGS = {"rm", "touch", "truncate", "tee", "mv"}
 WRITE_LAST_ARG = {"cp", "install", "ln"}
@@ -47,12 +52,32 @@ def session_id(hook_input=None):
     )
 
 
-def common_dir(cwd):
-    out = subprocess.run(
-        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd=cwd, capture_output=True, text=True,
-    )
-    return Path(out.stdout.strip()).resolve() if out.returncode == 0 else None
+def git_paths(directory):
+    """(top level, git dir, common dir) of the checkout containing `directory`; None outside any work tree."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
+            cwd=directory, capture_output=True, text=True,
+        )
+    except OSError:
+        return None
+    lines = out.stdout.splitlines()
+    if out.returncode != 0 or len(lines) != 3:
+        return None
+    return tuple(Path(line).resolve() for line in lines)
+
+
+def where_name(git_dir, common):
+    return "主目录" if git_dir == common else f"worktree {git_dir.name}"
+
+
+def checkouts(common):
+    """(git dir, work tree) of the main checkout and of every worktree."""
+    yield common, common.parent
+    for git_dir in sorted((common / "worktrees").glob("*")):
+        pointer = git_dir / "gitdir"
+        if pointer.is_file():
+            yield git_dir, Path(pointer.read_text(encoding="utf-8").strip()).parent
 
 
 def read_lock(git_dir):
@@ -71,19 +96,24 @@ def _inside(path, root):
         return False
 
 
-def is_code(raw, cwd, git_dir):
-    """True when `raw` resolves inside this repository (any worktree) to a path git does not ignore."""
+def code_checkout(raw, cwd, common):
+    """Git dir of the checkout whose lock governs writing `raw`, when `raw` is code of this repository.
+
+    Code is a path git does not ignore, in the main checkout or in any worktree; anything inside .git
+    belongs to the main checkout. Paths outside this repository, and ignored paths, give None.
+    """
     path = Path(os.path.expanduser(raw))
     path = (path if path.is_absolute() else Path(cwd) / path).resolve()
-    if _inside(path, git_dir):
-        return True
-    if not _inside(path, git_dir.parent):
-        return False
-    probe = path.parent
+    if _inside(path, common):
+        return common
+    probe = path if path.is_dir() else path.parent
     while not probe.is_dir():
         probe = probe.parent
+    found = git_paths(probe)
+    if not found or found[2] != common:
+        return None
     ignored = subprocess.run(["git", "check-ignore", "-q", str(path)], cwd=probe, capture_output=True)
-    return ignored.returncode != 0
+    return found[1] if ignored.returncode != 0 else None
 
 
 def _tokens(command):
@@ -158,6 +188,24 @@ def git_change(args):
     return None
 
 
+def git_directory(prefix, args, cwd):
+    """Directory a git command runs in, after its -C options.
+
+    None when GIT_DIR / GIT_WORK_TREE or --git-dir / --work-tree send git somewhere this hook does not follow.
+    """
+    if any(word.split("=", 1)[0] in ("GIT_DIR", "GIT_WORK_TREE") for word in prefix):
+        return None
+    i, where = 0, Path(cwd)
+    while i < len(args) and args[i].startswith("-"):
+        flag = args[i]
+        if flag.split("=", 1)[0] in ("--git-dir", "--work-tree"):
+            return None
+        if flag == "-C" and i + 1 < len(args):
+            where = (where / os.path.expanduser(args[i + 1])).resolve()
+        i += 2 if flag in GIT_GLOBAL_WITH_VALUE else 1
+    return where
+
+
 def _command_start(seg):
     """Index of the command word, past variable assignments and wrappers such as env or xargs."""
     i = 0
@@ -174,17 +222,18 @@ def _command_start(seg):
     return i
 
 
-def bash_change(command, cwd, git_dir):
-    """A short description of the first code change `command` would make, else None."""
+def bash_changes(command, cwd, common):
+    """Code changes `command` would make, as (short description, git dir of the checkout it lands in)."""
     for seg in segments(command):
         words, targets = [], []
         for j, token in enumerate(seg):
             if token in REDIRECTS:
                 continue
             (targets if j and seg[j - 1] in REDIRECTS else words).append(token)
-        hit = next((t for t in targets if is_code(t, cwd, git_dir)), None)
-        if hit:
-            return f"写入 {hit}"
+        for target in targets:
+            git_dir = code_checkout(target, cwd, common)
+            if git_dir:
+                yield f"写入 {target}", git_dir
         start = _command_start(words)
         if start >= len(words):
             continue
@@ -194,10 +243,18 @@ def bash_change(command, cwd, git_dir):
             cwd = str((Path(cwd) / os.path.expanduser(args[0] if args else "~")).resolve())
         elif name == "git":
             sub = git_change(rest)
-            if sub:
-                return f"git {sub}"
+            if not sub:
+                continue
+            where = git_directory(words[:start], rest, cwd)
+            found = git_paths(where) if where and where.is_dir() else None
+            if where is None:
+                yield f"git {sub}", common
+            elif found and found[2] == common:
+                yield f"git {sub}", common if sub.split()[0] in SHARED_GIT else found[1]
         elif name == "uv" and rest and rest[0] in UV_WRITES:
-            return f"uv {rest[0]}"
+            found = git_paths(cwd)
+            if found and found[2] == common:
+                yield f"uv {rest[0]}", found[1]
         elif name in WRITE_ALL_ARGS or name in WRITE_LAST_ARG or name in IN_PLACE:
             if name in IN_PLACE:
                 if not any(a.startswith(("-i", "-pi")) or a == "--in-place" for a in rest):
@@ -205,46 +262,86 @@ def bash_change(command, cwd, git_dir):
                 args = [a for a in args if (Path(cwd) / os.path.expanduser(a)).is_file()]
             elif name in WRITE_LAST_ARG:
                 args = args[-1:]
-            hit = next((a for a in args if is_code(a, cwd, git_dir)), None)
-            if hit:
-                return f"{name} {hit}"
-    return None
+            for arg in args:
+                git_dir = code_checkout(arg, cwd, common)
+                if git_dir:
+                    yield f"{name} {arg}", git_dir
+
+
+def refusal(change, git_dir, common, lock):
+    where = where_name(git_dir, common)
+    shared = "push、branch、tag、worktree 命令和 .git 里的写入都算主目录的改动。" if git_dir == common else ""
+    if lock and lock["session"]:
+        owner = lock["label"] or lock["session"]
+        return (
+            f"已拒绝（{change}）：{where}的代码只能在会话「{owner}」里改。{shared}"
+            "本会话不改那里的代码、不在那里切分支或提交；需要改时，告诉用户到那个会话去做。"
+            "不要自己改锁或绕过这条限制；换会话由用户决定。"
+        )
+    if git_dir == common:
+        return (
+            f"已拒绝（{change}）：主目录没有持锁会话，这里不改代码。{shared}"
+            "开发在 worktree 会话里做（会话里先运行 python3 .claude/hooks/code_owner.py claim <名字>）；"
+            "合并回 main 由用户在主目录的会话里输入 /merge 完成。"
+            "不要自己 claim 主目录或绕过这条限制。"
+        )
+    return (
+        f"已拒绝（{change}）：{where}还没有持锁会话。"
+        "如果用户让本会话在这个 worktree 里开发，先在这里运行 python3 .claude/hooks/code_owner.py claim <名字>；"
+        "否则不要改这里的代码。"
+    )
 
 
 def hook():
     data = json.load(sys.stdin)
     cwd = data.get("cwd") or os.getcwd()
-    git_dir = common_dir(cwd)
-    lock = read_lock(git_dir) if git_dir else None
-    if not lock or not lock["session"] or session_id(data) == lock["session"]:
+    here = git_paths(Path(__file__).resolve().parent) or git_paths(cwd)
+    if not here:
         return 0
+    common = here[2]
     tool, args = data.get("tool_name", ""), data.get("tool_input") or {}
-    change = None
     if tool in FILE_TOOLS:
         target = args.get("file_path") or args.get("notebook_path") or ""
-        if target and is_code(target, cwd, git_dir):
-            change = f"{tool} {target}"
+        git_dir = code_checkout(target, cwd, common) if target else None
+        changes = [(f"{tool} {target}", git_dir)] if git_dir else []
     elif tool == "Bash":
-        change = bash_change(args.get("command") or "", cwd, git_dir)
-    if not change:
+        changes = bash_changes(args.get("command") or "", cwd, common)
+    else:
         return 0
-    owner = lock["label"] or lock["session"]
-    print(
-        f"已拒绝（{change}）：这个仓库的代码只能在会话「{owner}」里改。"
-        "本会话不改代码、不切分支、不提交；需要改代码时，告诉用户到那个会话去做。"
-        "不要自己改锁或绕过这条限制；换会话由用户决定"
-        "（在新会话里运行 python3 .claude/hooks/code_owner.py claim）。",
-        file=sys.stderr,
-    )
-    return 2
+    me = session_id(data)
+    for change, git_dir in changes:
+        lock = read_lock(git_dir)
+        if lock and lock["session"] and lock["session"] == me:
+            continue
+        print(refusal(change, git_dir, common, lock), file=sys.stderr)
+        return 2
+    return 0
+
+
+def status_lines(common, current):
+    """One line per checkout: which one, its branch, its work tree and who holds its lock."""
+    me = session_id()
+    for git_dir, tree in checkouts(common):
+        head_file = git_dir / "HEAD"
+        head = head_file.read_text(encoding="utf-8").strip() if head_file.is_file() else ""
+        branch = head[len("ref: refs/heads/"):] if head.startswith("ref: refs/heads/") else head[:12] or "?"
+        lock = read_lock(git_dir)
+        if lock and lock["session"]:
+            mine = "（就是本会话）" if lock["session"] == me else ""
+            holder = f"持锁「{lock['label'] or lock['session']}」{mine}"
+        else:
+            holder = "没有持锁会话"
+        marker = "  ← 当前" if git_dir == current else ""
+        yield f"{where_name(git_dir, common)}（{branch}，{tree}）：{holder}{marker}"
 
 
 def cli(argv):
-    git_dir = common_dir(os.getcwd())
-    if not git_dir:
-        print("不在 git 仓库里。", file=sys.stderr)
+    here = git_paths(os.getcwd())
+    if not here:
+        print("不在 git 仓库的工作区里。", file=sys.stderr)
         return 1
-    path, lock = git_dir / LOCK_NAME, read_lock(git_dir)
+    _, git_dir, common = here
+    where, path = where_name(git_dir, common), git_dir / LOCK_NAME
     if argv[0] == "claim":
         me = session_id()
         if not me:
@@ -252,16 +349,13 @@ def cli(argv):
             return 1
         label = " ".join(argv[1:]) or me
         path.write_text(f"{me}\n{label}\n", encoding="utf-8")
-        print(f"代码锁归属：{label}（{me}）")
+        print(f"{where}的代码锁归属：{label}（{me}）")
     elif argv[0] == "release":
         path.unlink(missing_ok=True)
-        print("代码锁已解除：所有会话都能改代码。")
+        print(f"{where}的代码锁已解除：在有会话 claim 之前，谁都不能改{where}的代码。")
     elif argv[0] == "status":
-        if lock:
-            mine = "（就是本会话）" if lock["session"] == session_id() else ""
-            print(f"代码锁归属：{lock['label'] or lock['session']}（{lock['session']}）{mine}")
-        else:
-            print("没有代码锁：所有会话都能改代码。")
+        for line in status_lines(common, git_dir):
+            print(line)
     else:
         print(__doc__, file=sys.stderr)
         return 1
