@@ -141,6 +141,11 @@ class FakeBrowser:
     def targets(self) -> list[dict]:
         return [dict(tab) for tab in self.tabs]
 
+    running = True  # whether the applying Chrome already runs when a run starts (open_tabs never starts it)
+
+    def open_tabs(self) -> list[dict] | None:
+        return self.targets() if self.running else None
+
     def fill(self, spec, **options):
         if self.release is not None:
             assert self.release.wait(5)
@@ -662,3 +667,76 @@ def test_input_errors_are_masked(tmp_path):
     with pytest.raises(InvariantError) as error:
         runner.load_inputs(listing, applicant, settings())
     assert "555-0100" not in str(error.value) and "[phone]" in str(error.value)
+
+
+# --- decision 23 ------------------------------------------------------------------------------------------------
+
+
+def test_run_rules_stop_on_a_stated_eligibility_bar_without_an_untrue_answer():
+    assert "RESULT:FAILED:not_eligible" in runner.RUN_RULES and "untrue" in runner.RUN_RULES
+
+
+def test_not_eligible_is_the_agents_result(ff):
+    box, path = ff
+    note = 'Education says "not open to current students"; the true answer is auto-rejected.'
+    box.form_fill_runner = FakeBrowser(outcomes={"acme-ml-01": ("failed", "not_eligible", [note])})
+    box.start_form_fill(path)
+    first = box.form_fill_status()["jobs"][0]
+    assert first["agent_result"] == "not_eligible" and note in first["notes"]
+
+
+def test_notes_keep_up_to_2000_characters(ff):
+    box, path = ff
+    box.form_fill_runner = FakeBrowser(outcomes={"acme-ml-01": ("waiting", None, ["y" * 1500 + " end"])})
+    box.start_form_fill(path)
+    assert "y" * 1500 + " end" in box.form_fill_status()["jobs"][0]["notes"]
+
+
+def test_personal_tabs_are_listed_at_the_start_and_the_run_still_goes(ff):
+    box, path = ff
+    fake = FakeBrowser()
+    fake.tabs += [
+        {"id": "G1", "type": "page", "url": "https://mail.google.com/mail/u/1/#inbox"},
+        {"id": "S1", "type": "page", "url": "https://records.synthetic.edu/student/details?id=1"},
+        {"id": "G2", "type": "page", "url": "https://mail.google.com/mail/u/0/#inbox"},
+    ]
+    box.form_fill_runner = fake
+    result = box.start_form_fill(path)
+    assert result["personal_tabs"] == ["https://mail.google.com", "https://records.synthetic.edu"]
+    assert "关掉" in result["warning"] and len(fake.calls) == 2
+    report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+    assert "https://mail.google.com" in report and "student/details" not in report
+
+
+def test_no_personal_tabs_no_warning(ff):
+    box, path = ff
+    result = box.start_form_fill(path)  # the fake's own tabs: a made-up mail site and a job page
+    assert result["personal_tabs"] == [] and "warning" not in result
+
+
+def test_personal_tabs_rule():
+    tabs = [
+        {"type": "page", "url": "https://www.chase.com/personal"},
+        {"type": "page", "url": "https://secure05a.chase.com/web/auth"},  # a subdomain of a listed site
+        {"type": "page", "url": "https://jobs.example.test/apply"},
+        {"type": "service_worker", "url": "https://mail.google.com/sw.js"},
+        {"type": "page", "url": "chrome://newtab/"},
+        {"type": "page", "url": "https://my.synthetic.edu.cn/student"},  # an "edu" label, not only a .edu ending
+        {"type": "page", "url": "https://www.education.example.test/"},  # "education" is not an edu label
+        {"type": "page", "url": "https://careers.synthetic.edu/jobs/42/apply"},  # a job on the list
+    ]
+    found = runner.personal_tabs(
+        tabs, ["https://www.chase.com", "https://mail.google.com"], skip=["https://careers.synthetic.edu/jobs/42"]
+    )
+    assert found == ["https://www.chase.com", "https://secure05a.chase.com", "https://my.synthetic.edu.cn"]
+
+
+def test_a_chrome_not_running_yet_is_not_started_for_the_tab_check(ff):
+    box, path = ff
+    fake = FakeBrowser()
+    fake.running = False
+    box.form_fill_runner = fake
+    result = box.start_form_fill(path)
+    assert result["personal_tabs"] == [] and "没能检查" in result["warning"]
+    assert box.form_fill_status()["personal_tabs_checked"] is False and len(fake.calls) == 2
+    assert "没能检查" in (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")

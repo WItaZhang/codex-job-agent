@@ -859,3 +859,57 @@ def test_the_reader_never_drives_the_page():
         node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
     }
     assert not called & forbidden
+
+
+# --- decision 23: page chrome is not a field ---------------------------------------------------------------------
+
+
+def _control(order, question, tag="input", typ="text", value="", required=False, options=None):
+    labels = {"label_for": question, "labelledby": "", "aria_label": "", "wrapping": "", "legend": "", "preceding": ""}
+    node = {"order": order, "tag": tag, "type": typ, "role": "", "labels": {**labels, "placeholder": ""}}
+    node.update({"value": value, "required": required})
+    if options is not None:
+        node["options"] = options
+    return node
+
+
+def test_step_bars_and_empty_widget_text_are_not_fields():
+    raw = {
+        "frames": [
+            {
+                "controls": [
+                    _control(2, "Application", typ="file"),
+                    _control(4, "items selected", tag="select", options=[{"text": "Python", "selected": False}]),
+                    _control(5, "or", typ="file"),
+                    _control(6, "Options Expanded", tag="select", options=[{"text": "SQL", "selected": False}]),
+                    _control(7, "Options Expanded", tag="select", options=[{"text": "Python", "selected": True}]),
+                    _control(8, "Work History (Optional) 1", typ="checkbox"),
+                    _control(9, "Resume", typ="file", required=True),
+                ],
+                "pairs": [
+                    {"order": 1, "question": "completed step 1 of 6", "value": "My Information"},
+                    {"order": 3, "question": "current step 6 of 6", "value": "Review"},
+                ],
+            }
+        ]
+    }
+    assert [(f.id, f.question, f.value) for f in normalize(raw)] == [
+        ("p1.1", "Options Expanded", "Python"),  # a widget label with a value is kept
+        ("p1.2", "Resume", ""),  # a required field is kept even when empty
+    ]
+
+
+@pytest.mark.parametrize(
+    ("question", "value", "required", "chrome"),
+    [
+        ("step 3 of 6", "Application Questions 1 of 2", False, True),
+        ("items selected", "", False, True),
+        ("Application", "", False, True),
+        ("Application", "", True, False),
+        ("Options Expanded", "Python (Programming Language)", False, False),
+        ("Work History (Optional) 1", "", False, True),
+        ("Email", "", False, False),
+    ],
+)
+def test_page_chrome_rule(question, value, required, chrome):
+    assert readback.is_page_chrome(question, value, required) is chrome

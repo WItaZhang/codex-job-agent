@@ -390,7 +390,8 @@ def letter_date() -> str:
 # --- running applications (adapted from ApplyPilot's launcher.run_job) -----------------------------------
 
 
-def _cdp_alive(port: int) -> bool:
+def cdp_alive(port: int) -> bool:
+    """Whether a Chrome answers on this debugging port (the form-fill module checks it without starting one)."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1):
             return True
@@ -404,7 +405,7 @@ def ensure_chrome(settings: Settings, worker_id: int = 0) -> int:
     from .vendor.applypilot.apply import chrome
 
     port = chrome.BASE_CDP_PORT + worker_id
-    if _cdp_alive(port):
+    if cdp_alive(port):
         return port
     profile_dir = chrome.setup_worker_profile(worker_id)
     strip_profile(profile_dir, settings.apply.chrome_profile_strip)
@@ -525,7 +526,7 @@ class ChromeRunner:
     def __call__(self, spec: ApplySpec) -> ApplyOutcome:
         try:
             configure(self.data_dir, self.settings, self.profile)
-            if self.port is None or not _cdp_alive(self.port):
+            if self.port is None or not cdp_alive(self.port):
                 self.port = ensure_chrome(self.settings)
             return run_application(spec, self.data_dir, self.settings, self.profile, self.port, self.read_dirs)
         except Exception as error:  # one broken run must not stop the batch; nothing reached the site

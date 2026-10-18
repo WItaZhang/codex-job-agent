@@ -3,7 +3,9 @@
 A question is matched by the `asks` phrases first: a phrase must appear as whole words, the longest phrase wins, an
 entry whose `overrides` cover every other hit wins outright, and equal phrases on different entries are ambiguous.
 Without an `asks` hit, a few common labels built into the code match when they are the whole question ("First
-name", "Email", "Location"); contact labels go to the entry whose from_profile names that profile field.
+name", "Email", "Location"); contact labels go to the entry whose from_profile names that profile field. Without
+either, a phrase of two or more words still matches when its words appear in order with at most two other words
+between them in all ("years of engineering experience" for "years of experience", decision 23).
 
 Education and work history come in segments: consecutive fields whose labels are record fields (School, Degree,
 Company, Job Title, From, To, City, Description ...). A label seen again starts the next segment. A label that hits
@@ -30,6 +32,33 @@ def norm(text) -> str:
 
 def _contains(text: str, phrase: str) -> bool:
     return bool(phrase) and f" {phrase} " in f" {text} "
+
+
+LOOSE_GAP = 2  # words a loosely matched phrase may have inside it, in all
+NEGATIONS = frozenset({"not", "no", "never", "non", "nor", "without", "cannot", "t"})  # "don't" normalizes to "don t"
+
+
+def _contains_loosely(text: str, phrase: str) -> bool:
+    """The phrase's words in order, with at most LOOSE_GAP other words between them in all; two words or more. A
+    negation inside never counts as a filler: "currently not require sponsorship" is not "currently require
+    sponsorship"."""
+    words, want = text.split(), phrase.split()
+    if len(want) < 2:
+        return False
+    for start in (i for i, word in enumerate(words) if word == want[0]):
+        at, gap = start + 1, 0
+        for word in want[1:]:
+            while at < len(words) and words[at] != word and gap <= LOOSE_GAP:
+                if words[at] in NEGATIONS:
+                    gap = LOOSE_GAP + 1
+                    break
+                at, gap = at + 1, gap + 1
+            if at >= len(words) or gap > LOOSE_GAP:
+                break
+            at += 1
+        else:
+            return True
+    return False
 
 
 # Whole-question labels, normalized. Names go to the name.* keys; the rest to the entry whose from_profile names the
@@ -158,13 +187,13 @@ class PageMatch:
 # --- one question -----------------------------------------------------------------------------------------------
 
 
-def _asks_hits(question: str, answers: dict[str, AnswerEntry]) -> dict[str, int]:
+def _asks_hits(question: str, answers: dict[str, AnswerEntry], contains=_contains) -> dict[str, int]:
     """Entries whose asks phrases appear as whole words in the (normalized) question, with the longest one's length."""
     hits: dict[str, int] = {}
     for key, entry in answers.items():
         for phrase in entry.asks:
             p = norm(phrase)
-            if _contains(question, p):
+            if contains(question, p):
                 hits[key] = max(hits.get(key, 0), len(p))
     return hits
 
@@ -198,7 +227,13 @@ def match_question(question: str, answers: dict[str, AnswerEntry]) -> FieldMatch
     if NAVIGATION.match(q):
         return FieldMatch(navigation=True)
     hits = _asks_hits(q, answers)
-    return _pick(hits, answers) if hits else _built_in(q, answers)
+    if hits:
+        return _pick(hits, answers)
+    found = _built_in(q, answers)
+    if found.key or found.ambiguous:
+        return found
+    loose = _asks_hits(q, answers, contains=_contains_loosely)
+    return _pick(loose, answers) if loose else found
 
 
 # --- segments ---------------------------------------------------------------------------------------------------
