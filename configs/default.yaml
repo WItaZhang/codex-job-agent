@@ -31,6 +31,9 @@ apply_list:                       # 投递清单（spec 4.9）
   agreement_window_days: 7        # 一致率看最近几个标注日（打过 label 的推荐日）
   shown: 20                       # 对话里先列出几个；文件里是全部
   dir: apply                      # 清单文件所在的目录，位于 storage.data_dir 下
+duplicates:                       # 同一个岗位的几条（spec 4.9 第 6 条；投递清单和每日推荐都用）
+  shingle_words: 5                # 正文切成连续几个词的片段（spec §10 第 71 条）
+  overlap: 0.9                    # 较短一份的片段至少有多少出现在较长一份里，才算正文基本一样
 apply:                            # 投递（spec 4.10）
   applicant_dir: applicant        # 投递资料目录（applicant.yaml、profile.json、简历），位于 storage.data_dir 下
   batch_size: 30                  # 一批最多多少个岗位

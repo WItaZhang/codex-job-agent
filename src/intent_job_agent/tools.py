@@ -25,7 +25,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import applicant as applicant_files
-from . import apply_bridge, apply_list, applypilot_bridge, avature, funnel
+from . import apply_bridge, apply_list, applypilot_bridge, avature, duplicates, funnel
 from .boards import BoardSpec, load_boards
 from .changes import (
     AddEntry,
@@ -47,7 +47,8 @@ from .llm import NoModelClient
 from .pretag import pretag
 from .prompts import ReasonMapping
 from .proposals import Analysis, LabelInput
-from .selection import select_daily
+from .scoring import score_job
+from .selection import rank_postings, select_daily
 from .store import Store, new_id
 
 TOOL_TIERS: dict[str, str] = {}
@@ -125,7 +126,7 @@ BACKFILL_RULES = {
 }
 
 
-APPLY_COLUMNS = ("n", "job_id", "new", "wanted", "title", "company", "location", "url", "why")
+APPLY_COLUMNS = ("n", "job_id", "new", "wanted", "title", "company", "location", "url", "also", "why")
 DEFAULT_LETTER_SKILL = Path(__file__).resolve().parents[2] / ".claude" / "skills" / "cover-letter"
 
 
@@ -147,6 +148,15 @@ def _chrome_found() -> bool:
     except FileNotFoundError:
         return False
     return True
+
+
+def _company_name(job: Job) -> str:
+    """A listing's company, or for a board that gives none (Talent.com) its only company tag (spec section 10
+    item 80), so that a merged row names its company and the careful list can match it."""
+    if job.company.strip():
+        return job.company.strip()
+    tags = [tag.removeprefix("company.") for tag in job.tags if tag.startswith("company.")]
+    return tags[0].replace("_", " ") if len(tags) == 1 else ""
 
 
 def _csv_cell(value) -> str:
@@ -332,7 +342,14 @@ class Toolbox:
             "tags": self.store.effective_tags(job.id) if self.store.is_tagged(job.id) else [],
             "description": _job_text(job),
             **(self._suggestions(job) if not self.store.is_tagged(job.id) else {}),
+            **({"same_posting": self._same_posting_view(job.id)} if self.store.is_tagged(job.id) else {}),
         }
+
+    def _same_posting_view(self, job_id: str) -> list[dict]:
+        """The other tagged listings of the job's posting: a misread fix on this job changes them too."""
+        return [
+            {"job_id": j.id, "board": j.board or j.source, "location": j.location} for j in self._fix_reaches(job_id)
+        ]
 
     def _suggestions(self, job: Job, pre=None) -> dict:
         pre = pre or pretag(job, self.store.vocabulary())
@@ -358,10 +375,8 @@ class Toolbox:
             self.store.current_intent(), self.store.vocabulary(), self.store.untagged_jobs(), self.settings
         )
         tagged_today = self.store.tagged_on(day)
-        shown = self.store.shown_job_ids()
-        tagged_open = [
-            j for j in self.store.jobs() if self.store.is_tagged(j.id) and j.id not in shown and self.store.is_open(j)
-        ]
+        shown, unshown, closed = self._tagged_pool()
+        tagged_open = rank_postings(self.store.current_intent(), unshown, self.settings, shown, closed)
         return {
             "day": day,
             "fetched": self.store.fetched_on(day),
@@ -675,40 +690,58 @@ class Toolbox:
     def select_today(self, day: str) -> dict:
         """Select today's recommended and exploration jobs (once per day) and return them numbered."""
         if not self.store.selection(day):
-            shown = self.store.shown_job_ids()
-            candidates = [
-                j
-                for j in self.store.jobs()
-                if self.store.is_tagged(j.id) and j.id not in shown and self.store.is_open(j)
-            ]
-            self.store.save_selection(day, select_daily(self.store.current_intent(), candidates, self.settings))
+            shown, unshown, closed = self._tagged_pool()
+            picks = select_daily(self.store.current_intent(), unshown, self.settings, shown, closed)
+            self.store.save_selection(day, picks)
         return self._day_view(day)
+
+    def _tagged_pool(self) -> tuple[list[Job], list[Job], set[str]]:
+        """Every tagged job with its corrected tags, as the daily picks group them (spec section 10 item 82): the
+        jobs shown on earlier days in display order, the others in storage order, and which of those are closed."""
+        overrides, tagged = self.store.tag_overrides(), self.store.tagged_ids()
+        jobs = {
+            job.id: job.model_copy(update={"tags": overrides.get(job.id, job.tags)})
+            for job in self.store.jobs()
+            if job.id in tagged
+        }
+        shown = [jobs[job_id] for job_id in self.store.shown_in_order() if job_id in jobs]
+        shown_ids = {job.id for job in shown}
+        unshown = [job for job in jobs.values() if job.id not in shown_ids]
+        return shown, unshown, {job.id for job in unshown if not self.store.is_open(job)}
+
+    def _fix_reaches(self, job_id: str) -> list[Job]:
+        """The other tagged listings of a tagged job's posting (spec section 10 item 83): grouped with every tagged
+        job by the tags before the fix, this job first, then the order of the daily picks."""
+        shown, unshown, _ = self._tagged_pool()
+        everything = {job.id: job for job in shown + unshown}
+        if job_id not in everything or duplicates.posting_key(everything[job_id]) is None:
+            return []
+        intent, key = self.store.current_intent(), duplicates.posting_key(everything[job_id])
+        ranked = sorted(unshown, key=lambda j: -score_job(intent, j.tags, j.salary, self.settings).score)
+        ordered = [everything[job_id]] + [j for j in shown + ranked if j.id != job_id]
+        (posting, *_) = duplicates.group([j for j in ordered if duplicates.posting_key(j) == key], self.settings)
+        return [job for job in posting if job.id != job_id]
 
     @_tool("prepare")
     def build_apply_list(self, day: str | None = None, limit: int | None = None) -> dict:
         """The apply list by the current intent (spec 4.9): tagged open jobs it recommends plus jobs the user
         labelled want, never ones labelled reject; wanted first, then by score, each with why it is there and
-        whether it is new today. Only pending jobs are listed. Writes apply/<day>.json and .csv in the data
-        directory (the same day overwrites them) and returns the agreement rate, counts and the first `limit`
-        jobs (default from the config)."""
+        whether it is new today. One row per posting: listings of the same posting from other boards or cities
+        are merged, with their places and links (`also`). Only postings whose listings are all pending are listed.
+        Writes apply/<day>.json and .csv in the data directory (the same day overwrites them) and returns the
+        agreement rate, counts and the first `limit` rows (default from the config)."""
         day = _day(day)
-        intent = self.store.current_intent()
-        jobs = [
-            (job, self.store.effective_tags(job.id))
-            for job in self.store.jobs()
-            if self.store.is_tagged(job.id) and self.store.is_open(job)
-        ]
-        chosen = apply_list.candidates(intent, jobs, self.store.labels(), self.settings)
         listed = self.store.applications()
-        pending = [c for c in chosen if listed.get(c.job.id, {"status": "pending"})["status"] == "pending"]
-        self.store.list_applications([c.job.id for c in pending if c.job.id not in listed], day)
-        listed = self.store.applications()
-        items = [
-            self._apply_item(n, candidate, listed[candidate.job.id]["first_listed"] == day)
-            for n, candidate in enumerate(pending, start=1)
+        pending = [
+            p
+            for p in self._apply_postings(listed)
+            if p.listed and all(listed.get(job.id, {"status": "pending"})["status"] == "pending" for job in p.listings)
         ]
+        self.store.list_applications([job.id for p in pending for job in p.listings if job.id not in listed], day)
+        listed = self.store.applications()
+        items = [self._apply_item(n, posting, listed, day) for n, posting in enumerate(pending, start=1)]
         window = self.settings.apply_list.agreement_window_days
-        rate = apply_list.agreement(intent, self.store, self.settings, window).text()
+        rate = apply_list.agreement(self.store.current_intent(), self.store, self.settings, window).text()
         files = self._write_apply_list(day, rate, items)
         limit = self.settings.apply_list.shown if limit is None else limit
         return {
@@ -720,22 +753,46 @@ class Toolbox:
             "jobs": items[:limit],
         }
 
-    def _apply_item(self, n: int, candidate: apply_list.Candidate, new: bool) -> dict:
-        job, result = candidate.job, candidate.result
-        why = ["你标了想投"] if candidate.wanted else []
-        why += [f"{ref} {LEVEL_TEXT[level]}" for ref, level, _ in result.contributions]
-        if result.below_salary_floor:
+    def _apply_postings(self, listed: dict[str, dict]) -> list[apply_list.Posting]:
+        """Every posting with a listing on the apply list or that could enter it: the candidates of the current
+        intent plus the listings listed before or labelled want/reject (spec section 10 item 72)."""
+        labels, everything = self.store.labels(), self.store.jobs()
+        jobs = [
+            (job, self.store.effective_tags(job.id))
+            for job in everything
+            if self.store.is_tagged(job.id) and self.store.is_open(job)
+        ]
+        chosen = apply_list.candidates(self.store.current_intent(), jobs, labels, self.settings)
+        known = set(listed) | {label.job_id for label in labels if label.value in ("want", "reject")}
+        known -= {c.job.id for c in chosen}
+        others = [(job, self.store.effective_tags(job.id)) for job in everything if job.id in known]
+        return apply_list.postings(chosen, others, labels, self.settings, self._letter_ready)
+
+    def _same_posting(self, listed: dict[str, dict]) -> dict[str, list[str]]:
+        """Each listing's posting, as the ids of all its listings."""
+        return {job.id: [j.id for j in p.listings] for p in self._apply_postings(listed) for job in p.listings}
+
+    def _apply_item(self, n: int, posting: apply_list.Posting, listed: dict[str, dict], day: str) -> dict:
+        best, job = posting.candidates[0], posting.use.job
+        why = ["你标了想投"] if posting.wanted else []
+        why += [f"{ref} {LEVEL_TEXT[level]}" for ref, level, _ in best.result.contributions]
+        if best.result.below_salary_floor:
             why.append("薪资低于下限")
-        places = [tag.removeprefix("location.") for tag in candidate.tags if tag.startswith("location.")]
+        also = [j.url for j in posting.offered if j.id != job.id and j.url and j.url != job.url]
+        listings = (job, *posting.listings)  # names first, then company tags of listings without one
+        named = [j.company.strip() for j in listings if j.company.strip()]
+        companies = list(dict.fromkeys(named + [name for j in listings if (name := _company_name(j))]))
         return {
             "n": n,
             "job_id": job.id,
-            "new": new,
-            "wanted": candidate.wanted,
+            "new": min(listed[j.id]["first_listed"] for j in posting.listings if j.id in listed) == day,
+            "wanted": posting.wanted,
             "title": job.title,
-            "company": job.company,
-            "location": ", ".join(places),
+            "company": companies[0] if companies else "",
+            "companies": companies,
+            "location": ", ".join(posting.places),
             "url": job.url,
+            "also": list(dict.fromkeys(also)),
             "why": why,
         }
 
@@ -749,16 +806,21 @@ class Toolbox:
             writer = csv.writer(handle)
             writer.writerow(APPLY_COLUMNS)
             for item in items:
-                row = {**item, "why": "；".join(item["why"])}
+                row = {**item, "why": "；".join(item["why"]), "also": "；".join(item["also"])}
                 writer.writerow([_csv_cell(row[column]) for column in APPLY_COLUMNS])
         return {"json": str(json_path), "csv": str(csv_path)}
 
     @_tool("prepare")
     def mark_applications(self, job_ids: list[str], status: Literal["pending", "applied", "skipped"]) -> dict:
-        """What the user did with jobs on the apply list: applied, skipped, or back to pending. Not a label and
-        not a signal: it changes neither the intent nor any analysis."""
-        self.store.set_application_status(job_ids, status)
-        return {"job_ids": job_ids, "status": status}
+        """What the user did with jobs on the apply list: applied, skipped, or back to pending. The other listings
+        of the same posting change with them (`same_posting`). Not a label and not a signal: it changes neither the
+        intent nor any analysis."""
+        self.store.set_application_status(job_ids, status)  # checks the ids and the status before any change
+        same = self._same_posting(self.store.applications())
+        others = [j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids]
+        self.store.list_applications(others, _day(None))
+        self.store.set_application_status(others, status)
+        return {"job_ids": job_ids, "same_posting": others, "status": status}
 
     # --- applying (spec 4.10) ---------------------------------------------------------------------
 
@@ -966,7 +1028,7 @@ class Toolbox:
         for n, item in enumerate(items, start=1):
             if n <= review_first:
                 mode = "review"
-            elif applicant_files.careful(item["company"], applicant.careful_companies):
+            elif any(applicant_files.careful(name, applicant.careful_companies) for name in item["companies"]):
                 mode = "careful"
             else:
                 mode = "submit"
@@ -1024,6 +1086,20 @@ class Toolbox:
         moved = [job["job_id"] for job in jobs if applications.get(job["job_id"], {}).get("status") != "pending"]
         if moved:
             raise InvariantError(f"Jobs {moved} are no longer pending; prepare a new batch")
+        same = self._same_posting(applications)
+        step = [job["job_id"] for job in jobs]
+        taken = [
+            job_id
+            for job_id in step
+            if any(
+                other != job_id and (other in step or applications.get(other, {}).get("status", "pending") != "pending")
+                for other in same.get(job_id, [])
+            )
+        ]
+        if taken:  # a batch prepared before postings were merged (spec section 10 item 75)
+            raise InvariantError(
+                f"Jobs {taken} share a posting with another job of this step or one already tried; prepare a new batch"
+            )
         no_letter = [job["job_id"] for job in jobs if not self._letter_ready(job["job_id"])]
         if no_letter:
             raise InvariantError(f"Jobs {no_letter} have no cover letter yet")
@@ -1326,9 +1402,19 @@ class Toolbox:
         return self._intent_view(intent)
 
     @_tool("commit")
-    def correct_tags(self, job_id: str, remove: list[str], add: list[str]) -> dict:
-        """Fix a misread job's tags. Does not touch the intent."""
-        return {"job_id": job_id, "tags": self.engine.correct_tags(job_id, remove, add)}
+    def correct_tags(self, job_id: str, remove: list[str], add: list[str], also: list[str] | None = None) -> dict:
+        """Fix a misread job's tags. The same fix, outside location tags, also changes the other tagged listings of
+        its posting: get them from show_job (same_posting), show them to the user and pass their ids as `also`;
+        any other list is refused. Returns the job's tags and which other listings changed. Does not touch the
+        intent."""
+        reaches = [job.id for job in self._fix_reaches(job_id)]
+        if sorted(also or []) != sorted(reaches):
+            raise InvariantError(
+                f"This fix also changes the posting's other listings {reaches}: show them to the user and pass "
+                "exactly these as also"
+            )
+        tags, changed = self.engine.correct_tags(job_id, remove, add, also=tuple(reaches))
+        return {"job_id": job_id, "tags": tags, "also": changed}
 
     @_tool("commit")
     def initialize_intent(self, path: str) -> dict:

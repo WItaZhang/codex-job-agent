@@ -396,14 +396,32 @@ class Engine:
         analysis.status = "declined"
         self.store.save_analysis(analysis)
 
-    def correct_tags(self, job_id: str, remove: list[str], add: list[str], label_id: str | None = None) -> list[str]:
-        """Misread flow: fix the job's tags. The intent is not touched."""
+    def correct_tags(
+        self, job_id: str, remove: list[str], add: list[str], label_id: str | None = None, also: tuple[str, ...] = ()
+    ) -> tuple[list[str], list[str]]:
+        """Misread flow: fix the job's tags, and the same fix outside location on the other listings `also` of its
+        posting (spec 4.6, section 10 item 83). Returns the job's new tags and the other listings that changed.
+        The intent is not touched."""
         vocab = self.store.vocabulary()
         tags = self.store.effective_tags(job_id)
         missing = [ref for ref in remove if ref not in tags]
         if missing:
             raise InvariantError(f"Job {job_id} has no tags {missing}")
+        added = [vocab.canonical(parse_ref(ref).ref) for ref in add]
         new_tags = [tag for tag in tags if tag not in remove]
-        new_tags += [vocab.canonical(parse_ref(ref).ref) for ref in add if ref not in new_tags]
+        new_tags += [ref for ref in dict.fromkeys(added) if ref not in new_tags]
         self.store.set_effective_tags(job_id, new_tags, label_id)
-        return new_tags
+
+        def outside_location(refs):
+            return [ref for ref in refs if parse_ref(ref).dimension != "location"]
+
+        labelled = {lab.job_id for lab in self.store.labels() if lab.value in ("want", "reject") and not lab.superseded}
+        changed = []
+        for other in also:
+            before = self.store.effective_tags(other)
+            after = [tag for tag in before if tag not in outside_location(remove)]
+            after += [ref for ref in dict.fromkeys(outside_location(added)) if ref not in after]
+            if after != before:
+                self.store.set_effective_tags(other, after, label_id, from_job=job_id, labelled=other in labelled)
+                changed.append(other)
+        return new_tags, changed

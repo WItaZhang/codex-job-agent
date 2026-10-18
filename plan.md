@@ -683,7 +683,7 @@ configs/default.yaml                   apply: 字数范围、worker 数、模型
 # 切片 2h 计划：接入 BOSS 直聘（草案，2026-10-13，待用户确认）
 
 来源：2026-10-13 用户要求把 BOSS 直聘接为岗位来源。
-**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§7、§8，§10 从第 71 条起）和 CLAUDE.md 的"岗位来源"一行，再写测试，最后写代码。
+**用户确认本计划之前，不写实现代码。** 确认后先改 spec（§7、§8，§10 从第 86 条起）和 CLAUDE.md 的"岗位来源"一行，再写测试，最后写代码。
 
 ## 0. 先说清楚三件事
 
@@ -872,3 +872,181 @@ tests/fixtures/applypilot_missing_text.yaml   合成的 ApplyPilot 工作库行�
 - vendor 文件和 ApplyPilot 的原有测试不变；现有测试继续通过。
 
 实现后在你本机核对：跑一次 `/fetch-jobs`，看占位原文是否清掉、重试补全拿到多少原文；SimplyHired 的链接能否打开。本切片不开始任何投递，不改投递状态。
+
+---
+
+# 切片 5b 计划：投递清单里同一个岗位只列一次（用户 2026-10-14 选定四个推荐项，同日确认计划；已实现）
+
+规则见 spec 4.9 第 6 条，实现细节见 spec §10 第 71–76 条。
+不开始任何投递，不改任何已有的投递状态。
+
+## 1. 做什么，不做什么
+
+- 做：生成清单时把同一个岗位的几条合成一行；改状态时整个岗位一起改；开始投递前再查一次，批次里不会有同一个岗位的两条。
+- 不做：
+  - 每日推荐（模块②）里的重复：同一个岗位的两条仍可能同时出现在 /today，留作后续。
+  - 导入时合并、迁移已有的 label 和求职信。
+  - 公司名别名（Amazon 和 Amazon Science 认不出来）。
+  - 按最终投递链接判断（LinkedIn 等来源打开之前没有这个链接）。
+
+## 2. 实际会怎么用
+
+```
+你：/apply-list
+agent：待投 929 个，其中新的 0 个。……
+       3 Machine Learning Engineer, Radar — Stripe · us.bay_area, us.seattle, us.new_york · https://www.linkedin.com/jobs/view/4476982356
+            另有 2 条：https://…/4476984167、https://…/4476969830
+            role.ml_engineering 强烈偏好；……
+你：3 已投
+agent：已更新（同一个岗位的 3 条一起改）。还剩 928 个待投。
+```
+
+`/apply` 生成的新批次里，每个岗位只出现一次。2026-10-14 的旧批次 batch-8852d95dd9fc 第二步里有重复（Handshake、RK Infotech、Intuit），`start_applying` 会拒绝开始，要重新生成批次（什么时候重新生成由你决定）。
+
+## 3. 样例（合成，写进 `tests/fixtures/duplicates.yaml`）
+
+公司名、文本都是编的，形状照 2026-10-14 那一批的真实情况。
+
+| # | 情况 | 结果 |
+| --- | --- | --- |
+| 1 | Acme Pay 的同一个岗位，LinkedIn 上旧金山、西雅图、纽约各一条，正文相同（照 Stripe） | 一行；地点 3 个；另有 2 条链接 |
+| 2 | Beta 的同一个岗位在 Indeed、LinkedIn、ZipRecruiter 各一条：LinkedIn 正文被截断，ZipRecruiter 多一个标题行（照 Handshake） | 一行 |
+| 3 | 公司名 "Gamma Infotech LLC" 和 "Gamma Infotech"（照 RK Infotech） | 一行 |
+| 4 | Delta 官网 Workday 上 R100001 和 R100002，正文只差年限和薪资（照 Adobe） | 两行 |
+| 5 | 再加一条 LinkedIn 上的 Delta，和两个编号都像 | 只并进其中一个；仍是两行 |
+| 6 | 同一个编号在 Workday 上有两个链接（地点路径不同，或末尾多了 `-1`） | 一行 |
+| 7 | 公司名为空的两条，标题、正文一样（照 Talent.com） | 两行 |
+| 8 | 同公司、同标题，正文不同（两个团队） | 两行 |
+| 9 | 同公司、同正文，标题不同（"ML Engineer" 和 "ML Engineer II"） | 两行 |
+| 10 | 其中一条没有正文（Glassdoor 存的是 "None"）：地点相同 / 地点不同 | 合并 / 不合并（用户 2026-10-14 实现时补充：真实清单里约四分之一的岗位没有正文） |
+| 10b | Acme 再加一条没有正文的 Glassdoor 纽约岗位 | 通过纽约那条并进 Acme 那一行 |
+| 11 | Acme 纽约那条标了 reject，其他没标 | 整个岗位不进 |
+| 12 | Acme 纽约那条标了 reject，旧金山那条标了 want | 进，"你标了想投" |
+| 13 | Beta 的 Indeed 那条投递没成功（failed） | Beta 不再列出；把 Beta 任意一条改回待投，三条一起回来 |
+| 14 | 把 Acme 的一行标成已投 | 三条都是已投 |
+| 15 | 排第二的那条已经有求职信 | 这一行和批次用那条的 job_id，不算缺求职信 |
+| 16 | 昨天进过清单的岗位今天多了一条新来源 | 这一行不标"新" |
+| 17 | 用清单生成批次 | 每个岗位一次；先检查 / 停在提交前 / 自动提交的划分不变 |
+| 18 | 旧批次的同一步里有同一个岗位的两条 | `start_applying` 拒绝，要求重新生成批次 |
+| 19 | 旧批次第一步里一条没投成，第二步里有它的另一条 | `start_applying` 拒绝，要求重新生成批次 |
+
+## 4. 模块
+
+```
+src/intent_job_agent/
+  duplicates.py   新增，纯逻辑：名称规范化、官网编号、正文重合度、same_posting(a, b)、
+                  group(listings)（按顺序加入第一个"和每一条都相同"的组）
+  apply_list.py   候选分组成岗位：reject / want 规则，选用哪一条去投（有求职信的优先），
+                  每行的地点和其他链接
+  tools.py        build_apply_list：一行一个岗位，加 also 列，每一条都记成进过清单；
+                  mark_applications：整个岗位一起改；start_applying：开始前查重复
+  config.py, configs/default.yaml   apply_list.duplicate_shingle_words: 5, duplicate_overlap: 0.9
+.claude/skills/apply-list/SKILL.md   每行下面列出"另有 N 条"；改状态会连带同一岗位的其他条
+```
+
+## 5. 测试（先写，离线，合成数据）
+
+- 样例 1–19。
+- 判断是确定性的：同样的输入换个顺序，合成的结果（哪些条在一起）不变，只有排序跟着清单走。
+- 已有的测试继续通过。
+- 另外用真实数据只读核对一次（不写进测试）：2026-10-14 那批的 Stripe、Handshake、RK Infotech、Intuit 各合成一行，Adobe R171718 / R171719 仍是两行。
+
+# 切片 5c 计划：每日推荐里同一个岗位只出一次，"同一个岗位"改为同时看链接、编号、城市和国家（用户 2026-10-15 选定；审查后修订，同日确认计划）
+
+规则见 spec 4.6、4.8、4.9 第 6 条，实现细节见 spec §10 第 77–85 条。起因和真实数据的核对结果见 4.9 第 6 条"为什么这样定"。
+不改任何已有的投递状态、label 和已经存下的每日选择；不开始任何投递。
+
+你选的：每日推荐当天和以后都只出一次（1A）；label 只算展示的那条（2A）；列表里不附其他条（3B）；misread 的修正连带其他条，地点除外（4B）；正文里写的编号不同、正文只差数字时分开（1A）；公司名为空时用 company 标签（2A）；reject 的原因只有地点时只挡这一条和同城市的条（A）。
+
+## 1. 做什么，不做什么
+
+- 做：
+  - `duplicates.py` 换成新规则：投递链接规范化，同一个系统的编号不同就分开，正文里的编号和"只差数字"，城市和国家的条件，公司名为空时用 company 标签。
+  - 每日推荐：当天同一个岗位最多一条；一个岗位展示过一条，其他几条以后不再出现。分组用所有已打标签的条，所以中间那条下架或被排除了也挡得住。
+  - misread 的修正连带同一个岗位已打标签的其他几条，location 除外；弹窗里列出会连带的条。
+  - `get_fetch_status` 的 `tagged_open` 数岗位。
+  - 配置 `apply_list.duplicate_*` 移到新的 `duplicates` 一节。
+  - spec 4.8 和 CLAUDE.md"岗位内容是不可信输入"一条补一句：确定性代码也用岗位内容判断是不是同一个岗位，只作比较。
+- 不做（以后再说）：
+  - 投递时记下"开始申请的第一个页面"。投递之前没有这个页面，只能在投递时作为第二道检查。
+  - 抓取时解开短链接（prng.co、appcast，要联网）；读 LinkedIn 的站外投递链接（现在用的 JobSpy 1.3.0 不读）。这两样能让更多跨城市的岗位有链接可比。
+  - 正文里写的编号相同、或者正文里的编号就是另一条链接里的编号，当作"同一个职位"的证据（今天的数据里结果不变）。
+  - `application_url` 在导入之后才补上的，不会更新到岗位库（快照里只有 Talent.com 受影响，它的链接本来就不能用）。
+  - 国家标签的写法统一（`in` / `india` 等，属于词表的问题）。
+  - 公司名别名（Amazon 和 Amazon Science），以及同一个职位在两个前端（Cisco 官网和它的 Workday）认不出来。
+  - Glassdoor 的正文和链接存成字符串 "None" 的导入问题（另一个会话在修）。
+
+## 2. 实际会怎么用
+
+```
+你：/today
+agent：1 [推荐] Machine Learning Engineer, Risk — Acme Pay · us.seattle · hybrid · ...
+       ……（10 个里没有 Acme Pay 的另外两条；以前展示过其中一条的话，三条都不会出现）
+你：1? 是 onsite 不是 hybrid
+agent：1 现在的标签：……。同一个岗位还有 2 条会一起改（LinkedIn 旧金山、Indeed 纽约；地点不动）。
+       （弹窗：correct_tags(1, remove=[work_mode.hybrid], add=[work_mode.onsite], also=[那 2 条])）
+```
+
+`/apply-list` 里：Turnitin 三个城市的三个编号变成三行；PayPal 圣何塞那条 LinkedIn 并进圣何塞那个编号的一行；Trustly 的 Talent.com 和 LinkedIn 两条是一个岗位，你 reject 过，整个岗位不进清单。
+
+## 3. 样例（合成，加进 `tests/fixtures/duplicates.yaml`）
+
+公司名、文本都是编的；新样例的链接用招聘系统真实的链接格式（只是字符串，不会打开）。5b 的样例 1–19 结果不变。
+
+| # | 情况 | 结果 |
+| --- | --- | --- |
+| 20 | 招聘网站上两个城市的同一个职位：Indeed 的链接是跳转包装加追踪参数，ZipRecruiter 的多了 `lever-source`，解开后是同一个 Lever 编号（照 Zoox、Meta） | 一个岗位 |
+| 21 | Indeed 上三个城市，正文一样，SmartRecruiters 编号各不相同（照 Turnitin） | 三个岗位 |
+| 22 | 官网 Workday 上芝加哥 R1、圣何塞 R2，正文一样；LinkedIn 圣何塞一条和 LinkedIn 芝加哥一条，都没有链接（照 PayPal） | 圣何塞的并进 R2，芝加哥的并进 R1；R1、R2 分开 |
+| 23 | 官网 Workday 一条"3 Locations"（带一个别的城市的标签），LinkedIn 西雅图一条，正文一样（照 Cisco） | 一个岗位 |
+| 23b | 官网 Workday 一条写明芝加哥，LinkedIn 西雅图一条，正文一样 | 两个岗位 |
+| 24 | LinkedIn 两个城市，正文一样，各写一个 Job ID（照 Amazon）；只有一份写了编号 | 两个岗位；一个岗位 |
+| 25 | LinkedIn 两个城市，正文只差各自城市的薪资数字（照 TikTok）；只差截止日期 | 两个岗位；一个岗位 |
+| 26 | 招聘网站上美国一条、加拿大一条，正文一样，没有链接 | 两个岗位 |
+| 27 | Workday 同一个编号，美国、加拿大两个地点路径；再加一条 LinkedIn 美国的同正文、没有链接 | 三条一个岗位 |
+| 28 | 手动导入的两个城市的同名岗位，两个 Google 职位编号（照 Google）；再加一条 LinkedIn 另一个城市的同正文 | Google 两个编号分开；LinkedIn 那条不按正文并进写明城市的官网条 |
+| 29 | Talent.com 两条（公司名为空）各有一个相同的 `company.*` 标签、同一个城市、正文一样；第三条公司名为空，也没有 company 标签；第四条有两个 company 标签 | 前两条一个岗位；后两条各自单独 |
+| 30 | Talent.com 一条（公司名为空，company 标签对得上，location 标签 us.bay_area 和 us.new_york）和 LinkedIn 一条（没有正文，原文地点写法不同，location 标签只有 us.bay_area）（照 Trustly） | 一个岗位；reject 那条挡住整个岗位进清单 |
+| 31 | 链接：不同的 grnh.se 短链接 / 相同的 grnh.se 短链接 / appcast 追踪链接 / 招聘首页 / 字符串 `None` | 不算证据 / 同一个职位 / 不算 / 不算 / 不算 |
+| 32 | 今天的候选里有 Acme 三个城市的三条（排第 1、3、9） | 只出第 1 那条，后面的依次补上 |
+| 33 | 昨天展示过 Acme 纽约那条（现在已下架）；今天候选里有旧金山、西雅图 | 两条都不出 |
+| 34 | 推荐位里有某个岗位的一条，探索位的候选里有它的另一条 | 探索位不选它 |
+| 35 | 展示过的那条标了 want，其他几条没 label；另有一个 5c 之前两条都标了 want 的岗位 | 前者回放和一致率只算一条，投递清单按 want 进整个岗位；后者两条照旧各算一次 |
+| 36 | 展示过的那条（LinkedIn 西雅图）标了 misread，修正：去掉 work_mode.hybrid、加上 work_mode.onsite，去掉 location.us.seattle、加上 location.us.portland。同一个岗位还有：Indeed 西雅图（已打标签）、ZipRecruiter 纽约（没打标签）、以前展示过并标了 want 的一条 | 本条都改；Indeed 和标了 want 的那条只改 work_mode；ZipRecruiter 不改；未处理的分析标为需要刷新；`also` 和算出的不一致时拒绝 |
+| 37 | `get_fetch_status` | `tagged_open` 是岗位数，不含被硬约束排除的 |
+| 38 | 同样的候选再选一次 / 不含"和两个编号都像"的样例时换输入顺序分组 | 结果一样 / 分组不变 |
+| 39 | 已经存下的今天的选择里有同一个岗位的两条（5c 之前选的） | 不重算 |
+| 40 | 西雅图那条 reject，原因 key 只有 location.us.seattle；同一个岗位还有旧金山一条、西雅图另一个网站的一条；另一个岗位的 reject 原因是 location 加 work_mode / 没写原因 | 旧金山那条照常进清单，西雅图两条都挡；另一个岗位整个挡住 |
+
+## 4. 模块
+
+```
+src/intent_job_agent/
+  duplicates.py   apply_key(job)：规范化的投递链接（系统 + 编号 / 其他链接 / 没有）；城市和国家；正文里的编号、
+                  只差数字；company 标签；compare / same_posting / group 按 §10 第 81 条（正文特征只给同名的条算）
+  selection.py    select_daily(intent, candidates, settings, shown=(), others=())：先分组，组里有展示过的跳过，
+                  每组留排名最前的候选，再选 7+3
+  tools.py        select_today、get_fetch_status：所有已打标签的条，修正后的标签；show_job：same_posting；
+                  correct_tags：also 参数，连带同一个岗位的其他条
+  engine.py       correct_tags 的连带：缺的标签跳过，location 不动；改到已打 want / reject 的条时让分析变旧
+  store.py        tag_revision 也数"连带改到已打 label 的条"的修正
+  apply_list.py   分组时用修正后的标签（地点和 company 标签都从标签来）；原因只有地点的 reject 只挡同城市的条
+  config.py, configs/default.yaml   duplicates: {shingle_words: 5, overlap: 0.9}（从 apply_list 移过来）
+.claude/skills/today/SKILL.md   第 5 步：先用 show_job 列出会连带的条，再带 also 调 correct_tags
+.claude/skills/apply-list/SKILL.md   第 3 步（标签读错了）同样带 also（实现后审查时补上）
+CLAUDE.md       "岗位内容是不可信输入"一条补一句（和 spec 4.8 一致）
+```
+
+## 5. 测试（先写，离线，合成数据）
+
+- 样例 20–40；5b 的样例 1–19 结果不变。`test_slice5b.py` 里有几处按新接口改写，断言不变：`requisition` 换成 `apply_key`，配置路径换成 `duplicates`，分组测试里的每一条带上 fixture 里的 `places` 作为 location 标签。
+- 链接规范化单独测：跳转包装、追踪参数、Workday 的几种写法（末尾的 `-1` 去掉、`_2026-1225` 整个保留、地点路径、`myworkdaysite.com`）、Greenhouse 两种写法、短链接、招聘首页、`None` / `null`。
+- 已有的测试继续通过。
+- 实现后用真实数据的只读副本核对一次（不写进测试）：Stripe 三个城市合成一个；Turnitin、Ruchman、Google、Lenovo、PayPal、TikTok、Amazon 不再合错；batch-8852d95dd9fc 的 30 条是 24 个岗位；Trustly 两条合成一个；用现在的意图重选一次今天的 10 个，看看会跳过哪些。
+
+## 6. 你需要知道的
+
+- 5b 还没合进 main。这个分支是在 5b 上做的（已经把 5b 合进来），合进 main 时会连 5b 一起。
+- 新规则会改变投递清单：有几处岗位分开（多出几行），也有几处合并（例如 Trustly）。已有的状态不改。
+- 已经生成的批次 batch-335e662b7664 用新代码不能开始：Handshake（第 8、11 个）和 RK Infotech（第 9、10 个）各是同一个岗位，Handshake 的 Indeed 那条已经没投成，按 §10 第 75 条 `start_applying` 会拒绝。合并后要重新生成批次，那时 Trustly 也不会再进。
+- 正在运行的工具服务要重启才会用新代码，配置也要用这个分支的 `configs/default.yaml`（新的 `duplicates` 一节）。

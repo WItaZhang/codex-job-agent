@@ -60,6 +60,11 @@ class ApplyList(_Section):
     dir: str
 
 
+class Duplicates(_Section):
+    shingle_words: int = Field(gt=0)
+    overlap: float = Field(gt=0, le=1)
+
+
 class ApplyMCP(_Section):
     playwright: str  # npm package with a pinned version (ApplyPilot runs @latest)
     gmail: str
@@ -119,6 +124,7 @@ class Settings(_Section):
     tagging: Tagging
     hard_review: HardReview
     apply_list: ApplyList
+    duplicates: Duplicates
     apply: Apply
     form_fill: FormFill
     llm: LLM
