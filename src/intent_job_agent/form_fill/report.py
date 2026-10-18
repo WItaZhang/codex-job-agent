@@ -11,7 +11,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from .compare import EMPTY_BLOCK, EXTRA, NAV_NOTE, check_page, is_empty
+from .compare import EMPTY_BLOCK, EXTRA, NAV_NOTE, REQUIRED_EMPTY, check_page, is_empty
 from .models import JobReport
 from .runner import GATE_REASONS
 
@@ -25,7 +25,8 @@ CONCLUSIONS = {
 REASONS = {
     "gate": "门槛",
     "needs_answer": "缺标准答案",
-    "stuck": "超时",
+    "stuck": "卡住",
+    "system_error": "程序没跑起来",
     "page_error": "页面出错",
     "expired": "已下架",
     "already_applied": "已经申请过",
@@ -36,19 +37,20 @@ REASONS = {
 AGENT_REASONS = {
     "timeout": "stuck",
     "no_result_line": "stuck",
-    "system_error": "page_error",
+    "system_error": "system_error",
     "login_issue": "login_failed",  # could not sign in nor register: not a gate (spec 5.5)
 }
 ADVICE = {  # what the user does next, by why the form was not filled (spec 5.5)
     "gate": "请你自己在标签页里过了这一关（不填 SSN、付款，不接受仲裁），再说“重跑 {job}”。",
     "needs_answer": "请补上标准答案，再在标签页里自己填，或者说“重跑 {job}”。",
     "stuck": "请在标签页里接着填，或者说“重跑 {job}”。",
+    "system_error": "填表 agent 没起来，网站没有打开过。请检查投递用的 Chrome 和 Claude Code，再说“重跑 {job}”。",
     "page_error": "请在标签页里看看页面怎么了，好了以后说“重跑 {job}”。",
     "login_failed": "登录和注册都没成功：请你自己在标签页里登录，再说“重跑 {job}”。",
     "expired": "岗位已经下架，不用再填。",
     "already_applied": "你已经申请过这个岗位，不用再填。",
     "wrong_job": "页面跳到了别的岗位，请确认清单里的地址。",
-    "email_only": "这个岗位只收邮件投递，请看备注里的地址。",
+    "email_only": "这个岗位只收邮件投递。备注里的邮箱地址已经打码，请到岗位页面上看。",
 }
 UNREADABLE = ("tab_lost", "readback_failed", "system_error")
 SEVERITIES = {"fact": "错的事实", "guess": "无依据的猜测", "missing": "缺漏", "format": "格式与写法"}
@@ -95,10 +97,9 @@ def _headline(meta: dict, conclusion: str, reason: str | None, results) -> str:
         why = status if status in UNREADABLE else "一栏都没读到"
         return f"读不出：{why}。标签页可能还在，请你自己打开看。"
     if conclusion == "do_not_submit":
-        return (
-            f"不能提交：{_count(results, 'fact')} 个错的事实、{_count(results, 'guess')} 个无依据的猜测。"
-            "下面这些改好之前不要提交。"
-        )
+        facts = sum(1 for r in results if r.severity == "fact" and not _per_segment(r))
+        facts += len({r.segment for r in results if r.severity == "fact" and _per_segment(r)})
+        return f"不能提交：{facts} 个错的事实、{_count(results, 'guess')} 个无依据的猜测。下面这些改好之前不要提交。"
     return "检查后可提交：没有查到错的事实。请按下面几条看一遍标签页再提交。"
 
 
@@ -146,6 +147,8 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
             groups["fact"].append(f"{where}：现在是「{r.value}」，应为「{r.expected}」（{r.key}）。请在标签页里改。")
         elif r.severity == "guess":
             groups["guess"].append(f"{where}：{r.note}「{r.value}」。请确认，或补标准答案（{r.key}）。")
+        elif r.note == REQUIRED_EMPTY:
+            groups["required"].append(f"{r.field_id} {r.question[:60]}")
         elif r.severity == "missing" and r.field_id and r.expected:
             groups["missing"].append(f"{where}：{r.note or '空着'}，应为「{r.expected}」（{r.key}）。")
         elif r.severity == "missing" and r.field_id:
@@ -167,7 +170,13 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
         elif r.result == "no_answer" and r.note != NAV_NOTE and r.key is None and r.field_id:
             groups["empty"].append(f"{r.field_id} {r.question[:60]}")
     items += groups["fact"] + _segment_items(results)
-    items += groups["guess"] + groups["missing"] + groups["format"] + groups["ambiguous"]
+    items += groups["guess"] + groups["missing"]
+    if groups["required"]:
+        items.append(
+            f"必填、空着、也没有标准答案的 {len(groups['required'])} 栏（不填交不了，请补标准答案或在标签页里自己填）："
+            + "；".join(groups["required"])
+        )
+    items += groups["format"] + groups["ambiguous"]
     items += groups["no_option"] + groups["spelling"]
     if groups["not_reviewed"]:
         items.append(
@@ -182,9 +191,10 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
     return tuple(items)
 
 
-def job_report(meta: dict, fields, answers) -> JobReport:
-    """One job's report from its meta.json and the fields read back from its last page."""
-    results = check_page(fields, answers) if fields else ()
+def job_report(meta: dict, fields, answers, contacts: bool = True) -> JobReport:
+    """One job's report from its meta.json and the fields read back from its last page. `contacts=False` for a page
+    saved before redact.VERSION (see compare.check_page)."""
+    results = check_page(fields, answers, contacts=contacts) if fields else ()
     conclusion, reason = conclude(meta, results)
     return JobReport(
         job_id=meta.get("job_id", ""),
@@ -213,7 +223,9 @@ def _tally(report: JobReport) -> str:
 
 
 def _problems(report: JobReport) -> set[str]:
+    """Answer-sheet keys with a problem: a severity, a tie, or a no-answer that asks the user to amend the entry."""
     keys = {r.key for r in report.fields if r.key and r.severity != "none"}
+    keys |= {r.key for r in report.fields if r.key and r.result == "no_answer" and r.note and r.note != NAV_NOTE}
     return keys | {key for r in report.fields if r.result == "ambiguous" for key in r.candidates}
 
 

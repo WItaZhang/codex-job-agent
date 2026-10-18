@@ -466,3 +466,123 @@ def test_a_contact_fields_unmasked_value_is_hidden_in_results(tmp_path):
 def test_a_missing_option_is_named_with_the_choices(sheet):
     v = compare_value(sheet["eeo.race"], "", options=("Select...", "Asian", "White"))
     assert v.result == "no_answer" and "Asian、White" in v.note
+
+
+# --- review round 2 (decision 20) -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("value", ["No Selection", "No answer", "Choose..."])
+def test_a_yes_no_left_on_other_placeholders_is_missing(tmp_path, value):
+    answers = load(tmp_path, {"work_auth.sponsorship_now": {"answer": "No", "kind": "yes_no"}})
+    v = compare_value(answers["work_auth.sponsorship_now"], value, control="select")
+    assert (v.result, v.severity) == ("wrong", "missing")
+
+
+@pytest.mark.parametrize(
+    ("value", "want"),
+    [
+        ("03/09/2025 - 07/12/2026", "wrong"),
+        ("Mar 1, 2025 - Jul 15, 2026", "wrong"),
+        ("03-2025 - 09-2026", "wrong"),
+        ("03.2025 - 09.2026", "wrong"),
+        ("09/01/2025 - 12/01/2026", "correct"),
+        ("09-2025 - 12-2026", "correct"),
+        ("Sep 1, 2025 to Dec 15, 2026", "correct"),
+        ("2025-09-2026-12", "correct"),
+    ],
+)
+def test_ranges_parse_each_half_as_a_whole(sheet, value, want):
+    assert compare_part(sheet["education.ms_esu"], "range", value).result == want
+
+
+ADDRESS = {**CONTACTS, "contact.github": {"from_profile": "personal.github_url"}}
+
+
+def address_sheet(tmp_path):
+    path = tmp_path / "answers.yaml"
+    path.write_text(yaml.safe_dump({"version": 1, "entries": {**NAMES, **ADDRESS}}), "utf-8")
+    return load_answers(path, PROFILE_FIELDS | {"personal.linkedin_url", "personal.github_url"}, set())
+
+
+@pytest.mark.parametrize(
+    ("value", "want"),
+    [
+        ("[address], [city], TX [postal_code], USA", "correct"),
+        ("[address], Springfield, IL 62701", "wrong"),
+        ("[address] 99999", "wrong"),
+        ("[address], Apt 5", "not_reviewed"),
+    ],
+)
+def test_an_address_may_only_hold_the_applicants_own_parts(tmp_path, value, want):
+    assert compare_value(address_sheet(tmp_path)["contact.address"], value).result == want
+
+
+def test_a_profile_field_sharing_its_value_accepts_the_other_placeholder(tmp_path):
+    entry = address_sheet(tmp_path)["contact.github"].model_copy(update={"accept": ("[linkedin]",)})
+    assert compare_value(entry, "[linkedin]").result == "correct"
+    assert compare_value(entry, "[github]").result == "correct"
+    assert compare_value(address_sheet(tmp_path)["contact.github"], "[linkedin]").result == "wrong"
+
+
+def test_a_city_named_like_its_state_may_repeat(tmp_path):
+    assert compare_value(address_sheet(tmp_path)["contact.city"], "[city], [city], United States").result == "correct"
+
+
+@pytest.mark.parametrize(("answer", "want"), [("Yes", ("correct", "none")), ("No", ("wrong", "fact"))])
+def test_a_ticked_box_says_yes_whatever_its_label(tmp_path, answer, want):
+    entry = load(tmp_path, {"screening.consent": {"answer": answer, "kind": "yes_no"}})["screening.consent"]
+    v = compare_value(entry, "I agree to be contacted", control="checkbox")
+    assert (v.result, v.severity) == want
+
+
+def test_a_yes_no_whose_page_offers_neither_yes_nor_no(tmp_path):
+    entry = load(tmp_path, {"work_auth.ok": {"answer": "Yes", "kind": "yes_no"}})["work_auth.ok"]
+    options = ("I am authorized to work in the US", "I am not authorized to work in the US")
+    v = compare_value(entry, "", options=options, control="radio")
+    assert v.result == "no_answer" and "I am authorized to work in the US" in v.note
+    declined = load(tmp_path, {"eeo.x": {"answer": "No", "kind": "yes_no", "otherwise": "I don't wish to answer"}})
+    assert compare_value(declined["eeo.x"], "I don't wish to answer").result == "correct"
+
+
+def test_a_placeholder_never_equals_a_plain_word(tmp_path):
+    entry = load(tmp_path, {"screening.heard": {"answer": "LinkedIn", "kind": "text"}})["screening.heard"]
+    assert compare_value(entry, "[linkedin]").result == "wrong"
+    assert compare_value(entry, "LinkedIn").result == "correct"
+
+
+@pytest.mark.parametrize("value", ["Riverton NY", "Riverton (NY)", "Riverton · United States"])
+def test_a_city_with_the_state_but_no_comma_is_format(sheet, value):
+    v = compare_part(sheet["education.beng_nru"], "city", value)
+    assert (v.result, v.severity) == ("wrong", "format")
+
+
+@pytest.mark.parametrize(
+    ("value", "want"), [("90000.", "correct"), ("80k~100k", "correct"), ("between 80k and 100k", "correct")]
+)
+def test_number_min_more_spellings(sheet, value, want):
+    assert compare_value(sheet["compensation.expected"], value).result == want
+
+
+def test_a_required_field_left_empty_without_an_answer_is_missing(tmp_path):
+    answers = load(tmp_path, {})
+    f = ReadField(
+        id="p1.1",
+        question="Have you worked for Acme?",
+        value="",
+        control="radio",
+        origin="control",
+        options=("Yes", "No"),
+        required=True,
+    )
+    (r,) = check_page([f], answers)
+    assert (r.result, r.severity) == ("no_answer", "missing")
+
+
+def test_contact_fields_on_an_old_page_are_not_reviewed(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    rows = [("Email", "[email]", "text"), ("First name", "Sam", "text")]
+    got = by_id(check_page(page(rows), answers, contacts=False))
+    assert got["p1.1"].result == "not_reviewed" and "旧的打码格式" in got["p1.1"].note
+    assert got["p1.2"].result == "correct"
+    (empty,) = check_page(page([("Location", "", "combobox")]), answers, contacts=False)
+    assert (empty.key, empty.result, empty.severity) == ("contact.city", "wrong", "missing")

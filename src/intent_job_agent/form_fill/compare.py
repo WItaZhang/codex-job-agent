@@ -55,13 +55,13 @@ DATE_FORMATS = (
     "%d %b %Y",
 )
 ONGOING = frozenset({"present", "current", "now", "ongoing"})
-NUMBER = re.compile(r"(?<![\d.,])(\d[\d,]*(?:\.\d+)?)(?![\d.,])(?:\s*(k)(?=usd\b|[^a-z]|$))?", re.I)
-NUMBER_RANGE = re.compile(r"\d\s*k?\s*(?:[-–—]|to)\s*\$?\s*\d", re.I)  # "$80k-$100k", "80,000 to 100,000"
-MONTH_TOKEN = re.compile(
-    r"\d{4}\s*[-/.]\s*\d{1,2}(?!\d)|\d{1,2}\s*/\s*\d{4}|[a-z]{3,9}\.?,?\s+\d{4}|\b\d{4}\b|\bpresent\b|\bcurrent\b|\bnow\b",
-    re.I,
-)
+NUMBER = re.compile(r"(?<![\d.,])(\d[\d,]*(?:\.\d+)?)(?![\d,]|\.\d)(?:\s*(k)(?=usd\b|[^a-z]|$))?", re.I)
+NUMBER_RANGE = re.compile(r"\d\s*k?\s*(?:[-–—~]|to|and)\s*\$?\s*\d", re.I)  # "$80k-$100k", "80k and 100k"
+RANGE_SEPARATOR = re.compile(r"\s+(?:-|–|—|to|until|through)\s+|\s*[–—]\s*", re.I)
 NAV_NOTE = "页面上的步骤导航，不是填写项"
+OLD_PAGE = "这一页是按旧的打码格式存的，分不出是不是你自己的联系方式；重新读这一页才能核对"
+REQUIRED_EMPTY = "必填，空着，也没有标准答案"
+APARTMENT = frozenset({"apt", "apartment", "suite", "ste", "unit", "floor", "fl", "room", "rm"})
 EXTRA = "多出来的一段经历"
 EMPTY_BLOCK = "空着的一段，对不上标准答案里的哪一段"
 US_STATES = {
@@ -86,8 +86,9 @@ class Verdict(NamedTuple):
 
 
 def _same(value: str, candidates) -> bool:
-    v = norm(value)
-    return any(v == norm(c) for c in candidates if c is not None and norm(c))
+    """Equal after normalizing; placeholders compare as themselves, so "[linkedin]" never equals "LinkedIn"."""
+    v, marks = norm(value), MARK.findall(value or "")
+    return any(v == norm(c) and marks == MARK.findall(c) for c in candidates if c is not None and norm(c))
 
 
 def _missing(expected: str | None, note: str = "空着") -> Verdict:
@@ -115,7 +116,7 @@ def parse_month(text: str) -> tuple[int, int | None] | None:
     t = " ".join(t.replace(".", " ").split()).lower()
     if m := re.fullmatch(r"(\d{4})\s*[-/]\s*(\d{1,2})", t):
         year, month = int(m[1]), int(m[2])
-    elif m := re.fullmatch(r"(\d{1,2})\s*[-/]\s*(\d{4})", t):
+    elif m := re.fullmatch(r"(\d{1,2})\s*[-/ ]\s*(\d{4})", t):  # 09/2025, 09-2025, 09.2025
         year, month = int(m[2]), int(m[1])
     elif (m := re.fullmatch(r"([a-z]+),?\s+(\d{4})", t)) and m[1] in MONTHS:
         year, month = int(m[2]), MONTHS[m[1]]
@@ -179,17 +180,28 @@ def _contact(entry: AnswerEntry, value: str) -> Verdict:
     if is_empty(value):
         return _missing(mark)
     marks = MARK.findall(value)
+    own = {mark, *entry.accept}  # accept: the marks of profile fields with the same value (cli.load_sheet)
     field = (entry.from_profile or "").removeprefix("personal.")
-    if field == "address":  # the street, with the city, state, postal code and country around it
-        ok = mark in marks and set(marks) <= ADDRESS_MARKS
-    elif field == "city":  # the city first; a state or country after a comma is fine
-        ok = value.split(",", 1)[0].strip() == mark and marks == [mark]
+    if any(m in OTHERS for m in marks):
+        return Verdict("wrong", "fact", mark, "不是你自己的")
+    if field == "address":  # the street, with the applicant's own city, state, postal code and country around it
+        if not (own & set(marks) and set(marks) <= own | ADDRESS_MARKS):
+            return Verdict("wrong", "fact", mark)
+        rest = [w for w in norm(MARK.sub(" ", value)).split() if not _place_key(w)]
+        rest = [w for w in rest if w not in ("united", "states", "of", "america")]
+        if not rest:
+            return Verdict("correct")
+        if all(w in APARTMENT or w.isdigit() and len(w) <= 4 for w in rest):
+            return Verdict("not_reviewed", note="住址里多了门牌、楼层这类内容，代码判断不了")
+        return Verdict("wrong", "fact", mark, "住址里有不是你自己的城市或邮编")
+    if field == "city":  # the city first; a state or country after a comma is fine
+        head = value.split(",", 1)[0].strip()
+        ok = head in own and set(marks) <= own
     else:  # the value itself, with at most a label in brackets: "[phone] (Mobile)"
-        rest = re.sub(r"\([^()]*\)", " ", value.replace(mark, " ", 1))
-        ok = marks == [mark] and not re.search(r"\w", rest)
-    if ok:
-        return Verdict("correct")
-    return Verdict("wrong", "fact", mark, "不是你自己的" if any(m in OTHERS for m in marks) else "")
+        found = [m for m in marks if m in own]
+        rest = re.sub(r"\([^()]*\)", " ", value.replace(found[0], " ", 1)) if found else value
+        ok = len(marks) == 1 and bool(found) and not re.search(r"\w", rest)
+    return Verdict("correct") if ok else Verdict("wrong", "fact", mark)
 
 
 def _text(entry: AnswerEntry, value: str, options) -> Verdict:
@@ -215,17 +227,32 @@ def _text(entry: AnswerEntry, value: str, options) -> Verdict:
     return Verdict("wrong", "fact", expected)
 
 
-def _yes_no(entry: AnswerEntry, value: str, control: str) -> Verdict:
+def _yes_or_no(text: str) -> str | None:
+    first = norm(text).split(" ", 1)[0]
+    return first if first in ("yes", "no") else None
+
+
+def _yes_no(entry: AnswerEntry, value: str, control: str, options=()) -> Verdict:
     answer = norm(entry.answer)
     if _same(value, entry.accept):
         return Verdict("correct")
-    if control == "checkbox" and is_empty(value):  # an unticked box says No
-        return Verdict("correct") if answer == "no" else _missing(entry.answer, "没勾")
+    if control == "checkbox":  # a box: unticked says No, ticked says Yes, whatever its label
+        said = "yes" if not is_empty(value) else "no"
+        if said == answer:
+            return Verdict("correct")
+        return _missing(entry.answer, "没勾") if said == "no" else Verdict("wrong", "fact", entry.answer, "勾上了")
+    if entry.otherwise and _same(value, [entry.otherwise]):
+        return Verdict("correct", note="按 otherwise")
+    readable = [o for o in options if not is_empty(o) and (_yes_or_no(o) or _same(o, entry.accept))]
+    if options and not readable:  # the page offers no Yes/No and no accepted spelling
+        shown = "、".join(o for o in options[:10] if not is_empty(o))
+        note = f"页面上没有标准答案的选项（可选的有：{shown}），也没写 otherwise"
+        return Verdict("no_answer", note=note)
     if is_empty(value):  # before the first word: "No Response" is not a No
         return _missing(entry.answer)
-    first = norm(value).split(" ", 1)[0]
-    if first in ("yes", "no"):
-        return Verdict("correct") if first == answer else Verdict("wrong", "fact", entry.answer)
+    said = _yes_or_no(value)
+    if said:
+        return Verdict("correct") if said == answer else Verdict("wrong", "fact", entry.answer)
     return Verdict("no_answer", note="选项不以 Yes 或 No 开头，也不在 accept 里")
 
 
@@ -270,7 +297,7 @@ def compare_value(entry: AnswerEntry, value: str, *, options=(), control: str = 
         return _contact(entry, value)
     kind = entry.kind or "text"
     if kind == "yes_no":
-        return _yes_no(entry, value, control)
+        return _yes_no(entry, value, control, tuple(options))
     if kind == "number_min":
         return _number_min(entry, value)
     if kind == "month":
@@ -295,12 +322,24 @@ def compare_value(entry: AnswerEntry, value: str, *, options=(), control: str = 
 # --- record segments --------------------------------------------------------------------------------------------
 
 
+def split_range(value: str) -> tuple[str, str] | None:
+    """A start and an end in one field, split on " - ", "–", " to " ..., or on a bare hyphen between two dates."""
+    pieces = RANGE_SEPARATOR.split(value.strip(), maxsplit=1)
+    if len(pieces) == 2:
+        return pieces[0], pieces[1]
+    for at in [i for i, c in enumerate(value) if c == "-"]:
+        left, right = value[:at], value[at + 1 :]
+        if parse_month(left) and (parse_month(right) or norm(right) in ONGOING):
+            return left, right
+    return None
+
+
 def _range(entry: AnswerEntry, value: str) -> Verdict:
     want = f"{entry.record['start']} – {entry.record['end']}"
     if is_empty(value):
         return _missing(want)
-    tokens = MONTH_TOKEN.findall(value)
-    if len(tokens) != 2:
+    tokens = split_range(value)
+    if tokens is None:
         return Verdict("not_reviewed", note="读不出起止，代码判断不了")
     halves = [
         _month(entry.record[part], token, entry.record_accept.get(part, ()), entry.record_otherwise.get(part, ()))
@@ -340,7 +379,9 @@ def compare_part(entry: AnswerEntry, part: str, value: str, *, options=()) -> Ve
     if part in ("start", "end"):
         return _month(expected, value)
     if part == "city":
-        if _same(value.split(",", 1)[0], names):
+        head = re.split(r"\s*[,(·|]\s*", value.strip(), maxsplit=1)[0]
+        tail = next((norm(value)[len(norm(n)) :].strip() for n in names if norm(value).startswith(norm(n) + " ")), "")
+        if _same(head, names) or (tail and (_place_key(tail) or norm(tail) in UNITED_STATES)):
             return Verdict("wrong", "format", expected, "只写城市名，不写州和国家")
         return Verdict("wrong", "fact", expected)
     if otherwise:
@@ -372,8 +413,9 @@ def _shown(value: str, entry: AnswerEntry | None, ambiguous) -> str:
     return HIDDEN
 
 
-def check_page(fields, answers: dict[str, AnswerEntry]) -> tuple[CheckResult, ...]:
-    """Every field of the page checked, in page order, then one result per record segment the page lacks."""
+def check_page(fields, answers: dict[str, AnswerEntry], contacts: bool = True) -> tuple[CheckResult, ...]:
+    """Every field of the page checked, in page order, then one result per record segment the page lacks.
+    `contacts=False` for a page saved before redact.VERSION: its contact fields are not reviewed (decision 20)."""
     fields = list(fields)
     found = match_page(fields, answers, score=segment_score)
     labels = {segment.index: segment.label for segment in found.segments}
@@ -417,10 +459,19 @@ def check_page(fields, answers: dict[str, AnswerEntry]) -> tuple[CheckResult, ..
                 verdict = Verdict("no_answer")
             else:
                 verdict = Verdict("not_reviewed", note="这一段没填学校或公司，代码对不上是哪一段")
+        elif entry is not None and entry.category == "contact" and entry.answer is None and not contacts:
+            # an empty field is empty in any masking format; a filled one cannot be told the applicant's own
+            verdict = (
+                _missing(placeholder(entry.from_profile))
+                if is_empty(f.value)
+                else Verdict("not_reviewed", note=OLD_PAGE)
+            )
         elif entry is not None and m.segment is not None:
             verdict = compare_part(entry, m.part or "other", f.value, options=f.options)
         elif entry is not None:
             verdict = compare_value(entry, f.value, options=f.options, control=f.control)
+        elif is_empty(f.value) and f.required:
+            verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY)
         elif is_empty(f.value):
             verdict = Verdict("no_answer")
         elif f.control == "file":

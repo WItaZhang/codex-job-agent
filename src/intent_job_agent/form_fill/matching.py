@@ -102,8 +102,16 @@ EMPTY = frozenset(
 )
 
 
+# Placeholder spellings beyond the list: "-- Make a Selection --", "Choose...", "No Selection", "Nothing selected".
+PLACEHOLDER_LIKE = re.compile(
+    r"^((please )?(select|choose|pick|make a selection)( (one|an option|an answer|a value|from the list))?"
+    r"|(no|nothing|not) (selection|selected|answer|response|option|value)( (selected|provided|given))?)$"
+)
+
+
 def is_empty(value: str) -> bool:
-    return norm(value) in EMPTY
+    v = norm(value)
+    return v in EMPTY or bool(PLACEHOLDER_LIKE.match(v))
 
 
 @dataclass(frozen=True)
@@ -277,7 +285,10 @@ def _same_second(entry: AnswerEntry, values: dict[str, str]) -> int:
 
 
 def _assign(drafts, fields, answers, score) -> tuple[dict[int, str], dict[int, tuple[str, ...]], set[int]]:
-    """Segments -> entries over the whole page: (assigned, ambiguous, unanchored segment numbers)."""
+    """Segments -> entries over the whole page: (assigned, ambiguous, unanchored segment numbers).
+
+    Repeatedly gives the segment with the strongest unique best candidate its entry, so a tie is decided only after
+    every unique match has taken its entry: a segment tied between two entries gets the one left over."""
     candidates: dict[int, list[tuple[int, int, str]]] = {}
     unanchored: set[int] = set()
     for n, draft in enumerate(drafts):
@@ -292,22 +303,26 @@ def _assign(drafts, fields, answers, score) -> tuple[dict[int, str], dict[int, t
         else:
             found = [(_strength(value, e, ANCHOR[draft.kind]), key, e) for key, e in records]
             candidates[n] = [(st, score(e, values), key) for st, key, e in found if st]
-    pairs = sorted(
-        ((st, sc, n, key) for n, cands in candidates.items() for st, sc, key in cands),
-        key=lambda item: (-item[0], -item[1], item[2]),
-    )
     assigned: dict[int, str] = {}
-    ambiguous: dict[int, tuple[str, ...]] = {}
-    for st, sc, n, key in pairs:
-        if n in assigned or n in ambiguous or key in assigned.values():
-            continue
-        rivals = [
-            k for st2, sc2, k in candidates[n] if (st2, sc2) == (st, sc) and k != key and k not in assigned.values()
-        ]
-        if rivals:
-            ambiguous[n] = tuple(sorted({key, *rivals}))
-        else:
-            assigned[n] = key
+    open_ = {n for n, cands in candidates.items() if cands}
+
+    def best(n: int) -> tuple[tuple[int, int], list[str]]:
+        free = [(st, sc, key) for st, sc, key in candidates[n] if key not in assigned.values()]
+        if not free:
+            return (-1, -1), []
+        level = max((st, sc) for st, sc, _ in free)
+        return level, [key for st, sc, key in free if (st, sc) == level]
+
+    while open_:
+        tops = {n: best(n) for n in open_}
+        unique = [(level, n, keys[0]) for n, (level, keys) in tops.items() if len(keys) == 1]
+        if not unique:
+            break
+        _, n, key = max(unique, key=lambda item: (item[0], -item[1]))
+        assigned[n] = key
+        open_.discard(n)
+        open_ -= {m for m, (_, keys) in tops.items() if not keys}
+    ambiguous = {n: tuple(sorted(keys)) for n in open_ for _, keys in [best(n)] if len(keys) > 1}
     return assigned, ambiguous, {n for n in unanchored if n not in assigned and n not in ambiguous}
 
 

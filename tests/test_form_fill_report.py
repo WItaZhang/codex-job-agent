@@ -104,7 +104,7 @@ def test_not_filled_says_what_happened_first(tmp_path):
     answers = load(tmp_path, ERRORS["answers"])
     report = job_report(meta(agent_result="timeout"), page(ERRORS["pages"][2]["fields"]), answers)
     assert report.conclusion == "not_filled" and report.not_filled_reason == "stuck"
-    assert report.todo[0].startswith("没填完：超时")
+    assert report.todo[0].startswith("没填完：卡住（填表 agent 的结果：timeout）")
 
 
 def test_summary_md(tmp_path, linkedin_report):
@@ -231,3 +231,52 @@ def test_ambiguous_questions_count_toward_problems_seen_in_two_jobs(tmp_path):
     reports = [job_report(meta(job_id=j), page(rows), answers) for j in ("j1", "j2")]
     repeated = summary_md("r", reports).split("## 在两个以上岗位出现的问题")[1]
     assert "work_auth.now：j1、j2" in repeated and "work_auth.later：j1、j2" in repeated
+
+
+# --- review round 2 (decision 20) -------------------------------------------------------------------------------
+
+
+def test_an_agent_that_never_started_is_not_a_page_error(tmp_path):
+    report = job_report(meta(status="system_error", agent_result="system_error"), (), load(tmp_path, ERRORS["answers"]))
+    assert report.not_filled_reason == "system_error" and "程序没跑起来" in report.todo[0]
+    assert "标签页" not in report.todo[0]
+
+
+def test_email_only_does_not_point_to_a_masked_address(tmp_path):
+    report = job_report(meta(agent_result="email_only"), (), load(tmp_path, ERRORS["answers"]))
+    assert "已经打码" in report.todo[0]
+
+
+def test_the_headline_counts_an_extra_segment_once(tmp_path):
+    report = job_report(meta(), page(ERRORS["pages"][0]["fields"]), load(tmp_path, ERRORS["answers"]))
+    assert report.todo[0].startswith("不能提交：6 个错的事实"), "4 fields and 2 extra segments"
+
+
+def test_answer_sheet_amendments_count_toward_repeated_problems(tmp_path):
+    answers = load(tmp_path, {"eeo.veteran": {"answer": "Decline", "kind": "choice", "asks": ["protected veteran"]}})
+    fields = (
+        ReadField(
+            id="p1.1",
+            question="Are you a protected veteran?",
+            value="",
+            control="select",
+            origin="control",
+            options=("I am a protected veteran", "I am not a protected veteran"),
+        ),
+    )
+    reports = [job_report(meta(job_id=j), fields, answers) for j in ("j1", "j2")]
+    assert "eeo.veteran：j1、j2" in summary_md("r", reports)
+
+
+def test_required_empty_fields_get_their_own_item(tmp_path):
+    f = ReadField(
+        id="p1.1",
+        question="Have you worked for Acme?",
+        value="",
+        control="radio",
+        origin="control",
+        options=("Yes", "No"),
+        required=True,
+    )
+    todo = job_report(meta(), (f,), load(tmp_path, {})).todo
+    assert any(item.startswith("必填、空着") and "p1.1" in item for item in todo)

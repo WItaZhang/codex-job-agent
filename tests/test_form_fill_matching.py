@@ -352,3 +352,59 @@ def test_the_schools_otherwise_finds_the_segment(tmp_path):
     answers = load(tmp_path, {"education.ms_esu": entry})
     found = match_page(page([["School", "Other", "review"], ["Degree", "MS", "review"]]), answers)
     assert found.fields["p1.1"].key == "education.ms_esu" and found.missing == ()
+
+
+# --- review round 2 (decision 20) -------------------------------------------------------------------------------
+
+
+def test_a_tie_waits_for_the_unique_matches_on_the_page(tmp_path):
+    bs = {k: v for k, v in ERRORS["answers"]["education.beng_nru"].items() if k not in ("accept", "otherwise")}
+    ms = {**bs, "degree": "Master of Science"}
+    answers = load(tmp_path, {"education.bs": bs, "education.ms": ms})
+    fields = page(
+        [
+            ["School", "Northern River University", "review"],
+            ["Field of Study", "Geographic Information System", "review"],
+            ["From", "2019", "review"],
+            ["School", "Northern River University", "review"],
+            ["Degree", "Master of Science", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert [found.fields[f"p1.{n}"].key for n in (1, 4)] == ["education.bs", "education.ms"]
+
+
+def test_a_tie_with_both_records_taken_is_an_extra_segment(tmp_path):
+    bs = {k: v for k, v in ERRORS["answers"]["education.beng_nru"].items() if k not in ("accept", "otherwise")}
+    answers = load(tmp_path, {"education.bs": bs, "education.ms": {**bs, "degree": "Master of Science"}})
+    fields = page(
+        [
+            ["School", "Northern River University", "review"],
+            ["School", "Northern River University", "review"],
+            ["Degree", "Bachelor of Engineering", "review"],
+            ["School", "Northern River University", "review"],
+            ["Degree", "Master of Science", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert found.fields["p1.1"].extra and [found.fields[f"p1.{n}"].key for n in (2, 4)] == [
+        "education.bs",
+        "education.ms",
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["No Selection", "No answer", "No option selected", "Nothing selected", "-- Make a Selection --", "Choose..."],
+)
+def test_more_placeholder_spellings_are_empty(value):
+    from intent_job_agent.form_fill.matching import is_empty
+
+    assert is_empty(value)
+
+
+@pytest.mark.parametrize("value", ["No", "None of the above", "No preference", "Not applicable"])
+def test_real_answers_are_not_placeholders(value):
+    from intent_job_agent.form_fill.matching import is_empty
+
+    assert not is_empty(value)

@@ -5,11 +5,16 @@
 checks the pages saved under data/local/form-fill/runs/<run id>/ against answers.yaml again and writes <job>.json and
 summary.md next to them. It opens no browser, visits no site and never reads the agents' logs (log.jsonl). Only code
 reads profile.json, for the redaction and for contact fields that are never masked (state, country).
+
+Pages saved before redact.VERSION (no "redaction" in meta.json) were masked with one placeholder per kind and wrote
+anyone's e-mail as [email]: they are checked against a sheet masked the same old way, and their contact fields are
+not reviewed (decision 20).
 """
 
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -18,25 +23,36 @@ from .. import applicant as applicant_files
 from ..config import Settings
 from ..domain import InvariantError
 from . import runner
-from .compare import placeholder
+from .compare import MARK, placeholder
 from .inputs import load_answers, profile_field_paths
 from .models import AnswerEntry, ReadField
-from .redact import Redactor
+from .redact import VERSION, Redactor
 from .report import job_report, write_reports
 
 META_FILE, READBACK_FILE = runner.META_FILE, "readback.json"
 
 
 def plain_contacts(answers: dict[str, AnswerEntry], profile: dict, redactor: Redactor) -> dict[str, AnswerEntry]:
-    """Contact entries whose profile value saved pages never mask (state, country, a city too short to mask) get the
-    value as their answer, compared as text."""
+    """Contact entries, as saved pages show them.
+    - A profile value saved pages never mask (state, country, a city too short to mask) becomes the answer, compared
+      as text; masked as the page would mask it, so a state that equals the city reads "[city]" on both sides.
+    - A masked value whose profile value another field shares (portfolio URL = GitHub URL) also accepts that
+      field's placeholder: the page shows whichever the redactor applied."""
     out = dict(answers)
     for key, entry in answers.items():
         if entry.category != "contact" or not entry.from_profile:
             continue
-        value = runner._profile_value(profile, entry.from_profile)
-        if value and value.strip() and (placeholder(entry.from_profile) is None or redactor.mask(value) == value):
-            out[key] = entry.model_copy(update={"answer": value.strip(), "kind": "text"})
+        value = (runner._profile_value(profile, entry.from_profile) or "").strip()
+        if not value:
+            continue
+        masked = redactor.mask(value)
+        mark = placeholder(entry.from_profile)
+        if mark is None or masked == value:
+            out[key] = entry.model_copy(update={"answer": masked, "kind": "text"})
+        else:
+            shared = tuple(m for m in MARK.findall(masked) if m != mark)
+            if shared and masked.strip() in shared:
+                out[key] = entry.model_copy(update={"accept": shared})
     return out
 
 
@@ -53,24 +69,43 @@ def _mask(redactor: Redactor, value):
 def mask_sheet(answers: dict[str, AnswerEntry], redactor: Redactor) -> dict[str, AnswerEntry]:
     """The answer sheet masked as the saved pages are, so both sides compare alike: the applicant's city inside a
     school name ("University of California, [city]") or as a job's city ("[city]")."""
-    fields = ("answer", "accept", "otherwise", "record", "record_accept", "record_otherwise", "aliases")
+    fields = ("answer", "accept", "otherwise", "record", "record_accept", "record_otherwise", "aliases", "asks")
     return {
         key: entry.model_copy(update={name: _mask(redactor, getattr(entry, name)) for name in fields})
         for key, entry in answers.items()
     }
 
 
-def load_sheet(data_dir: Path, settings: Settings) -> tuple[dict[str, AnswerEntry], Redactor]:
+@dataclass(frozen=True)
+class Sheet:
+    """The answer sheet masked for pages saved now (`current`) and before redact.VERSION (`legacy`)."""
+
+    current: dict[str, AnswerEntry]
+    legacy: dict[str, AnswerEntry]
+    redactor: Redactor
+
+    def for_page(self, meta: dict) -> tuple[dict[str, AnswerEntry], bool]:
+        """(sheet, whether contact fields can be checked) for a job's page."""
+        if meta.get("redaction") == VERSION:
+            return self.current, True
+        return self.legacy, False
+
+
+def load_sheet(data_dir: Path, settings: Settings) -> Sheet:
     """answers.yaml checked and resolved as for a run, masked like the saved pages, and the redactor built from
-    profile.json."""
+    profile.json. Errors are masked too: a contact value written into answers.yaml by mistake is never echoed."""
     applicant = applicant_files.load(Path(data_dir), settings.apply.applicant_dir)
     fields = profile_field_paths(applicant.profile)
     profile = json.loads(applicant.profile.read_text(encoding="utf-8"))
-    redactor = Redactor.from_profile(profile)
+    redactor, old = Redactor.from_profile(profile), Redactor.from_profile(profile, legacy=True)
     values = runner.applicant_values(applicant)
-    answers = load_answers(applicant.folder / settings.form_fill.answers_file, fields, set(values))
-    answers = mask_sheet(runner.resolve(answers, profile, values), redactor)
-    return plain_contacts(answers, profile, redactor), redactor
+    try:
+        answers = load_answers(applicant.folder / settings.form_fill.answers_file, fields, set(values))
+        answers = runner.resolve(answers, profile, values)
+    except InvariantError as error:
+        raise InvariantError(redactor.mask(str(error))) from None
+    current = plain_contacts(mask_sheet(answers, redactor), profile, redactor)
+    return Sheet(current, plain_contacts(mask_sheet(answers, old), profile, old), redactor)
 
 
 def _broken(job_dir: Path, why: str) -> tuple[dict, tuple[ReadField, ...]]:
@@ -113,8 +148,12 @@ def run_report(run_id: str, data_dir: Path, settings: Settings) -> Path:
     if not jobs:
         raise InvariantError(f"run {run_id} has no job folders")
     jobs.sort(key=lambda job: str(job[0].get("started", "")))
-    answers, redactor = load_sheet(data_dir, settings)
-    return write_reports(run_dir, [job_report(meta, fields, answers) for meta, fields in jobs], redactor)
+    sheet = load_sheet(data_dir, settings)
+    reports = []
+    for meta, fields in jobs:
+        answers, contacts = sheet.for_page(meta)
+        reports.append(job_report(meta, fields, answers, contacts=contacts))
+    return write_reports(run_dir, reports, sheet.redactor)
 
 
 def main(argv=None) -> int:

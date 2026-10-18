@@ -36,7 +36,9 @@ FIELDS = {  # personal.<field> in ApplyPilot's profile format -> kind (how the v
     "password": "password",
 }
 # Each field has its own placeholder, so a check of a saved page can tell the city from the street address, or the
-# LinkedIn URL from the GitHub one (decision 19).
+# LinkedIn URL from the GitHub one (decision 19). VERSION is written into each job's meta.json; pages saved before it
+# (no version) used one placeholder per kind and wrote anyone's e-mail and phone as [email] and [phone] (decision 20).
+VERSION = 2
 FIELD_PLACEHOLDER = {
     "email": "[email]",
     "phone": "[phone]",
@@ -138,15 +140,18 @@ _BUILD: dict[str, Callable[[str], str | None]] = {
 class Redactor:
     """Masks the applicant's contact values and password, plus any e-mail- or phone-shaped text."""
 
-    def __init__(self, patterns: list[tuple[str, re.Pattern[str]]], marks: list[str] | None = None):
+    def __init__(self, patterns: list[tuple[str, re.Pattern[str]]], marks: list[str] | None = None, legacy=False):
         self._patterns = patterns
         self._marks = marks or [PLACEHOLDER[kind] for kind, _ in patterns]
+        # The placeholders of pages saved before VERSION: one per kind, and no mark of its own for someone else's.
+        self._other = ("[email]", "[phone]") if legacy else (PLACEHOLDER["other_email"], PLACEHOLDER["other_phone"])
 
     def __repr__(self) -> str:
         return f"Redactor({len(self._patterns)} patterns)"
 
     @classmethod
-    def from_profile(cls, profile: dict) -> "Redactor":
+    def from_profile(cls, profile: dict, legacy: bool = False) -> "Redactor":
+        """`legacy`: mask as pages saved before VERSION were masked, so a check compares like with like."""
         personal = profile.get("personal") if isinstance(profile, dict) else None
         if not isinstance(personal, dict):
             raise InvariantError("profile: missing the personal section")
@@ -164,21 +169,22 @@ class Redactor:
             if pattern:
                 found.append((len(value), kind, pattern, FIELD_PLACEHOLDER[field]))
         found.sort(key=lambda item: -item[0])  # longer values first, so a city inside an address goes with it
-        return cls([(kind, re.compile(pattern, re.I)) for _, kind, pattern, _ in found], [mark for *_, mark in found])
+        marks = [PLACEHOLDER[kind] if legacy else mark for _, kind, _, mark in found]
+        return cls([(kind, re.compile(pattern, re.I)) for _, kind, pattern, _ in found], marks, legacy)
 
     def _apply(self, text: str) -> tuple[str, Counter]:
         hits: Counter = Counter()
         for (kind, pattern), mark in zip(self._patterns, self._marks, strict=True):
             text, n = pattern.subn(mark, text)
             hits[kind] += n
-        text, n = _OTHER_EMAIL.subn(PLACEHOLDER["other_email"], text)
+        text, n = _OTHER_EMAIL.subn(self._other[0], text)
         hits["other_email"] += n
 
         def phone(match: re.Match[str]) -> str:
             if not 10 <= len(re.sub(r"\D", "", match.group())) <= 15:
                 return match.group()
             hits["other_phone"] += 1
-            return PLACEHOLDER["other_phone"]
+            return self._other[1]
 
         return _OTHER_PHONE.sub(phone, text), hits
 

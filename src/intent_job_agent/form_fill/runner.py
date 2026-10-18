@@ -29,6 +29,7 @@ from ..domain import InvariantError
 from . import readback
 from .inputs import load_answers, load_checklist, load_list, profile_field_paths
 from .models import RECORD_FIELDS, AnswerEntry, ChecklistItem, JobList, JobReport, ListEntry, PageState, ReadField
+from .redact import VERSION as REDACTION_VERSION
 from .redact import Redactor, total_hits
 
 _Status = JobReport.model_fields["status"].annotation
@@ -431,6 +432,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         "checks": result.checks,
         "page": seen.state.model_dump(mode="json") if seen.state else None,
         "submit_warnings": list(seen.signs),
+        "redaction": REDACTION_VERSION,  # how this job's saved files were masked (redact.VERSION)
         "notes": list(result.notes),
         "started": started,
         "finished": _now(),
