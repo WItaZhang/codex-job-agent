@@ -462,10 +462,17 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
 
 17. ApplyPilot（https://github.com/Pickle-Pixel/ApplyPilot ，提交 4a8d521，AGPL-3.0）的 `discovery/jobspy.py`、`discovery/workday.py`、`discovery/smartextract.py`、`enrichment/detail.py`、`database.py`、`llm.py` 原样放在 `src/intent_job_agent/vendor/applypilot/`，**只改了 import**。它们原本依赖的配置模块由本项目重写为一个薄适配层。
 18. ApplyPilot 的代码在自己的工作库（`data/local/applypilot/applypilot.db`）里工作；完成后把新岗位以"未打标签"导入本项目，并刷新尚未打标签、尚未展示的岗位的原文。已打标签的岗位原文不再变化。例外（2026-10-15 用户选择）：原文为空的岗位（包括存成占位词的，见第 19 条），还没展示过时，拿到真正的原文就换上；已经打过标签的退回待打标签队列，按原文重新打。重新打完之前它不在投递清单上，投递状态保留。展示过的岗位原文不变。
+    - **地点也会刷新**（2026-10-18 用户选择，起因见第 19 条的 Workday 地点）：拿到和已存不同的地点时，下面几种岗位换上新地点：
+      - 没打过标签的：只换地点。
+      - 已经打过标签的：预打标签（第 31 条）能把每个地方都读出来时，只把 location 标签换成读出的标签，其他标签不动；有读不出的地方时，退回待打标签队列重打（同上，投递状态保留）。
+      - 不换的：展示过的、修正过标签的（misread，包括别的条连带过来的），以及投递状态是停在提交前、失败、跳过或已投的。它们的地点和标签都不变；投递状态是待投或还没进过清单的才换。
 19. 对 ApplyPilot 的几处修正（不改它的代码，在适配层完成）：
     - 它的示例配置用 `boards`、`location.accept_patterns/reject_patterns`、`exclude_titles`，代码却读 `sites`、`location_accept`、`location_reject_non_remote`，且从不使用 `exclude_titles`。两种写法都接受，`exclude_titles` 在导入时生效。
     - 它的地点过滤在没有任何接受规则时会丢掉所有非远程岗位；这里改为"不写就不过滤"。
     - 它存 JobSpy 结果时丢了公司名；这里在旁边另记公司名。
+    - 它的 Workday 抓取只存列表页的地点文字：一个岗位有几个地点时只写个数（"2 Locations"），有的公司（Thomson Reuters、Moderna）列表页不写地点，存成空。它对每个搜到的岗位（包括库里已有的）都会读详情，详情里的主地点（`location`）和其他地点（`additionalLocations`）却被丢掉。这里在旁边另记详情里的地点，导入时 `location` 存成主地点在前、用 "; " 连接的原文，例如 "California - Palo Alto; California - San Francisco"，原文不改写；没拿到详情时照旧用列表页的文字。
+      - 已存的岗位在下次抓取读到详情时按第 18 条更新，不另外补抓；已下架或现在的搜索词搜不到的保持原样（2026-10-18 用户选择；当时 "N Locations" 378 个、地点为空 98 个）。
+      - 没有修的一处：它的地点过滤（上面第 2 款）在读详情之前按列表页文字判断，写了接受规则时 "N Locations" 的岗位会被丢掉。本项目的 `searches.yaml` 不写地点过滤，所以不受影响。
     - 它的来源会把"没有"写成字符串：存 JobSpy 结果时用 `str(...)`，Glassdoor 没有描述时存成 "None"；补全原文的 LLM 一步会把 "null" 当原文写回，并记为补全成功。从它的工作库读到的字段，整个值（去掉首尾空白、不分大小写）是 `None`、`null`、`nan` 的，一律当作没有。原文取第一个真正的值：补全的原文 → 搜索结果里的描述 → 空。已经存成占位词的旧岗位，下次导入时清成空，展示过的也一样（清掉占位词不算原文变化）。2026-10-15 发现：Glassdoor 231 个存成 "None"，LinkedIn 83 个和 ZipRecruiter 1 个存成 "null"。
     - 补全原文结束却没拿到原文的行（原文为空或是占位词），在下次补全前标回"未补全"，每行只重试一次（重试过的链接另记在它的工作库旁边）。它本来就不补全的站点（Glassdoor 等）不重试（2026-10-15 用户选择）。
     - 它自带的 `base_urls` 缺少部分站点（如 SimplyHired），这些站点抓到的相对链接既打不开，也补不了原文。`base_urls` 里没有的站点，用它搜索页的域名补上；明确写成 null 的不补。导入时先把相对链接换成完整链接再查重，所以它以后改写成完整链接也认作同一个岗位。已存的相对链接岗位改成完整链接，岗位编号、标签和投递状态不变（2026-10-15：SimplyHired 40 个，其中 34 个在投递清单上；用户选择）。
@@ -497,6 +504,12 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - **标题里的 Manager 表示 senior**（用户 2026-10-13 在 /today 里指出 "Manager, Data Science and Machine Learning (Risk and Fraud)" 没被识别为 senior，原话"除了 pm 之外的场景出现 manager，indicate seniority"，当天选定下面的范围）。标题写了明确级别（Senior / Sr / Staff / Principal、Junior / Jr、New Grad / Entry level / Early Career）时以明确级别为准，例如 "Area Manager - New Grad" → `seniority.new_grad`。没有明确级别时，标题里出现整词 Manager 就打 `seniority.senior`，算有把握。
     - PM 类标题除外，这类标题里的 Manager 是岗位名，不代表级别：Product Manager（含 Technical / Engineering Product Manager 等）、Program Manager（含 Technical Program Manager）、Project Manager、Product Marketing Manager。只认这几个连写的词组，所以 "Manager, Product Management"（管理 PM 的岗位）仍算 senior；"Senior Product Manager" 因为有 Senior 也算 senior。
     - 子 agent 打完整标签时用同一条规则（第 35 条）。规则加入之前已经打好标签的岗位不自动改：只读列出受影响的岗位，由用户逐个决定是否用 `correct_tags` 修正。
+    - **地点的写法**（2026-10-18 用户选择，起因是 Workday 各公司的写法不同，见第 19 条）：一条地点里可以有几个地方，用 `;`、`|`、`/`、`or` 隔开（" - " 不算隔开）。每个地方去掉 Remote、Hybrid 这类词和括号后，认下面几种写法：
+      - 城市在前："San Francisco, CA"、"Seattle, WA, United States"、"London, UK"；
+      - 国家在前："US, CA, Santa Clara"、"India, Bengaluru"、"United States of America, McLean, Virginia"。三段的只认美国和加拿大：州或省占一段，另一段是城市；
+      - 地区 - 城市："California - Palo Alto"、"Israel - Tel Aviv"，地区是国家、美国的州或加拿大的省；
+      - 只写国家，或者国家加州、省（"US, CA"、"Remote - US"），读成国家。
+      - 认不出的地方（只写城市的 "San Jose"、地址代码 "US FL JAX 347"、"USA.VA.Reston"、不是地点的词）让整个 location 维度算没把握，交给子 agent。国家名单写在代码里，比原来多收一些常见国家。
 32. **硬约束预筛**只看有把握的维度：命中 exclude，或某个有 require 的维度在有把握读出的标签里一个都不满足，就先放一边。没把握的维度一律放行。预筛不写库，每次按当前意图重新计算，所以意图改了，被放一边的岗位会回来。
 33. **粗排**用和每日推荐同一个打分函数，对预标签打分，决定打标签的先后；分数相同时沿用原来的顺序（原文完整的优先，见第 23 条）。
 34. **每日打标签预算** `tagging.daily_budget`（默认 2000）按本地日期计算当天提交的标签数；用完后当天不再列出待打标签的岗位，没轮到的留在库里。预算要盖住每天新进的量：粗排只看标题和字段，分不开大部分岗位，校准过的意图只有在岗位打完完整标签后才能把它召回（用户 2026-10-13 选择，原为 50）。
