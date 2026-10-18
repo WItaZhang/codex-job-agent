@@ -678,3 +678,75 @@ def test_a_required_empty_field_lists_its_choices(tmp_path):
     )
     (r,) = check_page([f], load(tmp_path, {}))
     assert "Yes、No、Unsure" in r.note
+
+
+# --- review round 4 (decision 22) -------------------------------------------------------------------------------
+
+
+def test_date_and_city_drop_downs_in_a_segment_are_compared_by_their_own_rule(sheet):
+    years = tuple(str(y) for y in range(2018, 2031))
+    assert compare_part(sheet["education.ms_esu"], "start", "2025", options=years).result == "correct"
+    assert compare_part(sheet["education.ms_esu"], "end", "2027", options=years).result == "wrong"
+    months = ("Sep 2025", "Dec 2026", "May 2027")
+    assert compare_part(sheet["education.ms_esu"], "end", "Dec 2026", options=months).result == "correct"
+
+
+@pytest.mark.parametrize(
+    ("places", "value", "want"),
+    [
+        (("", "United States"), "[city], CA, United States", "correct"),
+        (("CA", ""), "[city], California, USA", "correct"),
+        (("CA", "United States"), "[city], England, United Kingdom", "not_reviewed"),
+        (("CA", "United States"), "[city], Ontario", "not_reviewed"),
+        (("CA", "United States"), "[city] CA", "correct"),
+        (("CA", "United States"), "[city], CA [postal_code]", "correct"),
+        (("CA", "United States"), "[city] - Texas", "wrong"),
+    ],
+)
+def test_the_city_rule_with_partial_or_foreign_places(tmp_path, places, value, want):
+    entry = address_sheet(tmp_path)["contact.city"].model_copy(update={"aliases": places})
+    assert compare_value(entry, value).result == want
+
+
+def test_a_third_option_while_the_page_offers_the_original_major(tmp_path):
+    entry = {**ERRORS["answers"]["education.beng_nru"]}
+    record = load(tmp_path, {"education.beng_nru": entry})["education.beng_nru"]
+    options = ("Biology", "Geographic Information System", "Statistics", "Computer Science")
+    v = compare_part(record, "major", "Statistics", options=options)
+    assert (v.result, v.severity) == ("wrong", "fact")
+
+
+def test_an_empty_part_whose_original_the_page_lacks_expects_the_otherwise(sheet):
+    v = compare_part(sheet["education.beng_nru"], "major", "", options=("Biology", "Computer Science"))
+    assert (v.result, v.severity, v.expected) == ("wrong", "missing", "Computer Science")
+
+
+def test_a_yes_no_group_with_both_boxes_ticked_is_wrong(tmp_path):
+    entry = load(tmp_path, {"work_auth.x": {"answer": "Yes", "kind": "yes_no"}})["work_auth.x"]
+    v = compare_value(entry, "Yes; No", options=("Yes", "No"), control="checkbox")
+    assert (v.result, v.severity) == ("wrong", "fact")
+
+
+def test_an_address_naming_another_state_is_wrong(tmp_path):
+    entry = address_sheet(tmp_path)["contact.address"].model_copy(update={"aliases": ("CA", "United States")})
+    assert compare_value(entry, "[address], [city], CA [postal_code]").result == "correct"
+    assert compare_value(entry, "[address], [city], NV [postal_code]").result == "wrong"
+    assert compare_value(entry, "[address], New York, NY").result == "wrong"
+
+
+def test_state_abbreviations_stay_visible_in_contact_fields(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    (r,) = check_page(page([("City", "[city], TX, USA", "text")]), answers)
+    assert r.value == "[city], TX, USA"
+
+
+def test_a_required_empty_field_inside_a_segment_is_missing(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    rows = [
+        ReadField(id="p1.1", question="Company", value="Vista Video Inc.", control="text", origin="control"),
+        ReadField(
+            id="p1.2", question="Role Description", value="", control="textarea", origin="control", required=True
+        ),
+    ]
+    got = by_id(check_page(rows, answers))
+    assert (got["p1.2"].result, got["p1.2"].severity) == ("no_answer", "missing")

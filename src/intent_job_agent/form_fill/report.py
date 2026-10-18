@@ -144,7 +144,10 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
         if _per_segment(r):
             continue  # one item per segment, below
         if r.result == "wrong" and r.severity == "fact":
-            groups["fact"].append(f"{where}：现在是「{r.value}」，应为「{r.expected}」（{r.key}）。请在标签页里改。")
+            why = f"，{r.note}" if r.note else ""
+            groups["fact"].append(
+                f"{where}：现在是「{r.value}」，应为「{r.expected}」（{r.key}）{why}。请在标签页里改。"
+            )
         elif r.severity == "guess":
             groups["guess"].append(f"{where}：{r.note}「{r.value}」。请确认，或补标准答案（{r.key}）。")
         elif r.note.startswith(REQUIRED_EMPTY):
@@ -170,7 +173,7 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
             groups["old_page"].append(f"{r.field_id} {r.question[:60]}「{r.value[:40]}」")
         elif r.result == "not_reviewed":
             groups["not_reviewed"].append(f"{r.field_id} {r.question[:60]}「{r.value[:40]}」")
-        elif r.result == "no_answer" and r.note != NAV_NOTE and r.key is None and r.field_id:
+        elif r.result == "no_answer" and r.note != NAV_NOTE and r.field_id and is_empty(r.value):
             groups["empty"].append(f"{r.field_id} {r.question[:60]}")
     items += groups["fact"] + _segment_items(results)
     items += groups["guess"] + groups["missing"]

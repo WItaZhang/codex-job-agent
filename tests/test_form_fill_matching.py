@@ -435,3 +435,41 @@ def test_a_city_alone_before_a_school_stays_a_question(tmp_path):
     answers = load(tmp_path, ERRORS["answers"])
     found = match_page(page([["City", "[city]", "text"], ["School", "ESU", "review"]]), answers)
     assert found.fields["p1.1"].key == "contact.city" and found.fields["p1.1"].segment is None
+
+
+# --- review round 4 (decision 22) -------------------------------------------------------------------------------
+
+
+def test_a_second_end_date_with_the_same_value_stays_in_its_segment(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [
+            ["School", "ESU", "review"],
+            ["End Date", "12/2026", "review"],
+            ["Graduation Date", "12/2026", "review"],
+            ["School", "Northern River University", "review"],
+            ["End Date", "06/2025", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert [found.fields[f"p1.{n}"].key for n in range(1, 6)] == ["education.ms_esu"] * 3 + ["education.beng_nru"] * 2
+
+
+def test_a_date_after_unrelated_fields_goes_back_to_its_segment(tmp_path):
+    answers = load(tmp_path, ERRORS["answers"])
+    fields = page(
+        [
+            ["School", "ESU", "review"],
+            ["Degree", "MS", "review"],
+            ["GPA", "3.9", "review"],
+            ["GPA scale", "4.0", "review"],
+            ["End date", "12/2026", "review"],
+            ["School", "Northern River University", "review"],
+            ["Degree", "BS", "review"],
+            ["GPA", "3.8", "review"],
+            ["GPA scale", "4.0", "review"],
+            ["End date", "06/2025", "review"],
+        ]
+    )
+    found = match_page(fields, answers)
+    assert found.fields["p1.5"].key == "education.ms_esu" and found.fields["p1.10"].key == "education.beng_nru"

@@ -232,27 +232,42 @@ LEADING = ("start", "end", "range", "other")  # parts that may open a segment ah
 
 
 def _segments(fields, answers) -> list[_Draft]:
-    """Segments in page order. Dates or a description ahead of the school or company (a layout listing the dates
-    first) are held and join the segment that the next school or company opens; a City alone is never held, so it
-    stays a question (the contact city)."""
+    """Segments in page order.
+    - A record field already in the segment starts the next one, unless it repeats the same value (End Date and
+      Graduation Date both 12/2026): then it is a second field of the same segment.
+    - Dates or a description ahead of the school or company (a layout listing the dates first) are held and join the
+      segment the next school or company opens. When the last segment was closed by unrelated fields (a GPA, a
+      scale) and lacks that part, the field goes back to it instead.
+    - A City alone is never held, so it stays a question (the contact city)."""
     parts = [part_of(f.question, answers) for f in fields]
     drafts: list[_Draft] = []
     current: _Draft | None = None
+    gap_closed: _Draft | None = None  # the last segment, when unrelated fields closed it
     held: list[tuple[int, str]] = []
+
+    def join(draft: _Draft, i: int, part: str) -> None:
+        draft.parts.setdefault(part, i)
+        draft.indexes.append(i)
+
     for i, part in enumerate(parts):
         if part is None:  # one unrelated field inside a segment does not end it
             held = []
             if current is not None and not _fits(current, parts[i + 1] if i + 1 < len(parts) else None):
-                current = None
+                gap_closed, current = current, None
             continue
+        if KIND_OF_PART.get(part) is None and current is not None and part in current.parts:
+            if norm(fields[current.parts[part]].value) == norm(fields[i].value):
+                join(current, i, part)  # the same value again: a second field of the same segment
+                continue
         if KIND_OF_PART.get(part) is not None:
             if current is None or not _fits(current, part):
                 current = _Draft(KIND_OF_PART[part])
                 drafts.append(current)
                 for j, early in held:
-                    current.parts.setdefault(early, j)
-                    current.indexes.append(j)
-            held = []
+                    join(current, j, early)
+            held, gap_closed = [], None
+        elif current is None and gap_closed is not None and part in LEADING and part not in gap_closed.parts:
+            current, gap_closed = gap_closed, None  # back into the segment the unrelated fields interrupted
         elif current is None or not _fits(current, part):
             current = None
             if part in LEADING and part not in {p for _, p in held}:
@@ -260,8 +275,7 @@ def _segments(fields, answers) -> list[_Draft]:
             else:
                 held = []
             continue
-        current.parts.setdefault(part, i)
-        current.indexes.append(i)
+        join(current, i, part)
     return drafts
 
 

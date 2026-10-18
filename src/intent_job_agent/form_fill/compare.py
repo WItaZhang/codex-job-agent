@@ -199,26 +199,55 @@ def _contact(entry: AnswerEntry, value: str) -> Verdict:
     if field == "address":  # the street, with the applicant's own city, state, postal code and country around it
         if not (own & set(marks) and set(marks) <= own | ADDRESS_MARKS):
             return Verdict("wrong", "fact", mark)
-        rest = [w for w in PLACE_PHRASE.sub(" ", norm(MARK.sub(" ", value))).split() if not _place_key(w)]
+        state, country = _own_places(entry)
+        text = norm(MARK.sub(" ", value))
+        for phrase in PLACE_PHRASE.findall(text):
+            key = _place_key(phrase)
+            if key == "united states" or state is None or key == state:
+                text = text.replace(phrase, " ", 1)
+        rest = [
+            w
+            for w in text.split()
+            if not (_place_key(w) and (state is None or _place_key(w) in (state, "united states")))
+        ]
         if not rest:
             return Verdict("correct")
         if all(w in APARTMENT or w.isdigit() and len(w) <= 4 for w in rest):
             return Verdict("not_reviewed", note="住址里多了门牌、楼层这类内容，代码判断不了")
         return Verdict("wrong", "fact", mark, "住址里有不是你自己的城市或邮编")
-    if field == "city":  # the city first; the applicant's own state or country after a comma is fine
-        head, _, tail = value.partition(",")
-        if not (head.strip() in own and set(marks) <= own):
+    if field == "city":  # the city first; then only the applicant's own state, country or postal code
+        lead = MARK.match(value.strip())
+        if not (lead and lead[0] in own and set(marks) <= own | {FIELD_PLACEHOLDER["postal_code"]}):
             return Verdict("wrong", "fact", mark)
-        places = {_place_key(p) for p in entry.aliases} - {None}  # the applicant's state and country (cli)
-        named = {_place_key(p) for p in re.split(r"[,(]", MARK.sub(" ", tail))} - {None}
-        if places and named - places:
-            return Verdict("wrong", "fact", mark, "城市名对，但州或国家不是你的")
+        state, country = _own_places(entry)
+        tail = MARK.sub(" ", value.strip()[lead.end() :])
+        for piece in (p for p in re.split(r"[,()\-–·|/]", tail) if norm(p)):
+            key = _place_key(piece)
+            if key is None:
+                return Verdict("not_reviewed", note=f"城市后面的「{piece.strip()}」代码认不出是哪里")
+            if key == "united states":
+                wrong = country is not None and country != "united states"
+            else:
+                wrong = (state is not None and key != state) or (country is not None and country != "united states")
+            if wrong:
+                return Verdict("wrong", "fact", mark, "城市名对，但州或国家不是你的")
         return Verdict("correct")
     else:  # the value itself, with at most a label in brackets: "[phone] (Mobile)"
         found = [m for m in marks if m in own]
         rest = re.sub(r"\([^()]*\)", " ", value.replace(found[0], " ", 1)) if found else value
         ok = len(marks) == 1 and bool(found) and not re.search(r"\w", rest)
     return Verdict("correct") if ok else Verdict("wrong", "fact", mark)
+
+
+def _choices_note(options) -> str:
+    return f"（可选的有：{_choices(options)}）" if _choices(options) else ""
+
+
+def _own_places(entry: AnswerEntry) -> tuple[str | None, str | None]:
+    """The applicant's own state and country, as cli.plain_contacts put them on a city or address entry
+    (aliases = (state, country), "" when profile.json leaves one out); None when unknown or unrecognised."""
+    state, country = (*entry.aliases, "", "")[:2]
+    return _place_key(state) if state else None, _place_key(country) if country else None
 
 
 def _choices(options) -> str:
@@ -280,6 +309,9 @@ def _yes_no(entry: AnswerEntry, value: str, control: str, options=()) -> Verdict
         return Verdict("no_answer", "guess", None, note)
     if is_empty(value):  # before the first word: "No Response" is not a No
         return _missing(entry.answer)
+    picks = [pick for pick in value.split("; ") if not is_empty(pick)]
+    if len(picks) > 1:  # a group of boxes with more than one ticked
+        return Verdict("wrong", "fact", entry.answer, "勾了不止一项")
     said = _yes_or_no(value)
     if said:
         return Verdict("correct") if said == answer else Verdict("wrong", "fact", entry.answer)
@@ -406,7 +438,9 @@ def compare_part(entry: AnswerEntry, part: str, value: str, *, options=()) -> Ve
         if options and any(_same(option, names) for option in options):
             return Verdict("wrong", "fact", expected, "页面上有原值的选项，不该选 otherwise")
         return Verdict("correct", note="按 otherwise")
-    if options and not otherwise and not any(_same(option, names) for option in options):
+    text_part = part in ("school", "company", "degree", "major", "title")
+    lacks = text_part and bool(options) and not any(_same(option, names) for option in options)
+    if lacks and not otherwise:
         if is_empty(value):
             return Verdict(
                 "no_answer", note=f"页面上没有标准答案的选项（可选的有：{_choices(options)}），也没写 otherwise"
@@ -414,7 +448,7 @@ def compare_part(entry: AnswerEntry, part: str, value: str, *, options=()) -> Ve
         note = f"页面上没有标准答案的选项（可选的有：{_choices(options)}），填表 agent 却选了一项"
         return Verdict("no_answer", "guess", None, note)
     if is_empty(value):
-        return _missing(expected)
+        return _missing(" 或 ".join(otherwise) if lacks else expected)
     if part in ("start", "end"):
         return _month(expected, value)
     if part == "city":
@@ -423,6 +457,8 @@ def compare_part(entry: AnswerEntry, part: str, value: str, *, options=()) -> Ve
         if _same(head, names) or (tail and (_place_key(tail) or norm(tail) in UNITED_STATES)):
             return Verdict("wrong", "format", expected, "只写城市名，不写州和国家")
         return Verdict("wrong", "fact", expected)
+    if otherwise and text_part and options and not lacks:  # the page offers the original and something else was chosen
+        return Verdict("wrong", "fact", expected, "页面上有原值的选项")
     if otherwise:
         picks = " 或 ".join(otherwise)
         return Verdict("not_reviewed", note=f"可能是最相近的选项；原值 {expected}，找不到时选 {picks}")
@@ -452,7 +488,9 @@ def _shown(value: str, entry: AnswerEntry | None, ambiguous) -> str:
     pieces = re.split(r"(\[[^\[\]]+\])", value)
     kept = [
         piece
-        if MARK.fullmatch(piece) or not re.search(r"\w", piece) or not PLACE_PHRASE.sub(" ", norm(piece)).strip()
+        if MARK.fullmatch(piece)
+        or not re.search(r"\w", piece)
+        or all(_place_key(w) for w in PLACE_PHRASE.sub(" ", norm(piece)).split())
         else HIDDEN
         for piece in pieces
     ]
@@ -514,11 +552,12 @@ def check_page(fields, answers: dict[str, AnswerEntry], contacts: bool = True) -
             )
         elif entry is not None and m.segment is not None:
             verdict = compare_part(entry, m.part or "other", f.value, options=f.options)
+            if verdict == Verdict("no_answer") and f.required:
+                verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY + _choices_note(f.options))
         elif entry is not None:
             verdict = compare_value(entry, f.value, options=f.options, control=f.control)
         elif is_empty(f.value) and f.required:
-            choices = f"（可选的有：{_choices(f.options)}）" if _choices(f.options) else ""
-            verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY + choices)
+            verdict = Verdict("no_answer", "missing", None, REQUIRED_EMPTY + _choices_note(f.options))
         elif is_empty(f.value):
             verdict = Verdict("no_answer")
         elif f.control == "file":

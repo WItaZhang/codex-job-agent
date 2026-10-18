@@ -172,3 +172,11 @@ def test_scan_skips_binary_files_and_walks_directories(redactor, tmp_path):
     assert set(report["_skipped"]) == {str(png), str(blob)}
     assert report[str(log)]["phone"] == 1
     assert total_hits(report) == 1
+
+
+def test_an_address_with_a_unit_is_masked_line_by_line():
+    """Forms split the address over Line 1 and Line 2; each line is masked on its own (decision 22)."""
+    r = Redactor.from_profile({"personal": {"address": "12 Elm Street Apt 4B", "city": "Springfieldia"}})
+    assert r.mask("12 Elm Street") == "[address]" and r.mask("Apt 4B") == "[address]"
+    assert r.mask("12 Elm Street Apt 4B, Springfieldia") == "[address], [city]"
+    assert r.mask("Elm Street") == "Elm Street", "a part of the street alone stays"

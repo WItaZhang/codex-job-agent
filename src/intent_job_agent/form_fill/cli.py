@@ -54,9 +54,9 @@ def plain_contacts(answers: dict[str, AnswerEntry], profile: dict, redactor: Red
             shared = tuple(m for m in MARK.findall(masked) if m != mark)
             if shared and masked.strip() in shared:
                 update["accept"] = shared
-            if entry.from_profile == "personal.city":  # a city is right only in the applicant's own state or country
-                places = (runner._profile_value(profile, f"personal.{f}") for f in ("province_state", "country"))
-                update["aliases"] = tuple(p.strip() for p in places if p and p.strip())
+            if entry.from_profile in ("personal.city", "personal.address"):  # only the applicant's own state, country
+                places = (runner._profile_value(profile, f"personal.{f}") or "" for f in ("province_state", "country"))
+                update["aliases"] = tuple(place.strip() for place in places)  # (state, country), "" when not given
             if update:
                 out[key] = out[key].model_copy(update=update)
     return out

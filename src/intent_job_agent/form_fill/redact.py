@@ -111,6 +111,19 @@ def _words(value: str) -> str | None:
     return r"(?<!\w)" + r"[\s,]+".join(parts) + r"(?!\w)"
 
 
+UNIT = re.compile(r"[\s,]+(?=(?:apt|apartment|suite|ste|unit|floor|fl|room|rm)\b\.?|#)", re.I)
+
+
+def address_parts(value: str) -> list[str]:
+    """The street address and, when it carries a unit, the street and the unit on their own: forms often split them
+    over Address Line 1 and Line 2, and each line must be masked by itself (decision 22)."""
+    pieces = UNIT.split(value.strip(), maxsplit=1)
+    parts = [value.strip()]
+    if len(pieces) == 2:
+        parts += [piece.strip(" ,") for piece in pieces if len(piece.strip(" ,")) >= MIN_LEN]
+    return parts
+
+
 def _postal(value: str) -> str | None:
     chars = re.sub(r"[^0-9a-z]", "", value.lower())
     if len(chars) < MIN_LEN:
@@ -165,9 +178,10 @@ class Redactor:
             value = value.strip()
             if len(value) < MIN_LEN:
                 continue
-            pattern = _BUILD[kind](value)
-            if pattern:
-                found.append((len(value), kind, pattern, FIELD_PLACEHOLDER[field]))
+            for piece in address_parts(value) if field == "address" else [value]:
+                pattern = _BUILD[kind](piece)
+                if pattern:
+                    found.append((len(piece), kind, pattern, FIELD_PLACEHOLDER[field]))
         found.sort(key=lambda item: -item[0])  # longer values first, so a city inside an address goes with it
         marks = [PLACEHOLDER[kind] if legacy else mark for _, kind, _, mark in found]
         return cls([(kind, re.compile(pattern, re.I)) for _, kind, pattern, _ in found], marks, legacy)
