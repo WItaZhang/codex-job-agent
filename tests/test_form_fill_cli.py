@@ -238,3 +238,17 @@ def test_a_shared_profile_value_accepts_the_other_fields_placeholder():
     entries = {"contact.portfolio": AnswerEntry(key="contact.portfolio", from_profile="personal.portfolio_url")}
     shared = cli.plain_contacts(entries, profile, redactor)["contact.portfolio"]
     assert shared.answer is None and shared.accept == ("[github]",)
+
+
+def test_a_saved_page_drops_page_chrome_but_keeps_its_numbers(data):
+    """Decision 23: step bars and empty widget text saved before the rule are left out when the run is checked
+    again; the other fields keep the numbers the saved page and its screenshot use."""
+    chrome = [
+        {"id": "p1.4", "question": "completed step 1 of 6", "origin": "review_text", "control": "review", "value": "Me"},
+        {"id": "p1.5", "question": "items selected", "origin": "control", "control": "select", "value": ""},
+    ]
+    readback_file = data / "form-fill/runs" / RUN / "acme-ml/readback.json"
+    readback_file.write_text(json.dumps(chrome + FIELDS), encoding="utf-8")
+    summary = cli.run_report(RUN, data, settings())
+    report = JobReport.model_validate_json((summary.parent / "acme-ml.json").read_text(encoding="utf-8"))
+    assert [row.field_id for row in report.fields] == ["p1.1", "p1.2", "p1.3"]

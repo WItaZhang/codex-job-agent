@@ -1,4 +1,4 @@
-# 填表模块切片 1 计划（B）：用现有填表 agent 填到提交前，读回最后一页、核对、出报告（草案，2026-10-15，待用户确认）
+# 填表模块切片 1 计划（B）：用现有填表 agent 填到提交前，读回最后一页、核对、出报告（2026-10-15 用户确认，见决定 13）
 
 规格：`specs/form-fill.md`；决定记录：`specs/form-fill.decisions.md`；已确认样例：`tests/fixtures/form_fill/samples_work_auth.yaml`（11 例）、`samples_profile.yaml`（18 例）。
 本计划放在模块旁边，不追加到根目录的 `plan.md`，免得和其他分支冲突。**你确认之前不写实现代码。** vendor 文件不改。
@@ -176,6 +176,10 @@ cli.py        本机命令：report <运行编号>
      - Salesforce：10-16 没填完（页面出错，网站在维护）；10-17 没填完（超时）。查出 UCSD 的 Field of Study 空着，两段工作经历的 Location 多写了州和国家。
    - 按决定 16，你确认的条目已补进 `answers.yaml`（四段经历的城市、武大专业的 otherwise、`screening.contact_consent`）和 `checklist.yaml`（`city_only`、`major_fallback_closest`、`skills_from_jd`）。
 6. 你检查。
+   - 2026-10-17 你检查了报告，重跑了 Perplexity 和 Salesforce（4 次，最后一次走到 Workday 的 Review 页），补了标准答案，用选择题判定了 12 处疑点（决定 23）。
+   - 切片 1 里修的 6 处：等价写法放宽、读回去掉不是题目的东西、新结论"不符合申请资格"和不截断的备注、没有一栏核对为对时的提醒、对题时中间夹词的放宽、启动前提醒个人标签页。
+   - 留到切片 2：Workday 的 Review 页读回不全（有的题读成 `*`，有的题和 Skills 没读到），Workday 普通填写页的自定义控件读不出来。两处并入"逐页录制"一起做。
+   - 另开需求：Workday 导入的岗位地点只存成 "2 Locations"（导入模块）。
 
 每次提交前都跑：`uv sync --locked`、`uv run ruff check src tests`、`uv run ruff format --check src tests`、`uv run python -m pytest -q`。
 

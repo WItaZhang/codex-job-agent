@@ -662,3 +662,58 @@ def test_input_errors_are_masked(tmp_path):
     with pytest.raises(InvariantError) as error:
         runner.load_inputs(listing, applicant, settings())
     assert "555-0100" not in str(error.value) and "[phone]" in str(error.value)
+
+
+# --- decision 23 ------------------------------------------------------------------------------------------------
+
+
+def test_run_rules_stop_on_a_stated_eligibility_bar_without_an_untrue_answer():
+    assert "RESULT:FAILED:not_eligible" in runner.RUN_RULES and "untrue" in runner.RUN_RULES
+
+
+def test_not_eligible_is_the_agents_result(ff):
+    box, path = ff
+    note = 'Education says "not open to current students"; the true answer is auto-rejected.'
+    box.form_fill_runner = FakeBrowser(outcomes={"acme-ml-01": ("failed", "not_eligible", [note])})
+    box.start_form_fill(path)
+    first = box.form_fill_status()["jobs"][0]
+    assert first["agent_result"] == "not_eligible" and note in first["notes"]
+
+
+def test_notes_keep_up_to_2000_characters(ff):
+    box, path = ff
+    box.form_fill_runner = FakeBrowser(outcomes={"acme-ml-01": ("waiting", None, ["y" * 1500 + " end"])})
+    box.start_form_fill(path)
+    assert "y" * 1500 + " end" in box.form_fill_status()["jobs"][0]["notes"]
+
+
+def test_personal_tabs_are_listed_at_the_start_and_the_run_still_goes(ff):
+    box, path = ff
+    fake = FakeBrowser()
+    fake.tabs += [
+        {"id": "G1", "type": "page", "url": "https://mail.google.com/mail/u/1/#inbox"},
+        {"id": "S1", "type": "page", "url": "https://records.synthetic.edu/student/details?id=1"},
+        {"id": "G2", "type": "page", "url": "https://mail.google.com/mail/u/0/#inbox"},
+    ]
+    box.form_fill_runner = fake
+    result = box.start_form_fill(path)
+    assert result["personal_tabs"] == ["https://mail.google.com", "https://records.synthetic.edu"]
+    assert "关掉" in result["warning"] and len(fake.calls) == 2
+    report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+    assert "https://mail.google.com" in report and "student/details" not in report
+
+
+def test_no_personal_tabs_no_warning(ff):
+    box, path = ff
+    result = box.start_form_fill(path)  # the fake's own tabs: a made-up mail site and a job page
+    assert result["personal_tabs"] == [] and "warning" not in result
+
+
+def test_personal_tabs_rule():
+    tabs = [
+        {"type": "page", "url": "https://www.chase.com/personal"},
+        {"type": "page", "url": "https://jobs.example.test/apply"},
+        {"type": "service_worker", "url": "https://mail.google.com/sw.js"},
+        {"type": "page", "url": "chrome://newtab/"},
+    ]
+    assert runner.personal_tabs(tabs, ["https://www.chase.com", "https://mail.google.com"]) == ["https://www.chase.com"]

@@ -473,3 +473,38 @@ def test_a_date_after_unrelated_fields_goes_back_to_its_segment(tmp_path):
     )
     found = match_page(fields, answers)
     assert found.fields["p1.5"].key == "education.ms_esu" and found.fields["p1.10"].key == "education.beng_nru"
+
+
+# --- decision 23: a phrase with a few words inside ---------------------------------------------------------------
+
+YEARS = {
+    "screening.years_experience": {"answer": "0", "kind": "choice", "asks": ["years of experience"]},
+    "location.onsite_5_days": {"answer": "Yes", "kind": "yes_no", "asks": ["come into the office"]},
+}
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "How many years of Engineering experience do you currently have?",
+        "How many years of professional software experience do you have?",
+    ],
+)
+def test_a_phrase_with_up_to_two_words_inside_still_matches(tmp_path, question):
+    assert match_question(question, load(tmp_path, YEARS)).key == "screening.years_experience"
+
+
+def test_three_words_inside_do_not_match(tmp_path):
+    question = "How many years of full time paid engineering experience do you have?"
+    assert match_question(question, load(tmp_path, YEARS)).key is None
+
+
+def test_a_loose_match_never_beats_an_exact_one(tmp_path):
+    ml = {"screening.ml_years": {"answer": "1", "kind": "choice", "asks": ["years of ml engineering experience"]}}
+    answers = load(tmp_path, {**YEARS, **ml})
+    assert match_question("How many years of ML engineering experience?", answers).key == "screening.ml_years"
+
+
+def test_a_loose_match_comes_after_the_built_in_labels(tmp_path):
+    answers = load(tmp_path, {"contact.email": {"from_profile": "personal.email"}, **YEARS})
+    assert match_question("Email", answers).key == "contact.email"
