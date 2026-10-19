@@ -446,3 +446,10 @@
     - 子域名、.edu.cn 也查；清单上岗位所在的网站不算。
     - 查标签页时不为此启动 Chrome，因为工具服务一次只处理一个调用，冷启动要复制资料。Chrome 还没开就提醒"没能检查"。
     - form_fill_status 也返回这次查到的结果。
+
+## 2026-10-19 决定 24（用户）：开放题的写法和模型跟着 /apply 改
+
+- 起因：总规格的决定（`spec.decisions.md` 决定 1）把投递 agent 换成 Opus 5.5，开放题按用户的要求写：紧扣题目、不堆砌经历、识别提问的人想知道什么、为适合这个岗位加分、简练有力。这一条代替 ApplyPilot 的"写 2–3 句、引用简历里的成就"。
+- 填表 agent 用同一份投递指令（`apply_bridge.build_prompt`）和同一个模型（`apply.model`），所以本模块不另改代码，开放题规则和模型都跟着换。
+- 示例要求清单的 `open_answers_specific` 原来写"开放题写 2–3 句……引用简历里的真实经历"，和新规则冲突，改成新规则的意思（规格 2.4，`docs/examples/applicant/checklist.example.yaml`），id 不变。用户自己的 `checklist.yaml` 不动：它的 `open_answers_grounded`（紧扣题目、只用简历和知识库里的事实）和新规则一致。
+- 以后做独立评审时，`form_fill.reviewer_model` 不能弱于 Opus 5.5（规格 4.5：不弱于填表 agent 用的模型）。
