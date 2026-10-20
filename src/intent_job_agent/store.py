@@ -77,8 +77,12 @@ class Store:
     # --- jobs and labels (never touch the intent) ---------------------------------
 
     def add_job(self, job: Job) -> None:
+        """Store a new job, or rewrite a stored one in place: it keeps its place in storing order (spec §10 item 82)."""
         with self.db:
-            self.db.execute("INSERT OR REPLACE INTO jobs (id, data) VALUES (?, ?)", (job.id, job.model_dump_json()))
+            self.db.execute(
+                "INSERT INTO jobs (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+                (job.id, job.model_dump_json()),
+            )
 
     def job(self, job_id: str) -> Job:
         row = self.db.execute("SELECT data FROM jobs WHERE id = ?", (job_id,)).fetchone()
