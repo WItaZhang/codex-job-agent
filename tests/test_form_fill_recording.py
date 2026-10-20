@@ -7,11 +7,11 @@ import json
 import quopri
 
 import pytest
-from intent_job_agent.form_fill.recorder import Recorder, Snapshot
-from intent_job_agent.form_fill.recording import Capture, RecordingStore, read_run, recording_id
 
 from intent_job_agent.form_fill import recording
 from intent_job_agent.form_fill.models import ReadField
+from intent_job_agent.form_fill.recorder import Recorder, Snapshot
+from intent_job_agent.form_fill.recording import Capture, RecordingStore, read_run, recording_id
 from intent_job_agent.form_fill.redact import Redactor
 
 PROFILE = {
@@ -134,7 +134,7 @@ def test_a_job_never_recorded_needs_a_visit(tmp_path):
 
 def test_the_blank_form_holds_structure_and_the_fill_holds_values(tmp_path, redactor):
     rec, store = Recorder(), RecordingStore(tmp_path, "greenhouse-acme-1", "run-1", redactor)
-    store.write_meta(URL, "Acme", "ML Engineer")
+    store.write_meta("https://job-boards.greenhouse.io/acme/jobs/1", "Acme", "ML Engineer")
     blank = rec.observe(snap(field("Email", "sam.synthetic@example.test"), field("School", "Old U")), "blank")
     store.save(blank, "blank", capture())
     filled = rec.observe(snap(field("Email", "sam.synthetic@example.test"), field("School", "Example U")), "filled")
@@ -154,7 +154,8 @@ def test_the_blank_form_holds_structure_and_the_fill_holds_values(tmp_path, reda
     )
     assert (store.fill_dir / "p1.filled.html").is_file() and (store.fill_dir / "p1.filled.png").is_file()
     meta = json.loads((store.rec_dir / "meta.json").read_text(encoding="utf-8"))
-    assert meta["url"] == URL and meta["platform"] == "greenhouse" and meta["replay_capability"] == "check_only"
+    assert meta["url"] == "https://job-boards.greenhouse.io/acme/jobs/1" and meta["platform"] == "greenhouse"
+    assert meta["replay_capability"] == "check_only" and meta["runs"] == ["run-1"]
     assert leaks(tmp_path) == []
 
 
@@ -273,7 +274,7 @@ def test_the_network_record_is_kept_only_for_a_signed_out_single_page_form(
 
 
 def test_the_network_record_stops_at_its_size_limit(tmp_path, redactor):
-    store = RecordingStore(tmp_path, "r", "run-1", redactor, network_max_bytes=100)
+    store = RecordingStore(tmp_path, "r", "run-1", redactor, network_max_bytes=200)  # one line is about 115 bytes
     assert store.add_network({"url": "a", "status": 200, "headers": {}, "body_text": "x" * 60})
     assert not store.add_network({"url": "b", "status": 200, "headers": {}, "body_text": "x" * 60})
 

@@ -15,11 +15,14 @@ from urllib.parse import urlsplit
 from ..domain import InvariantError
 from .matching import NAVIGATION, is_empty, norm
 from .models import PageState, ReadField
+from .recorder import Snapshot
 
-# Runs in each frame. Returns {"url", "scope", "controls": [...], "pairs": [...], "actions": [...], "notices": [...]};
-# "order" is the document order in the frame. An open modal dialog makes the rest of the page inert, so only the
-# dialog is read ("scope": "dialog"), unless nothing in it can be read. "actions" are the visible button texts there,
-# "notices" the page's headings, alerts and status lines (both for check 4).
+# Runs in each frame. Returns {"url", "scope", "controls": [...], "pairs": [...], "actions": [...], "notices": [...],
+# "step", "headings"}; "order" is the document order in the frame. An open modal dialog makes the rest of the page
+# inert, so only the dialog is read ("scope": "dialog"), unless nothing in it can be read. "actions" are the visible
+# button texts there, "notices" the page's headings, alerts and status lines (both for check 4). "step" is the text of
+# the current step (aria-current="step"), "headings" the visible headings read, and each control and pair carries
+# its "section", the nearest heading above it (the page's title and the fields' identity, spec 4.3).
 EXTRACT_JS = r"""() => {
   const NO_TEXT = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SELECT", "OPTION", "TEXTAREA", "INPUT",
     "BUTTON", "IFRAME", "SVG"]);
@@ -27,7 +30,8 @@ EXTRACT_JS = r"""() => {
   const INLINE = new Set(["SPAN", "B", "STRONG", "EM", "I", "SMALL", "ABBR", "SUP", "SUB", "BR", "MARK", "U"]);
   const EDITABLE = '[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"]';
   const WIDGETS = '[role=combobox],[role=listbox],[role=radiogroup],[role=checkbox],[role=switch],' + EDITABLE;
-  const CONTROLS = 'input,select,textarea,' + WIDGETS;
+  const LISTBOX_BUTTONS = 'button[aria-haspopup="listbox"],[role=button][aria-haspopup="listbox"]';
+  const CONTROLS = 'input,select,textarea,' + WIDGETS + ',' + LISTBOX_BUTTONS;
   const TOGGLES = 'button[aria-pressed],[role=button][aria-pressed]';
   const HEADINGS = 'h1,h2,h3,h4,h5,h6,[role=heading]';
   const ACTIONS = 'button,input[type=submit],input[type=button],[role=button]';
@@ -84,6 +88,15 @@ EXTRACT_JS = r"""() => {
       if (p.closest('[aria-hidden="true"]') || !shown(p)) continue;
       texts.push(t);
     }
+    // Visible headings in document order, for each field's section (the nearest one above it).
+    const heads = Array.from(root.querySelectorAll(HEADINGS)).filter(shown)
+      .map((h) => [order.get(h), textOf(h).slice(0, 120)]).filter(([, t]) => t);
+    const sectionOf = (el) => {
+      const at = order.get(el);
+      let found = "";
+      for (const [o, t] of heads) { if (o < at) found = t; else break; }
+      return found;
+    };
     const preceding = (el) => {
       let lo = 0, hi = texts.length - 1, found = -1;
       while (lo <= hi) {
@@ -194,9 +207,12 @@ EXTRACT_JS = r"""() => {
       if ((type === "radio" || type === "checkbox") && beside(el)) continue;
       const node = {
         order: order.get(el), tag, type, role, id: el.getAttribute("id") || "", name: el.getAttribute("name") || "",
-        labels: labelsOf(el), value: "", options: [], required: required(el),
+        labels: labelsOf(el), value: "", options: [], required: required(el), section: sectionOf(el),
       };
-      if (el.matches(EDITABLE) && role !== "combobox") {
+      if (el.matches(LISTBOX_BUTTONS)) {
+        node.listbox_button = true;
+        node.value = buttonText(el);
+      } else if (el.matches(EDITABLE) && role !== "combobox") {
         node.editable = true;
         node.value = el.innerText;
       } else if (role === "combobox") {
@@ -242,7 +258,7 @@ EXTRACT_JS = r"""() => {
     for (const [box, buttons] of toggles) {
       controls.push({
         order: order.get(buttons[0]), tag: "button", type: "", role: "togglegroup", id: box.getAttribute("id") || "",
-        name: "", labels: labelsOf(box), value: "", required: required(box),
+        name: "", labels: labelsOf(box), value: "", required: required(box), section: sectionOf(buttons[0]),
         options: buttons.map((b) => ({
           text: buttonText(b), value: "", selected: b.getAttribute("aria-pressed") === "true",
         })),
@@ -263,7 +279,9 @@ EXTRACT_JS = r"""() => {
       if (used.has(q) || !shown(q) || hasControl(q) || valueEls.some(hasControl) || inField(q)) return;
       used.add(q);
       valueEls.forEach((v) => used.add(v));
-      pairs.push({ order: order.get(q), question: textOf(q), value: valueEls.map(textOf).join(" "), source });
+      pairs.push({
+        order: order.get(q), question: textOf(q), value: valueEls.map(textOf).join(" "), source, section: sectionOf(q),
+      });
     };
     for (const dt of root.querySelectorAll("dt")) {
       const dd = dt.nextElementSibling;
@@ -324,7 +342,7 @@ EXTRACT_JS = r"""() => {
       const t = shown(b) ? buttonText(b) : "";
       if (t && actions.length < 100) actions.push(t);
     }
-    return { controls, pairs, actions };
+    return { controls, pairs, actions, headings: heads.slice(0, 40).map(([, t]) => t) };
   };
 
   const modal = () => {
@@ -347,7 +365,12 @@ EXTRACT_JS = r"""() => {
     const t = shown(n) ? textOf(n) : "";
     if (t && notices.length < 100) notices.push(t.slice(0, 300));
   }
-  return { url: location.href, scope, controls: out.controls, pairs: out.pairs, actions: out.actions, notices };
+  const current = Array.from(page.querySelectorAll('[aria-current="step"]')).find(shown);
+  const step = current ? textOf(current).slice(0, 120) : "";
+  return {
+    url: location.href, scope, controls: out.controls, pairs: out.pairs, actions: out.actions, notices, step,
+    headings: out.headings,
+  };
 }"""
 
 # Runs in each frame for the screenshot blackout. One node per element under body (open shadow roots count as the
@@ -457,6 +480,8 @@ def _pick(sources: dict, order: tuple[str, ...]) -> tuple[str, bool]:
 
 def _control_kind(node: dict) -> str:
     tag, role, typ = node.get("tag", ""), node.get("role", ""), node.get("type", "")
+    if node.get("listbox_button"):  # a button that opens a list of options and shows the one picked
+        return "select"
     if role == "combobox":
         return "combobox"
     if role in ("radiogroup", "togglegroup"):
@@ -506,6 +531,7 @@ def _single(node: dict) -> dict:
         "value": _clean(value),
         "options": tuple(texts),
         "required": bool(node.get("required")) or starred,
+        "section": _clean(node.get("section")),
     }
 
 
@@ -522,6 +548,7 @@ def _group(members: list[dict]) -> dict:
         "value": "; ".join(label for m, label in zip(members, labels, strict=True) if m.get("checked") and label),
         "options": tuple(label for label in labels if label),
         "required": any(m.get("required") for m in members) or starred,
+        "section": _clean(first.get("section")),
     }
 
 
@@ -558,8 +585,10 @@ def _lone_checkbox(members: list[dict]) -> bool:
     return not inner or inner == _clean(members[0].get("option_label"))
 
 
-def normalize(raw: dict) -> tuple[ReadField, ...]:
-    """Raw nodes from EXTRACT_JS (one entry per frame) -> ReadFields numbered p1.1, p1.2 ... in page order."""
+def normalize(raw: dict, sections: bool = False) -> tuple[ReadField, ...]:
+    """Raw nodes from EXTRACT_JS (one entry per frame) -> ReadFields numbered p1.1, p1.2 ... in page order.
+    `sections`: also keep each field's section and count the same question in the same section (the recorder's
+    identity, spec 4.3); without it the fields are slice 1's."""
     if not isinstance(raw, dict) or not isinstance(raw.get("frames"), list):
         raise InvariantError("raw page must be an object with a frames list")
     items = []
@@ -581,15 +610,48 @@ def normalize(raw: dict) -> tuple[ReadField, ...]:
             value = _clean(payload.get("value"))
             if question and value:
                 drafts.append(
-                    {"question": question, "control": "review", "value": value, "options": (), "required": False}
+                    {
+                        "question": question,
+                        "control": "review",
+                        "value": value,
+                        "options": (),
+                        "required": False,
+                        "section": _clean(payload.get("section")),
+                    }
                 )
 
     drafts = [d for d in drafts if not is_page_chrome(d["question"], d["value"], d["required"])]
     seen = {(d["question"].lower(), d["value"].lower()) for d in drafts if d["control"] != "review"}
     kept = [d for d in drafts if d["control"] != "review" or (d["question"].lower(), d["value"].lower()) not in seen]
-    return tuple(
-        ReadField(id=f"p1.{n}", origin="review_text" if d["control"] == "review" else "control", **d)
-        for n, d in enumerate(kept, start=1)
+    counts: dict[tuple, int] = {}
+    for d in kept:
+        section = d.pop("section", "")
+        origin = "review_text" if d["control"] == "review" else "control"
+        if sections:
+            key = (origin, norm(section), norm(d["question"]))
+            counts[key] = counts.get(key, 0) + 1
+            d.update(section=section, occurrence=counts[key])
+        d["origin"] = origin
+    return tuple(ReadField(id=f"p1.{n}", **d) for n, d in enumerate(kept, start=1))
+
+
+def snapshot(raw: dict, tab: str, read_at: str) -> Snapshot:
+    """One read of a tab for the recorder: the fields with their sections, the page's title (the current step when
+    the page shows one, else every heading read, in order) and whether a password field was shown."""
+    fields = normalize(raw, sections=True)
+    frames = [f for f in raw.get("frames", []) if isinstance(f, dict) and not f.get("error")]
+    step = next((_clean(f.get("step")) for f in frames if _clean(f.get("step"))), "")
+    headings = tuple(h for f in frames for h in map(_clean, f.get("headings") or []) if h)
+    password = any(
+        isinstance(node, dict) and node.get("type") == "password" for f in frames for node in f.get("controls") or []
+    )
+    return Snapshot(
+        tab=tab,
+        url=str(raw.get("url") or ""),
+        marker=(step,) if step else headings,
+        fields=fields,
+        read_at=read_at,
+        password=password,
     )
 
 
