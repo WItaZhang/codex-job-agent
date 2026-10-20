@@ -984,3 +984,98 @@ def test_the_page_script_reads_the_step_headings_sections_and_listbox_buttons(ch
         ("Degree", "select", "Select One", "Education 2", 1),
         ("Graduation", "review", "12/2026", "Education 2", 1),
     ]
+
+
+# --- slice 2a: the Workday read-back of decision 23 (items 1 and 11), as generic ARIA patterns ---------------------
+# SYNTHETIC pages in the shapes of the two saved Workday pages of 2026-10-17 (a fill page and a review page): page
+# chrome menus, a listbox button, pickers whose search box is not the value, Month/Year spin buttons in a dated
+# fieldset, a check box repeated per segment, review rows whose question sits in nested blocks with a required mark,
+# and a heading over a list of picked items.
+
+WORKDAY_FILL_HTML = """<!doctype html><html><body>
+<header><button aria-haspopup="listbox" id="lang"><span>English</span></button>
+  <button aria-haspopup="listbox" id="settings"><span>Settings</span></button></header>
+<h2>Synthetic Engineer</h2><h3>My Experience</h3>
+<div role="group" aria-labelledby="wh"><h4 id="wh">Work History (Optional)</h4>
+ <div role="group"><h5>Work History (Optional) 1</h5>
+  <label for="t1">Job Title</label><input id="t1" value="Engineer Intern">
+  <label for="c1">I currently work here</label><input id="c1" type="checkbox" name="currentlyWorkHere">
+  <fieldset><legend><label><span>From<abbr aria-hidden="true">*</abbr></span></label></legend>
+   <div role="group"><input role="spinbutton" aria-label="Month" value="6"><div>/</div>
+     <input role="spinbutton" aria-label="Year" value="2026"></div></fieldset>
+  <fieldset><legend><label><span>To<abbr aria-hidden="true">*</abbr></span></label></legend>
+   <div role="group"><input role="spinbutton" aria-label="Month" value="9"><div>/</div>
+     <input role="spinbutton" aria-label="Year" value="2026"></div></fieldset>
+ </div>
+ <div role="group"><h5>Work History (Optional) 2</h5>
+  <label for="t2">Job Title</label><input id="t2" value="Analyst Intern">
+  <label for="c2">I currently work here</label><input id="c2" type="checkbox" name="currentlyWorkHere" checked>
+ </div>
+</div>
+<div role="group"><h4>Education (Optional)</h4>
+ <div><label for="dg"><span>Degree<abbr aria-hidden="true">*</abbr></span></label>
+  <button aria-haspopup="listbox" type="button" id="dg" aria-label="Degree MS Required">MS</button></div>
+ <div><label for="fs">Field of Study</label>
+  <div><div><input enterkeyhint="search" placeholder="Search" id="fs" value=""></div>
+   <ul role="listbox" aria-label="items selected"><li role="presentation"><div role="option"
+     aria-label="Data Science, press delete to clear value."><span aria-hidden="true">x</span><p>Data Science</p></div>
+   </li></ul></div></div>
+ <div><label for="fs2">Field of Study</label>
+  <div><div><input enterkeyhint="search" placeholder="Search" id="fs2" value="Informat"></div><div></div></div></div>
+ <fieldset><legend><label><span>From</span></label></legend>
+   <div role="group"><input role="spinbutton" aria-label="Year" value="2025"></div></fieldset>
+</div>
+<button type="button">Save and Continue</button>
+</body></html>"""
+
+
+def test_workday_like_fill_page_controls_in_a_real_browser(chromium):
+    _, pg, _ = chromium
+    pg.set_content(WORKDAY_FILL_HTML)
+    snap = readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+    assert [(f.question, f.control, f.value, f.required) for f in snap.fields] == [
+        ("Job Title", "text", "Engineer Intern", False),
+        ("I currently work here", "checkbox", "", False),
+        ("From", "date", "6/2026", True),
+        ("To", "date", "9/2026", True),
+        ("Job Title", "text", "Analyst Intern", False),
+        ("I currently work here", "checkbox", "Yes", False),
+        ("Degree", "select", "MS", True),
+        ("Field of Study", "text", "Data Science", False),
+        ("Field of Study", "text", "", False),  # typed into the search box, nothing picked
+        ("From", "date", "2025", False),
+    ]
+    assert [f.section for f in snap.fields][:2] == ["Work History (Optional) 1"] * 2
+
+
+WORKDAY_REVIEW_HTML = """<!doctype html><html><body>
+<header><button aria-haspopup="listbox" id="lang"><span>English</span></button></header>
+<h2>Synthetic Engineer</h2><h3>Review</h3>
+<div aria-labelledby="em"><h4 id="em">Email Address</h4><div><div><span>sam@example.test</span></div></div></div>
+<h3>Application Questions 1 of 2</h3>
+<div role="group"><div>
+ <div class="row"><div><div><p><b>Are you currently or have you in the past been debarred by any agency?</b><abbr
+   title="required">*</abbr></p></div></div><div><span>No</span></div></div>
+ <div class="row"><div><div><p><b>Please input your anticipated graduation date</b><abbr title="required">*</abbr></p>
+   </div></div><div><span>12/12/2026</span></div></div>
+ <div class="row"><div><div><p><b>Current School Location (Please spell out the city and abbreviate the state.)</b>
+   <abbr title="required">*</abbr></p></div></div><div><span>Riverton, TX</span></div></div>
+</div></div>
+<div role="group"><h4>Skills and Strengths (Optional)</h4>
+ <ul><li><span>Python</span></li><li><span>PyTorch</span></li></ul><button type="button">MORE (2)</button></div>
+<button type="button">Submit</button>
+</body></html>"""
+
+
+def test_workday_like_review_page_rows_in_a_real_browser(chromium):
+    _, pg, _ = chromium
+    pg.set_content(WORKDAY_REVIEW_HTML)
+    snap = readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+    assert [(f.question, f.value) for f in snap.fields] == [
+        ("Email Address", "sam@example.test"),
+        ("Are you currently or have you in the past been debarred by any agency?", "No"),
+        ("Please input your anticipated graduation date", "12/12/2026"),
+        ("Current School Location (Please spell out the city and abbreviate the state.)", "Riverton, TX"),
+        ("Skills and Strengths (Optional)", "Python; PyTorch"),
+    ]
+    assert all(f.control == "review" for f in snap.fields)

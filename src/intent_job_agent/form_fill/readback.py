@@ -147,7 +147,11 @@ EXTRACT_JS = r"""() => {
       const wrap = el.closest("label");
       const fieldset = el.closest("fieldset");
       const legend = fieldset ? fieldset.querySelector(":scope > legend") : null;
+      // A required mark inside the field's label, legend or wrapping label, even one hidden from screen readers.
+      const star = [...forLabels, wrap, legend].some((l) => !!l
+        && Array.from(l.querySelectorAll("*")).some((e) => e.children.length === 0 && e.textContent.trim() === "*"));
       return {
+        star,
         label_for: forLabels.map(textOf).filter(Boolean).join(" "),
         labelledby: byIds(el.getAttribute("aria-labelledby")),
         aria_label: el.getAttribute("aria-label") || "",
@@ -178,6 +182,28 @@ EXTRACT_JS = r"""() => {
       return "";
     };
 
+    // Pickers: a search box (enterkeyhint=search, type=search, role=searchbox) whose value is the items picked, shown
+    // as options of a list beside it in the same field; what was typed into the box is not a value. The list is read
+    // as part of the picker, not on its own.
+    const consumed = new Set();
+    const picked = new Map();
+    for (const el of root.querySelectorAll("input")) {
+      const t = (el.type || "text").toLowerCase(), r = (el.getAttribute("role") || "").toLowerCase();
+      if (!(el.getAttribute("enterkeyhint") === "search" || t === "search" || r === "searchbox")) continue;
+      const label = (el.labels && el.labels[0]) || null;
+      let box = el.parentElement;
+      if (label) { while (box && !box.contains(label)) box = box.parentElement; }
+      else box = el.closest("[role=group],fieldset") || el.parentElement;
+      if (!box || box === root) continue;
+      const others = Array.from(box.querySelectorAll("input,select,textarea"))
+        .filter((x) => x !== el && !SKIP_TYPES.has((x.type || "").toLowerCase()));
+      if (others.length) continue;  // the box is a whole section, not this one field
+      const own = popup(el);
+      const lists = Array.from(box.querySelectorAll("[role=listbox]")).filter((l) => l !== own);
+      lists.forEach((l) => consumed.add(l));
+      picked.set(el, lists.flatMap((l) => Array.from(l.querySelectorAll("[role=option]"))).map(textOf).filter(Boolean));
+    }
+
     // Yes / No style button groups (aria-pressed): one control per parent with two or more such buttons. A native
     // input kept beside them for the form's sake is read as part of the group, not on its own.
     const toggles = new Map();
@@ -203,16 +229,22 @@ EXTRACT_JS = r"""() => {
       if (!visible) continue;
       const host = el.parentElement && el.parentElement.closest(WIDGETS);
       if (host) continue;  // read as part of the enclosing widget
-      if (role === "listbox" && popups.has(el)) continue;
+      if (role === "listbox" && (popups.has(el) || consumed.has(el))) continue;
       if (role === "radiogroup" && el.querySelector("input[type=radio]")) continue;
       if ((type === "radio" || type === "checkbox") && beside(el)) continue;
+      const labels = labelsOf(el);
+      // A listbox button is a field only when a label names it; menus in the page's header are not.
+      if (el.matches(LISTBOX_BUTTONS) && !labels.label_for && !labels.labelledby) continue;
       const node = {
         order: order.get(el), tag, type, role, id: el.getAttribute("id") || "", name: el.getAttribute("name") || "",
-        labels: labelsOf(el), value: "", options: [], required: required(el), section: sectionOf(el),
+        labels, value: "", options: [], required: required(el), section: sectionOf(el),
       };
       if (el.matches(LISTBOX_BUTTONS)) {
         node.listbox_button = true;
         node.value = buttonText(el);
+      } else if (picked.has(el)) {
+        node.picker = true;
+        node.value = picked.get(el).join("; ");
       } else if (el.matches(EDITABLE) && role !== "combobox") {
         node.editable = true;
         node.value = el.innerText;
@@ -276,12 +308,13 @@ EXTRACT_JS = r"""() => {
       const g = el.closest(GROUPS);
       return !!g && root.contains(g) && hasControl(g);
     };
-    const addPair = (q, valueEls, source) => {
+    const addPair = (q, valueEls, source, joiner = " ") => {
       if (used.has(q) || !shown(q) || hasControl(q) || valueEls.some(hasControl) || inField(q)) return;
       used.add(q);
       valueEls.forEach((v) => used.add(v));
       pairs.push({
-        order: order.get(q), question: textOf(q), value: valueEls.map(textOf).join(" "), source, section: sectionOf(q),
+        order: order.get(q), question: textOf(q), value: valueEls.map(textOf).filter(Boolean).join(joiner), source,
+        section: sectionOf(q),
       });
     };
     for (const dt of root.querySelectorAll("dt")) {
@@ -297,11 +330,11 @@ EXTRACT_JS = r"""() => {
       if (!leaf(el)) continue;
       const v = el.nextElementSibling;
       if (!v || used.has(v)) continue;
-      const t = textOf(el);
+      const t = textOf(el).replace(/\s*\*+$/, "");  // a required mark does not end the question
       const orphanLabel = el.tagName === "LABEL" && !el.control;
       if (!t || t.length > 200 || !(/[:?：？]$/.test(t) || orphanLabel)) continue;
       const vt = textOf(v);
-      if (vt.length > 500 || /[:：]$/.test(vt)) continue;
+      if (vt.length > 500 || /[:：]$/.test(vt) || /^\*+$/.test(vt)) continue;  // the required mark is not a value
       addPair(el, [v], "label");
     }
     // "One row, two parts": a block whose only content is a question text and a value, as review pages list them.
@@ -310,11 +343,22 @@ EXTRACT_JS = r"""() => {
     // shape, or when it follows a small heading on its own; a block holding pairs already read is a section.
     const fillable = controls.some((c) => !(c.type === "checkbox" || c.type === "file" || c.role === "checkbox"
       || c.role === "switch"));
+    // A question part may sit in blocks of its own (one child each) around its text, as rich-text labels do.
+    // Alerts and status lines are notices, never questions.
+    const single = (el) => {
+      for (let e = el; ; ) {
+        if (e.matches('[role=alert],[role=status],[aria-live]')) return false;
+        if (leaf(e)) return true;
+        const kids = Array.from(e.children).filter(shown);
+        if (kids.length !== 1 || ownText(e)) return false;
+        e = kids[0];
+      }
+    };
     const parts = (el) => {
       const kids = Array.from(el.children).filter(shown);
       if (kids.length !== 2 || ownText(el) || hasControl(el)) return null;
       const [q, v] = kids;
-      if (NO_TEXT.has(q.tagName.toUpperCase()) || !leaf(q)) return null;
+      if (NO_TEXT.has(q.tagName.toUpperCase()) || !single(q)) return null;
       const qt = textOf(q), vt = textOf(v);
       if (!qt || !vt || qt.length > 3000 || vt.length > 1000 || /[:：]$/.test(vt)) return null;
       return [q, v, qt, vt];
@@ -336,6 +380,15 @@ EXTRACT_JS = r"""() => {
       const siblings = Array.from(el.parentElement ? el.parentElement.children : []);
       const listed = siblings.some((s) => s !== el && rowEls.has(s));
       if (listed || (headed(el) && qt.length <= 120 && vt.length <= 300)) addPair(q, [v], "row");
+    }
+
+    // A heading over a list of items (a review page's picked skills): the items are its value.
+    for (const list of fillable ? [] : root.querySelectorAll("ul,ol")) {
+      const h = list.previousElementSibling;
+      if (!h || !h.matches(HEADINGS) || !shown(list) || hasControl(list)) continue;
+      const items = Array.from(list.children).filter((li) => li.tagName === "LI" && shown(li));
+      if (!items.length || items.some((li) => li.querySelector("ul,ol"))) continue;
+      addPair(h, items, "list", "; ");
     }
 
     const actions = [];
@@ -412,6 +465,9 @@ CONTACT_JS = r"""() => {
 SCREENSHOT_NOTE = "screenshot-not-saved.txt"
 
 QUESTION_SOURCES = ("label_for", "labelledby", "aria_label", "wrapping", "legend", "preceding", "placeholder")
+# A date entered in parts (spin buttons labelled Month and Year): the parts of one fieldset are one field, titled by
+# its legend ("From", "To"), its value the parts in page order ("6/2026").
+DATE_PARTS = frozenset({"month", "day", "year", "mm", "dd", "yyyy", "yy"})
 GROUP_SOURCES = ("group_labelledby", "group_aria_label", "legend", "inner", "preceding")
 
 # Check 4 (slice-1 plan, section 2): buttons that still send the form or move it on, and words saying it was received.
@@ -515,7 +571,8 @@ def _options(node: dict) -> tuple[list[str], list[str]]:
 
 def _single(node: dict) -> dict:
     kind = _control_kind(node)
-    question, starred = _pick(node.get("labels") or {}, QUESTION_SOURCES)
+    labels = node.get("labels") or {}
+    question, starred = _pick(labels, QUESTION_SOURCES)
     texts, chosen = _options(node)
     if kind == "checkbox":
         value = "Yes" if node.get("checked") else ""
@@ -531,9 +588,29 @@ def _single(node: dict) -> dict:
         "control": kind,
         "value": _clean(value),
         "options": tuple(texts),
-        "required": bool(node.get("required")) or starred,
+        "required": bool(node.get("required")) or starred or bool(labels.get("star")),
         "section": _clean(node.get("section")),
+        "group_title": _question(labels.get("legend"))[0],
     }
+
+
+def _merge_dates(drafts: list[dict]) -> list[dict]:
+    """Month / Day / Year parts in one fieldset -> one "date" field named by the legend (DATE_PARTS)."""
+    out: list[dict] = []
+    for d in drafts:
+        title = d.pop("group_title", "")
+        if not (title and d["control"] == "text" and d["question"].strip().lower() in DATE_PARTS):
+            out.append(d)
+            continue
+        prev = out[-1] if out else None
+        if prev is not None and prev.get("_date") == title:
+            prev["value"] = "/".join(v for v in (prev["value"], d["value"]) if v)
+            prev["required"] = prev["required"] or d["required"]
+            continue
+        out.append({**d, "question": title, "control": "date", "_date": title})
+    for d in out:
+        d.pop("_date", None)
+    return out
 
 
 def _group(members: list[dict]) -> dict:
@@ -574,7 +651,15 @@ def _frame_items(fi: int, frame: dict) -> list[tuple[tuple, str, dict]]:
         if not isinstance(pair, dict):
             raise InvariantError("pair must be an object")
         items.append(((fi, pair.get("order", 0)), "pair", pair))
-    return items
+    out = []
+    for item in items:  # check boxes sharing a name and a label are one field repeated per segment, not a group
+        _, what, payload = item
+        if what == "group" and len(payload) > 1 and _control_kind(payload[0]) == "checkbox":
+            if len({_clean(m.get("option_label")) for m in payload}) == 1:
+                out.extend(((fi, m.get("order", 0)), "control", m) for m in payload)
+                continue
+        out.append(item)
+    return out
 
 
 def _lone_checkbox(members: list[dict]) -> bool:
@@ -621,6 +706,7 @@ def normalize(raw: dict, sections: bool = False) -> tuple[ReadField, ...]:
                     }
                 )
 
+    drafts = _merge_dates(drafts)
     drafts = [d for d in drafts if not is_page_chrome(d["question"], d["value"], d["required"])]
     seen = {(d["question"].lower(), d["value"].lower()) for d in drafts if d["control"] != "review"}
     kept = [d for d in drafts if d["control"] != "review" or (d["question"].lower(), d["value"].lower()) not in seen]
