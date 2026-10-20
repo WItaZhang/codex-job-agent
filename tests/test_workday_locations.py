@@ -397,6 +397,23 @@ def test_b7_shown_corrected_and_acted_on_jobs_keep_their_location_and_tags(box, 
     assert box.store.effective_tags(job.id) == tags and box.store.is_tagged(job.id)
 
 
+def test_a_relocated_job_keeps_its_place_in_storing_order(box, monkeypatch):
+    fake, job = stored_with_search_text(box, monkeypatch)
+    box.store.add_job(Job(id="later", title="Data Scientist", location="Austin, TX", tags=[]))
+    fake.location = "US, CA, Santa Clara"
+    assert discover(box)["relocated"] == 1
+    assert [j.id for j in box.store.jobs()] == [job.id, "later"]  # ties keep storing order (items 33, 82)
+
+
+def test_storing_a_job_again_keeps_its_place(tmp_path):
+    store = Store(tmp_path / "agent.sqlite", settings())
+    for job_id in ("a", "b"):
+        store.add_job(Job(id=job_id, title="Synthetic job", tags=[]))
+    store.add_job(store.job("a").model_copy(update={"description": "SYNTHETIC text found later"}))
+    assert [j.id for j in store.jobs()] == ["a", "b"]
+    assert store.job("a").description == "SYNTHETIC text found later"
+
+
 def test_b8_a_failed_detail_keeps_the_location_read_before(box, monkeypatch):
     fake = FakeWorkday(monkeypatch)
     fake.location, fake.additional = "California - Palo Alto", ["California - San Francisco"]
