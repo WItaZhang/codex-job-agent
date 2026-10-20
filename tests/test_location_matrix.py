@@ -172,3 +172,32 @@ def test_a_city_named_like_its_state_is_read_beside_that_state_only():
         ("USA - Washington", ({"location.us"}, LOCATION)),
     ]
     assert not wrong(elsewhere)
+
+
+# --- words that name no place, in the city position of every format -----------------------------------
+
+NO_PLACE = (
+    "Virtual", "Nationwide", "Multiple Locations", "Various Locations", "Any Location", "Work at Home", "Teleworking",
+    "Telecommuting", "Head Office", "Home Office", "Home-Based", "Field Based", "Field-Based", "Flexible",
+    "Distributed", "Global", "Worldwide", "TBD", "HQ", "Corporate Headquarters", "Remote Eligible", "Remote-Friendly",
+)  # fmt: skip
+NO_PLACE_FORMATS = ("{k} - {w}", "{k}, {w}", "{w}, {k}", "{s} - {w}", "{k}, {s}, {w}", "{k}, {w}, {s}", "{w}, {s}")
+
+
+def test_a_word_that_names_no_place_is_never_a_city():
+    remote = ({"work_mode.remote"}, {"work_mode"})  # "Remote Eligible": the work mode is still read
+    cases = [
+        (fmt.format(k=k, s=s, w=w), remote if w.startswith("Remote") else UNSURE)
+        for w, fmt, k, s in itertools.product(NO_PLACE, NO_PLACE_FORMATS, ("US", "United States"), ("CA", "Texas"))
+    ]
+    assert not wrong(cases)
+
+
+def test_city_names_that_only_contain_such_letters_are_still_read():
+    cases = [
+        ("Homestead, FL", city("us", "homestead")),
+        ("Fairfield, CT", city("us", "fairfield")),
+        ("Officer, VA", city("us", "officer")),
+        ("California - Bakersfield", city("us", "bakersfield")),
+    ]
+    assert not wrong(cases)

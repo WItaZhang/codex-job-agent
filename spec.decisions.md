@@ -102,7 +102,7 @@
 
 **规则写在** `spec.md` §10 第 31 条。
 
-## 决定 7（2026-10-20）：work_mode 的词全部从地点里去掉；Virtual、Nationwide 这类词算认不出
+## 决定 7（2026-10-20）：work_mode 的词全部从地点里去掉；Virtual、Nationwide 这类词算认不出（第 2 款已被决定 11 取代）
 
 - 合并前审查发现（3 票成立）："US - Work From Home" 读成 `us.work_from_home`，"India, Work From Home" 读成 `india.work_from_home`，"United States - In Office" 读成 `us.in_office`，"US - Virtual"、"USA - Nationwide" 也读成城市，都算有把握。原来的代码这几条都算没把握。
 - 原因：Work From Home、WFH、In Office 这些词只用来读 work_mode，没有像 Remote 一样从地点里去掉；"地区 - 城市"和"国家在前"两种新写法会把剩下的词当成城市。
@@ -147,5 +147,16 @@
   - 国家在前的三段写法，两种分法（第二段是州或第三段是州）都试，只有一种读得通、或者两种读出同一个城市时才算读出。"United States of America, Washington, District of Columbia" 因此读成 `us.washington`（决定 6 原来让它算没把握）。
   - 加拿大三段城市在前的写法（"Toronto, ON, Canada"），中间一段现在也必须是省，和美国一样。
 - 测试是组合矩阵：每种写法 × 州写成全名、缩写、带点缩写 × 城市位置上是本州的城市、本州缩写、本州全名、别的州 × 美国和加拿大的各种国家名。
+
+**规则写在** `spec.md` §10 第 31 条。
+
+## 决定 11（2026-10-20）：不是地名的词按整词比；名单外的词仍可能被读成城市（取代决定 7 第 2 款）
+
+- 复核发现：决定 7 写"新见到的这类词照例交给子 agent"，代码实际把名单外的词当成城市，例如 "US - Work at Home"、"US - Teleworking"、"US - Head Office"。名单是整个短语比的，换个说法就漏。
+- 定下的（按用户 2026-10-19 授权全部按推荐项，即复核的推荐修法 (d)，由本会话在两种改法里选推荐项）：
+  - **名单改成按词比**：城市位置上的一段里只要有一个整词在名单里（virtual、nationwide、locations、home、office、work、field、telework、hq 等），就不当城市，location 算没把握。"Work at Home"、"Head Office"、"Teleworking"、"Remote Eligible" 都因此算没把握；按整词比，"Homestead"、"Fairfield" 这样的地名不受影响。
+  - **决定 7 的文字如实改写**：名单外、不是地名的词仍可能被读成城市（用户知情）。做不到"新见到的都交给子 agent"：代码里没有地名库，分不出一个没见过的词是不是地名。
+  - 没选的：让代码做到原文写的那样。要接地名库，超出本切片。
+  - 名单里有 international，所以 "International Falls, MN" 这类真地名会算没把握，交给子 agent（宁可没把握）。
 
 **规则写在** `spec.md` §10 第 31 条。

@@ -71,12 +71,13 @@ _DASHES = re.compile(r"[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]")
 _DOTTED = re.compile(r"\b[A-Za-z](?:\.[A-Za-z])+\b\.?")
 # A dash with a space on either side parts a region from a city; one inside a word ("Winston-Salem") does not.
 _DASH = re.compile(r"\s*(?:(?<=\s)-|-(?=\s))\s*")
-# Words that stand where a city would but name no place: the location is left to the tagger.
-_NOT_PLACES = {
-    "virtual", "nationwide", "national", "distributed", "flexible", "telecommute", "telework", "home", "home based",
-    "home-based", "home office", "field", "field based", "field-based", "travel", "global", "worldwide",
-    "international", "various", "various locations", "multiple", "multiple locations", "all locations", "any",
-    "any location", "other", "tbd", "headquarters", "hq", "corporate",
+# Words that name no place: a city position holding any of them, as a whole word, is not read as a city. Words
+# outside this list that name no place may still be read as a city (spec §10 item 31).
+_NOT_PLACE_WORDS = {
+    "virtual", "nationwide", "distributed", "flexible", "telecommute", "telecommuting", "telework", "teleworking",
+    "home", "office", "work", "working", "field", "travel", "traveling", "travelling", "global", "worldwide",
+    "international", "various", "multiple", "location", "locations", "all", "any", "other", "tbd", "headquarters",
+    "hq", "corporate", "based", "eligible", "friendly", "optional", "first",
 }  # fmt: skip
 # Between places; " - " is not one (spec §10 item 31): it joins a region and a city.
 _SEPARATOR = re.compile(r";|\||\bor\b|/")
@@ -122,7 +123,9 @@ def _city(country: str, text: str, region: str | None = None) -> str | None:
     stands there names no city: a code (two letters or fewer, or with digits), a country, a state or province (a
     well-known city named like one counts beside that state only, "New York, NY"), or a word such as "Nationwide"."""
     slug, low = _slug(text), " ".join(text.casefold().split())
-    if len(slug.replace("_", "")) <= 2 or any(c.isdigit() for c in text) or low in _COUNTRIES or low in _NOT_PLACES:
+    if len(slug.replace("_", "")) <= 2 or any(c.isdigit() for c in text) or low in _COUNTRIES:
+        return None
+    if set(re.split(r"[\s-]+", low)) & _NOT_PLACE_WORDS:
         return None
     if (
         any(_region(c, low) for c in _REGION_CODES)
