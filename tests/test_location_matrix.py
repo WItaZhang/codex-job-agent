@@ -170,6 +170,8 @@ def test_a_state_code_inside_the_city_position_is_no_city():
         ("Washington DC, United States", UNSURE),
         ("Austin TX, USA", UNSURE),
         ("US - Austin TX", UNSURE),
+        ("washington dc, us", UNSURE),  # lower case: the last word still counts
+        ("austin tx, usa", UNSURE),
         ("La Jolla, CA", city("us", "la_jolla")),  # "La" is a word of the name, not Louisiana
         ("De Pere, WI", city("us", "de_pere")),
     ]

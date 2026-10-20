@@ -120,6 +120,10 @@ def _region(country: str | None, text: str) -> str | None:
     return codes.get(low) or (low if low in codes.values() else None)
 
 
+def _is_code(word: str) -> bool:
+    return any(word.casefold() in codes for codes in _REGION_CODES.values())
+
+
 def _city(country: str, text: str, region: str | None = None) -> str | None:
     """The city position, the same rule in every format (spec §10 item 31): a city-level ref, or None when what
     stands there names no city: a code (two letters or fewer, or with digits), a country, a state or province (a
@@ -129,8 +133,9 @@ def _city(country: str, text: str, region: str | None = None) -> str | None:
         return None
     if set(re.split(r"[\s-]+", low)) & _NOT_PLACE_WORDS:
         return None
-    if any(w.isupper() and any(w.casefold() in codes for codes in _REGION_CODES.values()) for w in text.split()):
-        return None  # "Washington DC", "Austin TX": a state's code inside the city position
+    words = text.split()
+    if any(_is_code(w) for w in words if w.isupper()) or (len(words) > 1 and _is_code(words[-1])):
+        return None  # "Washington DC", "austin tx": a state's code inside the city position
     if (
         any(_region(c, low) for c in _REGION_CODES)
         and (country, _region(country, region or ""), low) not in _NAMED_LIKE_REGION
