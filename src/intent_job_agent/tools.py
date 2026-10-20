@@ -1136,7 +1136,7 @@ class Toolbox:
             relocation=applicant.relocation,
         )
 
-    def _step_list(self, batch_id: str, phase: str, jobs: list[dict], applicant) -> Path:
+    def _step_list(self, batch_id: str, phase: str, jobs: list[dict]) -> Path:
         """The step's jobs written as a form-fill list (spec section 10 item 87): every job of the step, so the
         form-fill module's checks cover the auto-submitted ones too. Only the reviewed and careful ones are filled
         by it."""
@@ -1228,7 +1228,7 @@ class Toolbox:
         if no_letter:
             raise InvariantError(f"Jobs {no_letter} have no cover letter yet")
         applicant = self._ready_applicant()
-        list_path = self._step_list(batch_id, phase, jobs, applicant)
+        list_path = self._step_list(batch_id, phase, jobs)
         inputs = form_fill.load_inputs(list_path, applicant, self.settings)  # nothing starts if anything is wrong
         conflicts = self._profile_conflicts(applicant, inputs.answers)
         if conflicts:
@@ -1388,7 +1388,7 @@ class Toolbox:
             conclusion=conclusion,
             todo=tuple(report.todo),
             report=str(path) if path else None,
-            recording_id=report.recording_id or outcome.recording_id,
+            recording_id=outcome.recording_id or report.recording_id,  # the report's copy went through the mask
         )
 
     def _sync_apply_results(self) -> None:
