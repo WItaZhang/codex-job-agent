@@ -166,12 +166,12 @@ def _place(part: str) -> str | None:
 
 
 def _mode(text: str) -> str | None:
-    low = text.casefold()
-    if "hybrid" in low:
+    words = {word.casefold() for word in _MODE_WORDS.findall(text)}
+    if "hybrid" in words:
         return "hybrid"
-    if any(w in low for w in _ONSITE):
+    if words & set(_ONSITE):
         return "onsite"
-    return "remote" if any(w in low for w in _REMOTE) else None
+    return "remote" if words & set(_REMOTE) else None
 
 
 def _locations(text: str) -> tuple[list[str], str | None, bool]:

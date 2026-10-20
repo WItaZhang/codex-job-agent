@@ -109,6 +109,7 @@ def test_country_first_with_two_parts_that_could_be_the_state(location, tags):
         ("USA - Nationwide", set(), set()),
         ("Nationwide, US", set(), set()),
         ("Canada, Multiple Locations", set(), set()),
+        ("Kingston Site, Jamaica", set(), set()),  # whole words only: no "on site" here
     ],
 )
 def test_work_mode_words_are_no_place_and_other_words_that_are_no_place_are_not_read(location, tags, confident):
