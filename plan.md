@@ -81,7 +81,7 @@ src/<pkg>/
   - 用户没选过的 exception 不会出现；
   - 回放的数字和一个独立编写的简单重算函数结果一致；
   - 岗位 description 不会出现在 fake client 收到的 prompt 里。
-- 多天模拟：从 base_intent 开始连续跑多天，检查 spec §9 的四条完成标准。
+- 多天模拟：从 base_intent 开始连续跑多天，检查 spec §6.1 的四条不变量（原来是 §9 的四条完成标准）。
 
 ---
 
