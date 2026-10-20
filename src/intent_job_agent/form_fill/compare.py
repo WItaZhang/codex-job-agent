@@ -529,7 +529,13 @@ def _shown(value: str, entry: AnswerEntry | None, ambiguous) -> str:
     contact = (entry is not None and entry.category == "contact" and entry.answer is None) or any(
         key.startswith("contact.") for key in ambiguous
     )
-    if not contact or is_empty(value):
+    return contact_shown(value) if contact else value
+
+
+def contact_shown(value: str) -> str:
+    """A contact field's value with only its placeholders and place names (states, countries) kept: any other text is
+    a contact value masking missed, shown as HIDDEN (spec 5.6, masking by column)."""
+    if is_empty(value):
         return value
     pieces = re.split(r"(\[[^\[\]]+\])", value)
     kept = [

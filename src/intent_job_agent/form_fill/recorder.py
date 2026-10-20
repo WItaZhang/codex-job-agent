@@ -33,6 +33,8 @@ class Snapshot:
     fields: tuple[ReadField, ...]
     read_at: str = ""
     password: bool = False
+    paths: tuple[str, ...] = ()  # each field's element (CSS path in its frame), for hiding it by column (5.6)
+    frames: tuple[int, ...] = ()  # each field's frame (0: the page itself)
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,7 @@ class _Page:
     numbers: dict[tuple, _Number] = field(default_factory=dict)
     next: int = 1
     auto: Counter | None = None  # questions of the last background read kept
+    last_read: Counter | None = None  # questions of the last background read, kept or not
 
 
 class Recorder:
@@ -125,7 +128,11 @@ class Recorder:
             page.title = " / ".join(snap.marker)
         keep = True
         if stage == "auto":
-            keep = page.auto is None or not (_within(questions, page.auto) and questions != page.auto)
+            # A read with fewer fields, all of them in the last one kept, may be the page being taken down: it is
+            # kept only when the next read shows the same fields (a follow-up that went away, spec 4.3).
+            shrunk = page.auto is not None and _within(questions, page.auto) and questions != page.auto
+            keep = not shrunk or questions == page.last_read
+            page.last_read = questions
             if keep:
                 page.auto = questions
         if keep:
@@ -230,6 +237,7 @@ class Recorder:
                     "markers": [list(m) for m in p.markers],
                     "questions": counter(p.questions),
                     "auto": counter(p.auto),
+                    "last_read": counter(p.last_read),
                     "next": p.next,
                     "numbers": [[list(key), e.n, e.after, list(e.question)] for key, e in p.numbers.items()],
                 }
@@ -253,6 +261,7 @@ class Recorder:
                 markers=[tuple(m) for m in raw.get("markers", [])],
                 questions=counter(raw.get("questions")) or Counter(),
                 auto=counter(raw.get("auto")),
+                last_read=counter(raw.get("last_read")),
                 next=raw.get("next", 1),
             )
             shared: dict[int, _Number] = {}  # one entry per number, also under its other identities

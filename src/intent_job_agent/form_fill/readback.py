@@ -14,6 +14,8 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from ..domain import InvariantError
+from .columns import mask_snapshot
+from .compare import HIDDEN as HIDDEN_TEXT
 from .matching import NAVIGATION, is_empty, norm
 from .models import PageState, ReadField
 from .recorder import Snapshot
@@ -78,6 +80,17 @@ EXTRACT_JS = r"""() => {
   const ownText = (el) => Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.data.trim());
   const hasControl = (el) => el.matches(CONTROLS) || el.querySelector(CONTROLS + "," + TOGGLES) !== null;
   const required = (el) => !!el.required || el.getAttribute("aria-required") === "true";
+  // A CSS path from body, as CONTACT_JS writes it: the element to hide when its field is a contact field (5.6).
+  const pathOf = (el) => {
+    const parts = [];
+    for (let e = el; e && e !== document.body; e = e.parentElement) {
+      if (!e.parentElement) return "";
+      let n = 1;
+      for (let s = e.previousElementSibling; s; s = s.previousElementSibling) n++;
+      parts.unshift(`:nth-child(${n})`);
+    }
+    return ["body", ...parts].join(" > ");
+  };
 
   const read = (root) => {
     // Visible text nodes in document order, for "nearest preceding text".
@@ -201,7 +214,9 @@ EXTRACT_JS = r"""() => {
       const own = popup(el);
       const lists = Array.from(box.querySelectorAll("[role=listbox]")).filter((l) => l !== own);
       lists.forEach((l) => consumed.add(l));
-      picked.set(el, lists.flatMap((l) => Array.from(l.querySelectorAll("[role=option]"))).map(textOf).filter(Boolean));
+      // Only items shown: a list of suggestions kept hidden in the same box is not what was picked.
+      picked.set(el, lists.filter(shown).flatMap((l) => Array.from(l.querySelectorAll("[role=option]")))
+        .filter(shown).map(textOf).filter(Boolean));
     }
 
     // Yes / No style button groups (aria-pressed): one control per parent with two or more such buttons. A native
@@ -235,9 +250,12 @@ EXTRACT_JS = r"""() => {
       const labels = labelsOf(el);
       // A listbox button is a field only when a label names it; menus in the page's header are not.
       if (el.matches(LISTBOX_BUTTONS) && !labels.label_for && !labels.labelledby) continue;
+      // An icon-only listbox button beside another control is that control's toggle, not a field of its own.
+      if (el.matches(LISTBOX_BUTTONS) && !buttonText(el) && el.parentElement
+        && Array.from(el.parentElement.querySelectorAll(CONTROLS)).some((c) => c !== el)) continue;
       const node = {
         order: order.get(el), tag, type, role, id: el.getAttribute("id") || "", name: el.getAttribute("name") || "",
-        labels, value: "", options: [], required: required(el), section: sectionOf(el),
+        labels, value: "", options: [], required: required(el), section: sectionOf(el), path: pathOf(el),
       };
       if (el.matches(LISTBOX_BUTTONS)) {
         node.listbox_button = true;
@@ -277,6 +295,9 @@ EXTRACT_JS = r"""() => {
           aria_label: gbox ? gbox.getAttribute("aria-label") || "" : "",
         };
         node.labels.inner = innerTitle(groupBox(el));
+        // The title of the box holding this one check box alone (a consent paragraph above its "I agree").
+        const own = el.closest("fieldset,[role=group]");
+        node.own_title = own && own.querySelectorAll(CONTROLS).length === 1 ? innerTitle(own) : "";
         if (gbox && gbox.getAttribute("aria-required") === "true") node.required = true;
         node.checked = !!el.checked;
         node.option_label = Array.from(el.labels || []).map(textOf).filter(Boolean).join(" ")
@@ -292,6 +313,7 @@ EXTRACT_JS = r"""() => {
       controls.push({
         order: order.get(buttons[0]), tag: "button", type: "", role: "togglegroup", id: box.getAttribute("id") || "",
         name: "", labels: labelsOf(box), value: "", required: required(box), section: sectionOf(buttons[0]),
+        path: pathOf(box),
         options: buttons.map((b) => ({
           text: buttonText(b), value: "", selected: b.getAttribute("aria-pressed") === "true",
         })),
@@ -314,7 +336,7 @@ EXTRACT_JS = r"""() => {
       valueEls.forEach((v) => used.add(v));
       pairs.push({
         order: order.get(q), question: textOf(q), value: valueEls.map(textOf).filter(Boolean).join(joiner), source,
-        section: sectionOf(q),
+        section: sectionOf(q), path: valueEls.length === 1 ? pathOf(valueEls[0]) : pathOf(valueEls[0].parentElement),
       });
     };
     for (const dt of root.querySelectorAll("dt")) {
@@ -386,6 +408,8 @@ EXTRACT_JS = r"""() => {
     for (const list of fillable ? [] : root.querySelectorAll("ul,ol")) {
       const h = list.previousElementSibling;
       if (!h || !h.matches(HEADINGS) || !shown(list) || hasControl(list)) continue;
+      // Only inside a group the heading titles: a job description's headings over bullet lists are not answers.
+      if (!list.parentElement || !list.parentElement.matches("[role=group],fieldset,[aria-labelledby]")) continue;
       const items = Array.from(list.children).filter((li) => li.tagName === "LI" && shown(li));
       if (!items.length || items.some((li) => li.querySelector("ul,ol"))) continue;
       addPair(h, items, "list", "; ");
@@ -463,6 +487,36 @@ CONTACT_JS = r"""() => {
   return nodes;
 }"""
 SCREENSHOT_NOTE = "screenshot-not-saved.txt"
+
+# Runs in the main frame: the page as simplified HTML (no scripts, styles or templates), written from the live DOM
+# without changing it. The elements at the given paths (fields matched to a contact entry) have their text and
+# value-like attributes written as HIDDEN, so a contact value masking by value cannot see never reaches the file.
+SERIALIZE_JS = r"""([paths, hidden]) => {
+  const hide = new Set();
+  for (const p of paths) { try { const e = document.querySelector(p); if (e) hide.add(e); } catch (err) {} }
+  const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "LINK"]);
+  const VOID = new Set(["AREA", "BASE", "BR", "COL", "EMBED", "HR", "IMG", "INPUT", "META", "SOURCE", "TRACK", "WBR"]);
+  const VALUED = new Set(["value", "title", "aria-label", "aria-valuetext", "aria-valuenow", "placeholder", "alt"]);
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const out = [];
+  const walk = (node, masked) => {
+    if (node.nodeType === 3) { out.push(masked ? "" : esc(node.data)); return; }
+    if (node.nodeType !== 1 || SKIP.has(node.tagName)) return;
+    const own = masked || hide.has(node);
+    const tag = node.tagName.toLowerCase();
+    out.push("<" + tag);
+    for (const a of Array.from(node.attributes)) {
+      const v = own && VALUED.has(a.name.toLowerCase()) ? hidden : a.value;
+      out.push(" " + a.name + '="' + esc(v).replace(/"/g, "&quot;") + '"');
+    }
+    out.push(">");
+    if (own && !masked && !VOID.has(node.tagName)) out.push(esc(hidden));
+    for (const c of Array.from(node.childNodes)) walk(c, own);
+    if (!VOID.has(node.tagName)) out.push("</" + tag + ">");
+  };
+  walk(document.documentElement, false);
+  return "<!doctype html>" + out.join("");
+}"""
 
 QUESTION_SOURCES = ("label_for", "labelledby", "aria_label", "wrapping", "legend", "preceding", "placeholder")
 # A date entered in parts (spin buttons labelled Month and Year): the parts of one fieldset are one field, titled by
@@ -591,11 +645,16 @@ def _single(node: dict) -> dict:
         "required": bool(node.get("required")) or starred or bool(labels.get("star")),
         "section": _clean(node.get("section")),
         "group_title": _question(labels.get("legend"))[0],
+        "path": str(node.get("path") or ""),
     }
 
 
+PART_EMPTY = "?"  # an empty part of a date entered in parts ("?/2024": the month is empty)
+
+
 def _merge_dates(drafts: list[dict]) -> list[dict]:
-    """Month / Day / Year parts in one fieldset -> one "date" field named by the legend (DATE_PARTS)."""
+    """Month / Day / Year parts in one fieldset -> one "date" field named by the legend (DATE_PARTS), its parts in
+    page order. A part left empty while another is filled shows as PART_EMPTY: the date is not complete."""
     out: list[dict] = []
     for d in drafts:
         title = d.pop("group_title", "")
@@ -604,12 +663,15 @@ def _merge_dates(drafts: list[dict]) -> list[dict]:
             continue
         prev = out[-1] if out else None
         if prev is not None and prev.get("_date") == title:
-            prev["value"] = "/".join(v for v in (prev["value"], d["value"]) if v)
+            prev["_parts"].append(d["value"])
             prev["required"] = prev["required"] or d["required"]
             continue
-        out.append({**d, "question": title, "control": "date", "_date": title})
+        out.append({**d, "question": title, "control": "date", "_date": title, "_parts": [d["value"]]})
     for d in out:
         d.pop("_date", None)
+        parts = d.pop("_parts", None)
+        if parts is not None:
+            d["value"] = "/".join(v or PART_EMPTY for v in parts) if any(parts) else ""
     return out
 
 
@@ -625,9 +687,20 @@ def _group(members: list[dict]) -> dict:
         "control": _control_kind(first),
         "value": "; ".join(label for m, label in zip(members, labels, strict=True) if m.get("checked") and label),
         "options": tuple(label for label in labels if label),
-        "required": any(m.get("required") for m in members) or starred,
+        "required": any(m.get("required") or (m.get("labels") or {}).get("star") for m in members) or starred,
         "section": _clean(first.get("section")),
+        "path": str(first.get("path") or ""),
     }
+
+
+def _split_checkbox(node: dict) -> dict:
+    """One of several check boxes sharing a name and a label: its own box's title is its question, when the box
+    holds it alone (two consents, each "I agree"); otherwise its label is (one per work segment)."""
+    draft = _single(node)
+    title, _ = _question(node.get("own_title"))
+    if title and title != _clean(node.get("option_label")):
+        draft["question"] = title
+    return draft
 
 
 def _frame_items(fi: int, frame: dict) -> list[tuple[tuple, str, dict]]:
@@ -656,7 +729,7 @@ def _frame_items(fi: int, frame: dict) -> list[tuple[tuple, str, dict]]:
         _, what, payload = item
         if what == "group" and len(payload) > 1 and _control_kind(payload[0]) == "checkbox":
             if len({_clean(m.get("option_label")) for m in payload}) == 1:
-                out.extend(((fi, m.get("order", 0)), "control", m) for m in payload)
+                out.extend(((fi, m.get("order", 0)), "split", m) for m in payload)
                 continue
         out.append(item)
     return out
@@ -675,6 +748,11 @@ def normalize(raw: dict, sections: bool = False) -> tuple[ReadField, ...]:
     """Raw nodes from EXTRACT_JS (one entry per frame) -> ReadFields numbered p1.1, p1.2 ... in page order.
     `sections`: also keep each field's section and count the same question in the same section (the recorder's
     identity, spec 4.3); without it the fields are slice 1's."""
+    return _read_fields(raw, sections)[0]
+
+
+def _read_fields(raw: dict, sections: bool) -> tuple[tuple[ReadField, ...], tuple[str, ...], tuple[int, ...]]:
+    """normalize's fields, with each one's element path and frame."""
     if not isinstance(raw, dict) or not isinstance(raw.get("frames"), list):
         raise InvariantError("raw page must be an object with a frames list")
     items = []
@@ -686,11 +764,13 @@ def normalize(raw: dict, sections: bool = False) -> tuple[ReadField, ...]:
     items.sort(key=lambda item: item[0])  # stable: ties keep extraction order
 
     drafts = []
-    for _, what, payload in items:
+    for (fi, _), what, payload in items:
         if what == "group":
             drafts.append(_single(payload[0]) if _lone_checkbox(payload) else _group(payload))
         elif what == "control":
             drafts.append(_single(payload))
+        elif what == "split":
+            drafts.append(_split_checkbox(payload))
         else:
             question, _ = _question(payload.get("question"))
             value = _clean(payload.get("value"))
@@ -703,15 +783,21 @@ def normalize(raw: dict, sections: bool = False) -> tuple[ReadField, ...]:
                         "options": (),
                         "required": False,
                         "section": _clean(payload.get("section")),
+                        "path": str(payload.get("path") or ""),
                     }
                 )
+        if drafts and "frame" not in drafts[-1]:
+            drafts[-1]["frame"] = fi
 
     drafts = _merge_dates(drafts)
     drafts = [d for d in drafts if not is_page_chrome(d["question"], d["value"], d["required"])]
     seen = {(d["question"].lower(), d["value"].lower()) for d in drafts if d["control"] != "review"}
     kept = [d for d in drafts if d["control"] != "review" or (d["question"].lower(), d["value"].lower()) not in seen]
     counts: dict[tuple, int] = {}
+    paths, frames = [], []
     for d in kept:
+        paths.append(d.pop("path", ""))
+        frames.append(d.pop("frame", 0))
         section = d.pop("section", "")
         origin = "review_text" if d["control"] == "review" else "control"
         if sections:
@@ -719,13 +805,14 @@ def normalize(raw: dict, sections: bool = False) -> tuple[ReadField, ...]:
             counts[key] = counts.get(key, 0) + 1
             d.update(section=section, occurrence=counts[key])
         d["origin"] = origin
-    return tuple(ReadField(id=f"p1.{n}", **d) for n, d in enumerate(kept, start=1))
+    fields = tuple(ReadField(id=f"p1.{n}", **d) for n, d in enumerate(kept, start=1))
+    return fields, tuple(paths), tuple(frames)
 
 
 def snapshot(raw: dict, tab: str, read_at: str) -> Snapshot:
     """One read of a tab for the recorder: the fields with their sections, the page's title (the current step when
     the page shows one, else every heading read, in order) and whether a password field was shown."""
-    fields = normalize(raw, sections=True)
+    fields, paths, field_frames = _read_fields(raw, sections=True)
     frames = [f for f in raw.get("frames", []) if isinstance(f, dict) and not f.get("error")]
     step = next((_clean(f.get("step")) for f in frames if _clean(f.get("step"))), "")
     headings = tuple(h for f in frames for h in map(_clean, f.get("headings") or []) if h)
@@ -739,6 +826,8 @@ def snapshot(raw: dict, tab: str, read_at: str) -> Snapshot:
         fields=fields,
         read_at=read_at,
         password=password,
+        paths=paths,
+        frames=field_frames,
     )
 
 
@@ -921,12 +1010,21 @@ def blackout_css(paths: list[str]) -> str:
     return "\n".join(f"{p}, {p} *, {p}::placeholder {{ {BLACK} }}" for p in paths)
 
 
-def _masked_screenshot(page, redactor: Redactor) -> tuple[bytes | None, str]:
-    """A full-page screenshot with every element showing a contact value painted black for the shot only (Playwright
-    adds the stylesheet for the shot and takes it away; the page is left as it is), or None and why when that cannot
-    be done (specs/form-fill.md 5.6)."""
+def serialize(page, hide=()) -> str:
+    """The page's main frame as simplified HTML, with the fields at `hide` ((frame, path)) hidden (SERIALIZE_JS)."""
+    paths = [path for frame, path in hide if frame == 0 and path]
+    return page.main_frame.evaluate(SERIALIZE_JS, [paths, HIDDEN_TEXT])
+
+
+def _masked_screenshot(page, redactor: Redactor, hide=()) -> tuple[bytes | None, str]:
+    """A full-page screenshot with every element showing a contact value, and every field at `hide` ((frame, path)
+    of the fields matched to a contact entry), painted black for the shot only (Playwright adds the stylesheet for
+    the shot and takes it away; the page is left as it is), or None and why when that cannot be done (5.6)."""
     try:
+        if any(frame != 0 for frame, _ in hide):
+            return None, "子框架里有对到联系方式的栏，涂不到"
         paths = contact_paths(page.main_frame.evaluate(CONTACT_JS), redactor)
+        paths += [path for _, path in hide if path and path not in paths]
         for frame in page.frames[1:]:
             if contact_paths(frame.evaluate(CONTACT_JS), redactor):
                 return None, "子框架里有联系方式，涂不到"
@@ -937,7 +1035,7 @@ def _masked_screenshot(page, redactor: Redactor) -> tuple[bytes | None, str]:
         return None, type(exc).__name__
 
 
-def _read_live(port: int, target: dict, redactor: Redactor) -> tuple[dict, str, bytes | None, str]:
+def _read_live(port: int, target: dict, redactor: Redactor, sheet) -> tuple:
     from playwright.sync_api import sync_playwright
 
     # Leaving the context stops the Playwright driver, which drops the CDP connection. browser.close() is never
@@ -945,21 +1043,25 @@ def _read_live(port: int, target: dict, redactor: Redactor) -> tuple[dict, str, 
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
         page = _find_page(browser, target)
-        raw, html = _extract(page), page.content()
-        return raw, html, *_masked_screenshot(page, redactor)
+        raw = _extract(page)
+        snap = snapshot(raw, tab=str(target.get("id", "")), read_at=datetime.now().isoformat(timespec="seconds"))
+        masked, hide, _ = mask_snapshot(snap, redactor, sheet)
+        return raw, masked, serialize(page, hide), *_masked_screenshot(page, redactor, hide)
 
 
-def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor) -> FinalPage:
-    """Read the job tab as it is and save page.html, screenshot.png, readback.json and raw.json (all redacted;
-    contact values in the screenshot are painted black). A screenshot that cannot be blacked out is not saved;
-    screenshot-not-saved.txt says so. Disconnects without closing the browser or the page."""
+def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> FinalPage:
+    """Read the job tab as it is and save page.html, screenshot.png and readback.json, masked by value and by column
+    (`sheet`: the answer sheet, for the fields matched to a contact entry; spec 5.6); contact values in the
+    screenshot are painted black. A screenshot that cannot be blacked out is not saved; screenshot-not-saved.txt
+    says so. Disconnects without closing the browser or the page."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     # Playwright's sync API refuses to run inside an asyncio loop (the MCP server's), so it gets its own thread.
     with ThreadPoolExecutor(max_workers=1) as pool:
-        raw, html, shot, why = pool.submit(_read_live, int(port), target, redactor).result()
-    fields, state = normalize(raw), page_state(raw)
-    snap = snapshot(raw, tab=str(target.get("id", "")), read_at=datetime.now().isoformat(timespec="seconds"))
+        raw, snap, html, shot, why = pool.submit(_read_live, int(port), target, redactor, sheet or {}).result()
+    state = page_state(raw)
+    fields = tuple(f.model_copy(update={"id": f"p1.{n}"}) for n, f in enumerate(snap.fields, start=1))
+    fields = tuple(f.model_copy(update={"section": "", "occurrence": 1}) for f in fields)
     (out / "page.html").write_text(redactor.mask(simplify_html(html)), encoding="utf-8")
     if shot is None:
         (out / SCREENSHOT_NOTE).write_text(redactor.mask(f"截图未存：打码失败（{why}）\n"), encoding="utf-8")
@@ -967,7 +1069,6 @@ def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor) 
         (out / "screenshot.png").write_bytes(shot)
     dumped = [f.model_dump(mode="json") for f in fields]
     (out / "readback.json").write_text(_dump(redactor.mask_json(dumped)), encoding="utf-8")
-    (out / "raw.json").write_text(_dump(redactor.mask_json(raw)), encoding="utf-8")
     return FinalPage(fields, state, snap)
 
 

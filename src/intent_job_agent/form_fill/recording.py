@@ -4,10 +4,12 @@
       meta.json                 address, company, title, platform, pages, what it can retest, the last conclusion
       form/                     the blank form: structure (no values), simplified HTML, screenshot, MHTML, network
       fills/<run>/              one fill: state.json, checkpoints.json, requests.json, p<n>.prefilled.json,
-                                p<n>.values.json, p<n>.auto.json, p<n>.filled.html/.png, final.json/.html/.png
+                                p<n>.values.json, p<n>.auto.json, p<n>.filled.html/.png, final.json/.html/.png,
+                                network.partial.jsonl while the run goes on
 
-Everything is masked before it is written (redact.Redactor). The checkpoint service writes while the filling agent
-runs; the runner adds the final read, closes the network record and reads every page back with read_run.
+Everything is masked before it is written: by value (redact.Redactor) and by column (columns.mask_snapshot).
+The checkpoint service writes while the filling agent runs; the runner adds the final read, closes the network
+record and reads every page back with read_run.
 """
 
 import base64
@@ -20,6 +22,7 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
+from .columns import mask_snapshot  # noqa: F401 - the checkpoint service masks each read with it
 from .matching import norm
 from .models import ReadField
 from .readback import simplify_html
@@ -38,6 +41,9 @@ TRACKING = re.compile(
 DONE = ("ok", "check_then_submit", "do_not_submit", "maybe_submitted", "not_eligible")
 DONE_REASONS = ("expired", "wrong_job", "email_only", "already_applied")
 DROPPED_HEADERS = re.compile(r"cookie|authorization|token|auth|session|csrf|xsrf", re.I)
+# Documents (a resume preview after an upload) are personal and their text may be compressed past any scan.
+DOCUMENT_TYPES = re.compile(r"application/(pdf|msword|vnd\.openxmlformats|vnd\.oasis|rtf)|text/rtf", re.I)
+SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 TEXT_TYPES = re.compile(
     r"^(text/|application/(json|javascript|x-javascript|ecmascript|xml|xhtml|ld\+json))|\+json|\+xml|svg", re.I
 )
@@ -60,7 +66,7 @@ def platform(url: str) -> str:
         ("greenhouse", ("greenhouse.io",)),
         ("lever", ("lever.co",)),
         ("ashby", ("ashbyhq.com",)),
-        ("workday", ("myworkdayjobs.com", "myworkday.com")),
+        ("workday", ("myworkdayjobs.com", "myworkday.com", "myworkdaysite.com")),
         ("linkedin", ("linkedin.com",)),
     ):
         if any(host == m or host.endswith("." + m) for m in marks):
@@ -76,22 +82,41 @@ def recording_id(url: str) -> str:
     path = [p for p in parts.path.split("/") if p]
     query = dict(parse_qsl(parts.query))
     kind = platform(url)
-    if kind == "greenhouse" and "jobs" in path and path.index("jobs") >= 1 and len(path) > path.index("jobs") + 1:
-        i = path.index("jobs")
-        return f"greenhouse-{_slug(path[i - 1])}-{_slug(path[i + 1])}"
-    if kind in ("lever", "ashby") and len(path) >= 2:
-        return f"{kind}-{_slug(path[0])}-{_slug(path[1])}"
-    if kind == "workday":
-        job = next((m.group(1) for p in path if (m := re.search(r"_([A-Za-z]+-?\d[\w-]*)$", p))), None)
-        if job:
-            return f"workday-{_slug(host.split('.')[0])}-{_slug(job)}"
-    if kind == "linkedin":
-        job = query.get("currentJobId") or next((p for p in path if p.isdigit()), None)
-        if job:
-            return f"linkedin-{job}"
+    found = _known(kind, host, path, query)
+    if found and SAFE_ID.match(found) and ".." not in found:
+        return found
     canonical = f"{host}{parts.path.rstrip('/')}?{_clean_query(parts.query)}"
     host_part = re.sub(r"[^a-z0-9.-]+", "-", host).strip("-.") or "site"
     return f"other-{host_part}-{hashlib.sha256(canonical.encode()).hexdigest()[:8]}"
+
+
+def _known(kind: str, host: str, path: list[str], query: dict) -> str | None:
+    """platform-company-job for a known platform's address, None when the address does not show both."""
+    if kind == "greenhouse":
+        if "jobs" in path and path.index("jobs") >= 1 and len(path) > path.index("jobs") + 1:
+            i = path.index("jobs")
+            return f"greenhouse-{_slug(path[i - 1])}-{_slug(path[i + 1])}"
+        job = query.get("token") or query.get("gh_jid") or ""
+        if query.get("for") and job.isdigit():  # the embedded application form
+            return f"greenhouse-{_slug(query['for'])}-{job}"
+    if kind in ("lever", "ashby") and len(path) >= 2:
+        return f"{kind}-{_slug(path[0])}-{_slug(path[1])}"
+    if kind == "workday":
+        job = next((m.group(1) for p in path if (m := re.search(r"_((?:[A-Za-z]+-?)?\d[\w-]*)$", p))), None)
+        job = job or next((m.group(1) for p in path if (m := re.search(r"\$(\d+)\.htmld$", p))), None)
+        if host.endswith("myworkdayjobs.com"):
+            tenant = host.split(".")[0]
+        elif path[:1] == ["recruiting"] and len(path) > 1:  # myworkdaysite.com/recruiting/<tenant>/...
+            tenant = path[1]
+        else:
+            tenant = path[0] if path else ""
+        if job and tenant:
+            return f"workday-{_slug(tenant)}-{_slug(job)}"
+    if kind == "linkedin":
+        job = query.get("currentJobId") or next((p for p in path if p.isdigit()), None)
+        if job and job.isdigit():
+            return f"linkedin-{job}"
+    return None
 
 
 # --- another real visit? (spec 4.1, 6.5) ------------------------------------------------------------------------
@@ -110,8 +135,12 @@ def _write_json(path: Path, data) -> None:
 
 
 def note_conclusion(rec_dir: Path, run_id: str, conclusion: str, reason: str | None) -> None:
-    """The last run's conclusion in the recording's meta.json (spec 4.1)."""
+    """The last run's conclusion in the recording's meta.json (spec 4.1). The report of an older run of the same
+    recording, made again later, does not change it."""
     meta = _read_json(Path(rec_dir) / META_FILE, {}) or {}
+    runs = meta.get("runs") or []
+    if run_id in runs and runs[-1] != run_id:
+        return
     meta["last"] = {"run": run_id, "conclusion": conclusion, "reason": reason}
     _write_json(Path(rec_dir) / META_FILE, meta)
 
@@ -139,8 +168,9 @@ def request_entry(method: str, url: str) -> str:
 
 def network_entry(event: dict, redactor: Redactor) -> tuple[dict | None, bool]:
     """A GET response as network.json keeps it, or None, and whether it held the applicant's own contact details (a
-    signed-in page). Cookies and auth-like headers are dropped; a response whose address or text holds any contact
-    detail is dropped whole; other methods keep nothing here (see request_entry)."""
+    signed-in page). Cookies and auth-like headers are dropped. The address, every header kept and the body (read
+    as text whatever its type says) are checked: any contact detail drops the response whole. Documents (PDF, Word)
+    are never kept. Other methods keep nothing here (see request_entry)."""
     if str(event.get("method", "")).upper() != "GET":
         return None, False
     url, body = str(event.get("url", "")), event.get("body") or b""
@@ -148,13 +178,16 @@ def network_entry(event: dict, redactor: Redactor) -> tuple[dict | None, bool]:
         str(k).lower(): str(v) for k, v in (event.get("headers") or {}).items() if not DROPPED_HEADERS.search(str(k))
     }
     kind = headers.get("content-type", "")
-    text = body.decode("utf-8", errors="replace") if TEXT_TYPES.search(kind) else None
-    hits = redactor.hits(url + "\n" + (text or ""))
+    as_text = body.decode("utf-8", errors="replace")
+    seen = "\n".join([url, *(f"{k}: {v}" for k, v in headers.items()), as_text])
+    hits = redactor.hits(seen)
     if sum(hits.values()):
         return None, any(hits[k] for k in OWN_KINDS)
+    if DOCUMENT_TYPES.search(kind):
+        return None, False
     entry = {"url": url, "status": int(event.get("status") or 0), "headers": headers}
-    if text is not None:
-        entry["body_text"] = text
+    if TEXT_TYPES.search(kind):
+        entry["body_text"] = as_text
     else:
         entry["body_base64"] = base64.b64encode(body).decode("ascii")
     return entry, False
@@ -262,12 +295,14 @@ def mhtml_hits(text: str, redactor: Redactor) -> int:
 @dataclass(frozen=True)
 class Capture:
     """What a checkpoint saves besides the values: the page's HTML (simplified and masked on write), a screenshot
-    with contact values blacked out (None and why when that could not be done), and the MHTML for a blank page."""
+    with contact values blacked out (None and why when that could not be done), and the MHTML for a blank page
+    (None and why when it was not taken)."""
 
     html: str | None = None
     screenshot: bytes | None = None
     why: str = ""
     mhtml: str | None = None
+    mhtml_why: str = ""
 
 
 def _structure_key(fields) -> list:
@@ -279,16 +314,24 @@ def _structure_key(fields) -> list:
 
 class RecordingStore:
     """One run's view of one recording: writes form/ (or form-v2/ when the blank form changed since an earlier
-    visit) and fills/<run>/. State shared between the checkpoint service and the runner is in state.json."""
+    visit) and fills/<run>/. The checkpoint service and the runner are two processes: what they share (the page
+    numbers, which form folder this run uses, the network flags) is in state.json, read again before it is used.
+    The first page's network record grows in fills/<run>/ and only moves to the form folder when the run ends."""
 
     def __init__(self, root: Path, rec_id: str, run_id: str, redactor: Redactor, network_max_bytes=NETWORK_MAX_BYTES):
+        if not SAFE_ID.match(rec_id) or ".." in rec_id or not SAFE_ID.match(run_id.lower()):
+            raise ValueError(f"not a recording or run id: {rec_id!r}, {run_id!r}")
         self.rec_id, self.run_id, self.redactor = rec_id, run_id, redactor
         self.rec_dir = Path(root) / rec_id
         self.fill_dir = self.rec_dir / "fills" / run_id
         self.network_max_bytes = network_max_bytes
+        self._state: dict = {}
+        self._refresh()
+
+    def _refresh(self) -> None:
         self._state = _read_json(self.fill_dir / STATE_FILE, {}) or {}
         self.form_dir = self.rec_dir / self._state.get("form_dir", "form")
-        partial = self.form_dir / PARTIAL
+        partial = self.fill_dir / PARTIAL
         self._net_bytes = partial.stat().st_size if partial.is_file() else 0
 
     # meta.json
@@ -311,21 +354,22 @@ class RecordingStore:
         _write_json(self.rec_dir / META_FILE, self.redactor.mask_json(meta))
 
     def begin_run(self) -> None:
-        """Before the filling agent starts: a network record left by a run that never finished is dropped."""
-        (self.form_dir / PARTIAL).unlink(missing_ok=True)
+        """Before the filling agent starts: this run's state.json, empty."""
+        (self.fill_dir / PARTIAL).unlink(missing_ok=True)
         self._net_bytes = 0
         self._write_state()
 
     # state.json
 
     def save_state(self, recorder: Recorder) -> None:
-        self._state["recorder"] = recorder.to_json()
+        """The recorder's pages and numbers. Its texts are already masked (columns.mask_snapshot); the dump is
+        masked again so nothing in state.json escapes the redactor."""
+        self._state["recorder"] = self.redactor.mask_json(recorder.to_json())
         self._write_state()
 
     def load_recorder(self, stuck_after: int = 3) -> Recorder:
-        state = _read_json(self.fill_dir / STATE_FILE, {}) or {}
-        self._state.update(state)
-        return Recorder.from_json(state.get("recorder") or {}, stuck_after)
+        self._refresh()
+        return Recorder.from_json(self._state.get("recorder") or {}, stuck_after)
 
     def _write_state(self) -> None:
         self._state["form_dir"] = self.form_dir.name
@@ -342,6 +386,17 @@ class RecordingStore:
 
     def note_signed_in(self) -> None:
         self._flag("signed_in")
+
+    def note_received(self, text: str, url: str) -> None:
+        """A read showed "application received" (spec 5.6): kept for the report's first line."""
+        if not self._state.get("received"):
+            self._state["received"] = {"text": self.redactor.mask(text)[:200], "url": self.redactor.mask(url)}
+            self._write_state()
+
+    def received(self) -> dict | None:
+        self._refresh()
+        found = self._state.get("received")
+        return found if isinstance(found, dict) else None
 
     # one read
 
@@ -376,6 +431,8 @@ class RecordingStore:
             raise ValueError(f"unknown stage {stage!r}")
 
     def _save_blank(self, obs: Observation, capture: Capture | None) -> None:
+        """The page's values at blank (this run's prefill), and its blank form. A blank form an earlier visit saved
+        with the same structure stands: a later visit only adds its own fills/ (spec 6.2)."""
         n = obs.page
         prefilled = self.fill_dir / f"p{n}.prefilled.json"
         if prefilled.is_file():  # the agent came back to a page it has seen: its first blank read stands
@@ -395,15 +452,25 @@ class RecordingStore:
             for f in obs.fields
         ]
         structure = self.redactor.mask_json({"page": n, "title": obs.title, "url": obs.url, "fields": fields})
+        self._refresh_form_dir()
         self._pick_form_dir(n, structure["fields"])
+        if (self.form_dir / f"p{n}.structure.json").is_file():
+            return
         _write_json(self.form_dir / f"p{n}.structure.json", structure)
         self._save_capture(capture, self.form_dir, f"p{n}")
-        if capture is not None and capture.mhtml is not None:
-            masked = mask_mhtml(capture.mhtml, self.redactor)
-            if masked is None:
-                (self.form_dir / f"p{n}.mhtml.not-saved.txt").write_text("MHTML 未存：打码做不到\n", encoding="utf-8")
-            else:
-                (self.form_dir / f"p{n}.mhtml").write_text(masked, encoding="utf-8", newline="")
+        if capture is None:
+            return
+        masked = mask_mhtml(capture.mhtml, self.redactor) if capture.mhtml is not None else None
+        if masked is not None:
+            (self.form_dir / f"p{n}.mhtml").write_text(masked, encoding="utf-8", newline="")
+        else:
+            why = capture.mhtml_why or ("打码做不到" if capture.mhtml is not None else "没有截到")
+            (self.form_dir / f"p{n}.mhtml.not-saved.txt").write_text(f"MHTML 未存：{why}\n", encoding="utf-8")
+
+    def _refresh_form_dir(self) -> None:
+        state = _read_json(self.fill_dir / STATE_FILE, {}) or {}
+        if state.get("form_dir"):
+            self.form_dir = self.rec_dir / state["form_dir"]
 
     def _pick_form_dir(self, n: int, fields: list) -> None:
         """form/ unless an earlier visit saved another structure for this page there: then the first form-v<k>/
@@ -459,19 +526,21 @@ class RecordingStore:
         if self._net_bytes + size > self.network_max_bytes:
             self._flag("full")
             return False
-        self.form_dir.mkdir(parents=True, exist_ok=True)
-        with (self.form_dir / PARTIAL).open("a", encoding="utf-8") as out:
+        self.fill_dir.mkdir(parents=True, exist_ok=True)
+        with (self.fill_dir / PARTIAL).open("a", encoding="utf-8") as out:
             out.write(line)
         self._net_bytes += size
         return True
 
 
 def finish_network(store: RecordingStore) -> bool:
-    """Keep the first page's network record as network.json only for a signed-out single-page form: one page, no
-    password field, no response with the applicant's contact details (spec 6.2). Returns whether it was kept."""
+    """Keep the first page's network record as network.json in this run's form folder only for a signed-out
+    single-page form: one page, no password field, no response with the applicant's contact details (spec 6.2). A
+    network.json an earlier visit left there stands. Returns whether the form folder now has one from such a run."""
     recorder = store.load_recorder()
     network = store._state.get("network", {})
-    partial = store.form_dir / PARTIAL
+    partial = store.fill_dir / PARTIAL
+    target = store.form_dir / NETWORK
     keep = (
         partial.is_file()
         and partial.stat().st_size > 0
@@ -479,11 +548,11 @@ def finish_network(store: RecordingStore) -> bool:
         and not network.get("password")
         and not network.get("signed_in")
     )
-    if keep:
+    if keep and not target.is_file():
         lines = partial.read_text(encoding="utf-8").splitlines()
-        _write_json(store.form_dir / NETWORK, [json.loads(line) for line in lines if line.strip()])
+        _write_json(target, [json.loads(line) for line in lines if line.strip()])
     partial.unlink(missing_ok=True)
-    return keep
+    return keep and target.is_file()
 
 
 def finish_meta(store: RecordingStore) -> None:

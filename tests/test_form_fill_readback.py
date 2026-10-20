@@ -655,14 +655,16 @@ def test_read_final_page_over_cdp_leaves_the_page_open(chromium, tmp_path):
 
     final = readback.read_final_page(port, target, tmp_path, StandInRedactor())
 
-    assert final.fields == EXPECTED_BROWSER
+    masked = StandInRedactor()  # the fields come back masked, as they are saved
+    assert final.fields == tuple(f.model_copy(update={"value": masked.mask(f.value)}) for f in EXPECTED_BROWSER)
     assert final.state == PageState(actions=("Submit application",))
     assert not pg.is_closed() and pg.url == before_url
     assert pg.input_value("#fn") == "Sam"  # nothing was cleared or retyped
-    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "screenshot.png", "readback.json", "raw.json"}
+    # no raw.json since slice 2a: raw nodes are masked by value only (decision 32)
+    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "screenshot.png", "readback.json"}
     html = (tmp_path / "page.html").read_text(encoding="utf-8")
     assert "<script" not in html and "<style" not in html and "Synthetic form" in html
-    for name in ("page.html", "readback.json", "raw.json"):
+    for name in ("page.html", "readback.json"):
         text = (tmp_path / name).read_text(encoding="utf-8")
         assert EMAIL not in text and "synthetic-password-1" not in text, name
     saved = json.loads((tmp_path / "readback.json").read_text(encoding="utf-8"))
@@ -821,7 +823,7 @@ def test_a_screenshot_that_cannot_be_blacked_out_is_not_saved(chromium, tmp_path
     assert not (tmp_path / "screenshot.png").exists()
     note = (tmp_path / readback.SCREENSHOT_NOTE).read_text(encoding="utf-8")
     assert note.startswith("截图未存：打码失败") and EMAIL not in note
-    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "readback.json", "raw.json", readback.SCREENSHOT_NOTE}
+    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "readback.json", readback.SCREENSHOT_NOTE}
 
 
 def test_the_reader_never_drives_the_page():
