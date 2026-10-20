@@ -119,6 +119,20 @@ def test_work_mode_words_are_no_place_and_other_words_that_are_no_place_are_not_
 @pytest.mark.parametrize(
     ("location", "tags", "confident"),
     [
+        ("United States - Remote - Texas", {"location.us", "work_mode.remote"}, BOTH),
+        ("USA - Remote - CA", {"location.us", "work_mode.remote"}, BOTH),
+        ("Canada - Remote - ON", {"location.canada", "work_mode.remote"}, BOTH),
+        ("Texas - Remote - Austin", {"location.us.austin", "work_mode.remote"}, BOTH),
+        ("US - Remote - CA - Santa Clara", {"work_mode.remote"}, {"work_mode"}),  # still three pieces
+    ],
+)
+def test_a_work_mode_word_taken_out_leaves_no_empty_piece(location, tags, confident):
+    assert read(location) == (tags, confident)
+
+
+@pytest.mark.parametrize(
+    ("location", "tags", "confident"),
+    [
         ("San Francisco, CA", {"location.us.san_francisco"}, {"location"}),
         ("New York, NY (Hybrid)", {"location.us.new_york", "work_mode.hybrid"}, {"location", "work_mode"}),
         ("Seattle, WA, United States", {"location.us.seattle"}, {"location"}),

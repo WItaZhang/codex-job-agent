@@ -111,3 +111,10 @@
   - 站在城市位置上、不是地名的词（Virtual、Nationwide、Multiple Locations、Field Based 这类），让整个 location 算没把握。名单写在代码里，新见到的这类词照例交给子 agent，以后在开发流程里补名单。
 
 **规则写在** `spec.md` §10 第 31 条。
+
+## 决定 8（2026-10-20）：去掉 work_mode 的词后留下的空段不算一段
+
+- 合并前审查发现（3 票成立）："United States - Remote - Texas" 去掉 Remote 后变成 "United States - - Texas"，切开时第二段带着 "-"，结果把州读成城市 `us.texas`，算有把握；"USA - Remote - CA" 读成 `us.ca`，"Canada - Remote - ON" 读成 `canada.on`。"只能有两段"那道检查也因此失效。
+- 定下的（按用户 2026-10-19 授权全部按推荐项）：空段去掉后再切。"United States - Remote - Texas" 按 "United States - Texas" 读，前一段是国家、后一段是它的州，读成 `us`（决定 5）；"US - Remote - CA - Santa Clara" 去掉空段后仍是三段，算认不出。审查给的另一个选项"算没把握"没选：这几条去掉 Remote 后就是第 31 条已经认的"国家加州"写法。
+
+**规则写在** `spec.md` §10 第 31 条。

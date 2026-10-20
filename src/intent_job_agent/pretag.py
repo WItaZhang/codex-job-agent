@@ -183,7 +183,8 @@ def _locations(text: str) -> tuple[list[str], str | None, bool]:
         modes.add(_mode(part))
         cleaned = _PARENTHESES.sub(" ", part)
         cleaned = _MODE_WORDS.sub(" ", cleaned)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,-")
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        cleaned = re.sub(r" -(?: -)+ ", " - ", cleaned).strip(" ,-")  # a word taken out leaves no empty piece
         if not cleaned:  # only a work mode, such as "Remote"
             continue
         ref = _place(cleaned)
