@@ -77,6 +77,14 @@ class CoverLetterRules(_Section):
     read_chars: int = Field(gt=0)
 
 
+class ApplyDone(_Section):
+    """The done standard (spec section 9) that apply_stats checks a week against."""
+
+    weekly_target: int = Field(gt=0)  # successful submissions a week
+    success_rate: float = Field(gt=0, le=1)  # submitted / (submitted + not submitted)
+    allowed: list[str]  # failure categories that are fine (apply_fill.CATEGORIES)
+
+
 class Apply(_Section):
     applicant_dir: str
     batch_size: int = Field(gt=0)
@@ -94,6 +102,7 @@ class Apply(_Section):
     allowed_tools: list[str]
     disallowed_tools: list[str]
     chrome_profile_strip: list[str]
+    done: ApplyDone
 
 
 class FormFill(_Section):
@@ -103,6 +112,7 @@ class FormFill(_Section):
     recordings_dir: str  # under dir: recordings/<recording id>/ (spec 6.2)
     answers_file: str  # under apply.applicant_dir
     checklist_file: str  # under apply.applicant_dir
+    lists_dir: str  # under dir: the job lists, /apply's one per step (spec section 10 item 87)
     disallowed_tools: list[str]  # refused on top of apply.disallowed_tools
     checkpoint_timeout_seconds: float  # a checkpoint call answers within this (spec 6.1 item 3)
     watch_interval_seconds: float  # the background read of the job's tabs (spec 4.2)

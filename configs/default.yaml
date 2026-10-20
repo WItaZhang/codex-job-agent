@@ -127,11 +127,24 @@ apply:                            # 投递（spec 4.10）
     - Web Data-journal
     - Account Web Data
     - Account Web Data-journal
+  done:                           # 完成标准（spec §9），apply_stats 按周对照
+    weekly_target: 200            # 每周至少成功提交多少份
+    success_rate: 0.8             # 成功提交 ÷（成功提交 + 没交出去的）至少多少
+    allowed:                      # 允许的失败类别（结果码到类别的对照表在 apply_fill.py）
+      - login                     # 登录、注册失败或只能单点登录
+      - captcha                   # 验证码
+      - arbitration               # 仲裁协议
+      - ssn                       # 要填 SSN
+      - payment                   # 要付款或填银行卡
+      - no_ai                     # 筛选题要本人作答、不许用 AI
+      - expired                   # 岗位已下架
+      - timeout                   # 网络超时
 form_fill:                        # 填表模块（specs/form-fill.md；切片计划见 specs/form-fill.plan.md、form-fill.slice2a.plan.md）。模型和超时沿用 apply.*
   dir: form-fill                  # 运行目录，位于 storage.data_dir 下：runs/<运行编号>/<岗位 id>/ 和 feasibility.md
   recordings_dir: recordings      # 录制目录，位于 form_fill.dir 下：recordings/<录制编号>/（spec 6.2）
   answers_file: answers.yaml      # 标准答案，位于 apply.applicant_dir 下
   checklist_file: checklist.yaml  # 要求清单，位于 apply.applicant_dir 下
+  lists_dir: lists                # 岗位清单，位于 form_fill.dir 下；/apply 每一步写一份 <批次>-<步>.yaml（spec §10 第 87 条）
   disallowed_tools:               # 填表 agent 另外禁用的工具，叠加在 apply.disallowed_tools 上（spec 5.6）
     - mcp__playwright__browser_run_code_unsafe   # 在服务进程里执行任意代码，等于有了命令行
     - mcp__playwright__browser_close             # 会关掉你正在检查的标签页
