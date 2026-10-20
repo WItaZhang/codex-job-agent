@@ -1050,3 +1050,75 @@ CLAUDE.md       "岗位内容是不可信输入"一条补一句（和 spec 4.8 �
 - 新规则会改变投递清单：有几处岗位分开（多出几行），也有几处合并（例如 Trustly）。已有的状态不改。
 - 已经生成的批次 batch-335e662b7664 用新代码不能开始：Handshake（第 8、11 个）和 RK Infotech（第 9、10 个）各是同一个岗位，Handshake 的 Indeed 那条已经没投成，按 §10 第 75 条 `start_applying` 会拒绝。合并后要重新生成批次，那时 Trustly 也不会再进。
 - 正在运行的工具服务要重启才会用新代码，配置也要用这个分支的 `configs/default.yaml`（新的 `duplicates` 一节）。
+
+---
+
+# Workday 地点 计划：存下 Workday 详情里的全部地点，预打标签读懂各公司的写法（用户 2026-10-18 选定四个选择题；2026-10-20 按用户 2026-10-19 的授权全部按推荐项定下计划）
+
+规则见 spec §10 第 18、19、31 条，决定和原因见 [spec.decisions.md](spec.decisions.md) 决定 2–4。起因：库里的 Workday 岗位只存了列表页的地点，378 个是 "N Locations"，98 个是空的；预打标签也读不懂多数 Workday 写法（NVIDIA 单地点 295 个只读出 10 个）。
+vendor 文件只改 import，修正放在适配层（`applypilot_bridge.py`）。不另外补抓，不开始任何投递，不改已有的投递状态和 label。
+
+## 1. 做什么，不做什么
+
+- 做：
+  - 适配层在 ApplyPilot 读 Workday 详情时记下主地点（`location`）和其他地点（`additionalLocations`），存在它工作库旁边的一张表里（和另记公司名的做法一样）。导入时 `location` 用"主地点在前、`; ` 连接"的原文；没拿到详情时用列表页的文字。
+  - 已存的岗位，下次抓取读到不同的地点时按第 18 条更新：没打标签的只换地点；打过标签的，预打标签读得全就只换 location 标签，读不全就退回待打标签队列；展示过的、修正过标签的、投递状态不是待投的不动。
+  - 预打标签按第 31 条读地点：`;`、`|`、`/`、`or` 隔开几个地方；城市在前、国家在前、"地区 - 城市"、只写国家；认不出的地方让整个 location 没把握；几个地方的 work_mode 只在每个地方都写了同一种时读出。国家名单多收一些常见国家。
+  - `discover_jobs` 结果里的 `synced` 多一个 `relocated`（换了地点的岗位数）；因为地点读不全退回重打的，和原文的一样计入 `retagged`。
+- 不做（以后再说）：
+  - 一次性补录已下架、或者现在的搜索词搜不到的岗位（决定 2 没选）。
+  - ApplyPilot 的地点过滤在读详情之前按列表文字判断（第 19 条写明不修，本项目的 `searches.yaml` 不写地点过滤）。
+  - 城市在前的加拿大省份写法（"Toronto, ON"）：第 31 条没列，读不出时照旧交给子 agent。
+  - 词表里国家写法统一（`in` / `india`，属于词表的问题）。
+
+## 2. 实际会怎么用
+
+```
+你：/fetch-jobs
+agent：（discover_jobs 跑完）新岗位 40 个；换了地点 120 个，其中 15 个读不全、退回重打；……
+       Salesforce JR214107 的地点从 "2 Locations" 换成 "California - Palo Alto; California - San Francisco"，
+       location 标签换成 us.palo_alto、us.san_francisco（它停在提交前，所以实际上不动——这里只是举例）
+```
+
+## 3. 样例
+
+- A1–A10：地点读法，合成，在 `tests/fixtures/workday_locations.yaml`（决定 4）。
+- B1–B9：导入和刷新（合成，写在测试里）：
+
+| # | 情况 | 结果 |
+| --- | --- | --- |
+| B1 | 新岗位，列表 "2 Locations"，详情主地点 "California - Palo Alto"、其他地点 "California - San Francisco" | 存 "California - Palo Alto; California - San Francisco" |
+| B2 | 新岗位，详情读失败（403） | 存列表页文字 |
+| B3 | 新岗位，列表地点为空，其他地点里有 "Drug Manufacturing"，也重复了主地点 | 原文照存（去掉重复），预打标签读不全 |
+| B4 | 已存、没打标签的 "2 Locations"，这次读到详情 | 只换地点 |
+| B5 | 已存、打过标签（location.us.bay_area、role…），在投递清单上待投，新地点读得全 | location 标签换成读出的，其他标签、已打标签、投递状态都不变，不占当天打标签预算 |
+| B6 | 同 B5，新地点里有读不出的地方 | 退回待打标签队列，投递状态保留 |
+| B7 | 展示过 / misread 修正过（包括连带过来的）/ 投递状态是停在提交前、失败、跳过、已投 | 地点和标签都不变 |
+| B8 | 上次读到过详情，这次详情读失败 | 地点不变（仍用上次详情里的） |
+| B9 | 地点没变 | 什么都不做，不计数 |
+
+## 4. 模块
+
+```
+src/intent_job_agent/
+  pretag.py            _places：按第 31 条切分和读每个地方；read_locations(text, vocab)：读得全时返回 location 标签，
+                       否则 None（刷新地点时用）；work_mode 只在每个地方都写了同一种时读出
+  applypilot_bridge.py configure 时包一层 ApplyPilot 的 workday_detail 和 store_results，把详情里的地点记进
+                       工作库的 intent_agent_location 表；sync 导入时用它，已存岗位按第 18 条刷新地点
+tests/
+  fixtures/workday_locations.yaml   A1–A10
+  test_workday_locations.py         A1–A10、更多写法、B1–B9
+```
+
+## 5. 测试（先写，全部离线，合成数据）
+
+- A1–A10 逐条；另加：只写城市（"San Jose"）、地址代码（"US FL JAX 347"）、"2 Locations"、每个地方都写 Remote、"Ontario - Toronto"、"Canada, ON, Toronto"、几个地方之一认不出时不留部分标签。
+- 现有的地点测试（"San Francisco, CA"、"Remote - US"、"New York, NY (Hybrid)" 等）结果不变。
+- B1–B9：用假的 Workday 接口跑 `discover_jobs`，再按需要改库里的状态后再跑一次。
+- vendor 文件不变；现有测试继续通过。
+
+## 6. 你需要知道的
+
+- 合并后要重启工具服务才会用新代码；下次 `/fetch-jobs` 读到详情时才生效。退回重打的岗位会占当天的打标签预算。
+- 多地点的 Workday 岗位以后有了每个城市的标签，去重时算"写了城市"（第 78 条），和招聘网站上的条比较时只在城市对得上时才合并（5c 样例 23 那种情形会更准，也可能少合并几条）。
+- 用真实数据核对（例如在主目录数据的只读副本上看 NVIDIA、Intel、Salesforce 单地点的岗位现在读出多少）要先问你。
