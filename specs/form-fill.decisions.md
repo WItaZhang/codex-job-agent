@@ -404,3 +404,52 @@
     - 段被不相干的栏打断后，后面跟着的日期如果这一段还缺，回到这一段，不拉进下一段。
   - 报告里州的缩写照常显示；错的事实后面附上原因；段里的必填空栏也单独列出。
 - 原因：住址那一条会把申请人的街道原文留在存下的文件里；其余会让个别栏判错。
+
+## 2026-10-17 决定 23（用户）：第 6 步的检查——四次重跑、补的标准答案和 12 处疑点的判定
+
+- 经过：用户在主目录的会话里检查第 5 步的报告，重跑了两个岗位（都停在提交前，没有提交；自动检查全部通过，打码扫描 0 次命中）。
+  - Perplexity Early Career - Industry（`20261017-205807-4927`）：填表 agent 一栏没填就停下了。申请页的 Education 一节写明"不收在读学生和毕业不满 10 个月的人，系统自动拒"。10-15 那次的页上也有这句，当时 agent 选了"在读学生"接着填。用户不投这个岗位。
+  - Salesforce Research Scientist（Workday）连跑 3 次：
+    - `20261017-210545-3f0f` 4 分钟过了第 1、2 步，停在第 3 步，有 3 道必填题没有标准答案；
+    - `20261017-211606-2ef6` 停在第 4 步，又有 3 道；
+    - 用户要求一次补齐。宿主 agent 只读不点地读了第 4 步整页，又参照 10-15 同一网站的 Review 页预判了第 5 步，补完后 `20261017-213100-2b5b` 用 2.5 分钟走到 Review 页。
+    - 第 2 步的城市只写城市名、UCSD 和武大的 Field of Study、两段经历和两段学历的起止年月、联系方式（打码格式 2）、性别、退伍军人、同意条款，都核对为对。
+  - 10-17 早上那次（`20261017-085904-a375`）15 分钟超时停在第 2 步，跑在补标准答案（决定 16）之前。
+- 用户补的标准答案和要求清单（`data/local/applicant/`，宿主 agent 列出、用户选定后写入）：
+  - 新增 `screening.government_employee`、`screening.debarred`、`screening.sanctioned_country`，都是 No。
+  - 新增 `education.graduation_date` 2026-12-12；`education.current_school_location` 为 "San Diego, CA"（用户：按题目自己的格式写）；`education.postgraduate_intent` 为 No；`screening.terms_consent` 为 Yes（Workday 自愿披露页的"已阅读并同意条款"勾上）。
+  - Salesforce 那道把"学校给的 OPT/CPT 续期"也算作担保的题，按 10-11 的规则（点名普通 OPT 的担保题答 Yes）答 Yes。`work_auth.sponsorship_opt_named` 的 asks 加上 "opt/cpt renewal"，overrides 加上 `work_auth.status`，原来这道题被错对到了身份那一条。
+  - `eeo.veteran` 和 `eeo.race` 补上 Workday 上"不披露"的写法；武大学位的 accept 加 "BS"（判定第 3 处）；工作年限和到岗题补了问法（判定第 7 处）。
+  - `location_preference_order` 改为：能填多个时，按 Bay Area → Seattle → San Diego 把选项里有的都填上，湾区的几个排在前面。用户问过：湾区内部不分先后，选 Palo Alto 还是 San Francisco 由 agent 定。
+  - 新增 `location_city_from_profile`（判定第 9 处）和 `no_follow_company`（判定第 10 处）。
+- 决定（12 处疑点，用户逐条用选择题选定）：
+  1. Workday Review 页读回不全：有的题读成 `*`，毕业日期、学校所在地、OPT 担保、政府雇员、受制裁地区和 Skills 没读到。**留到切片 2**，并入"逐页录制"。
+  2. 意思相同的写法判错（"Salesforce Careers Website" 对 Company website；族裔多了 "(United States of America)"）：**代码放宽**。末尾的括号去掉再比；"<岗位的公司名> Careers Website" 算公司官网（规格 4.4）。
+  3. 武大 Degree 填 BS：**算对**，BS 写进 accept。
+  4. 读回把步骤条、空着的控件文字和区块标题当成了栏：**读回时去掉**，已存的页重出报告时也去掉（规格 4.3）。
+  5. 被申请资格卡住时，结论写"缺标准答案"、还让补 10 栏，备注在 500 字处被截断：**新增结论"不符合申请资格"**。填表 agent 的结果是 `not_eligible`，备注放宽到 2000 字（规格 3.2、5.5）。
+  6. 一栏都没核对为对、结论却是"检查后可提交"：**加提醒**，结论不变（规格 3.2）。
+  7. 问法对不上（"years of Engineering experience"、"come into the office four days per week"）：**放宽并补问法**。没有整词命中时，中间最多夹 2 个词也算对上（规格 4.4）。
+  8. 投递用 Chrome 里开着的个人标签页（Gmail、学校系统）：**只提醒**。启动前列出来，照样启动（规格 5.6）。
+  9. 单独的 Location 题没填：写进要求清单（`location_city_from_profile`）。
+  10. LinkedIn 的"关注公司主页"框默认勾着：不勾（`no_follow_company`）。
+  11. Workday 普通填写页的自定义控件读不出来：**留到切片 2**。
+  12. Workday 导入的岗位地点只存成 "2 Locations"：**另开需求**，属于导入模块（会话 workday 在做）。
+- 另外三处在当天的重跑里自行消解：联系方式在新打码格式下都能核对；武大专业按回退规则填对；起止年月在 Review 页上都能核对。
+- 原因：这几处让报告把填对的栏判成错，或者让用户补不该补的答案。切片 2 的读回改动太大，不放进切片 1 的收尾。
+- 实现后独立审查了一轮，按审查结果收窄和补齐（实现细节，用户的选择不变）：
+  - 第 2 处：只去掉写着地名的末尾括号。"(in progress)" 和 "(completed)" 这类括号本身就是选项之间的区别，去掉会把两项都判对，也会把原来判对的 `otherwise` 判成错。`otherwise` 也按同样的规则比较。
+  - 公司官网：公司名里的 Inc、LLC 不算，名字可以只取前面几个词；careers、jobs 不算词，所以 "Company website" 也能对上。
+  - 第 5 处：ApplyPilot 原有指令里的 `not_eligible_work_auth` 也算"不符合申请资格"。
+  - 第 7 处：夹在中间的否定词（not、no、never）不算，免得 "currently not require sponsorship" 被对到相反的那条。
+  - 第 8 处：
+    - 子域名、.edu.cn 也查；清单上岗位所在的网站不算。
+    - 查标签页时不为此启动 Chrome，因为工具服务一次只处理一个调用，冷启动要复制资料。Chrome 还没开就提醒"没能检查"。
+    - form_fill_status 也返回这次查到的结果。
+
+## 2026-10-19 决定 24（用户）：开放题的写法和模型跟着 /apply 改
+
+- 起因：总规格的决定（`spec.decisions.md` 决定 1）把投递 agent 换成 Opus 5.5，开放题按用户的要求写：紧扣题目、不堆砌经历、识别提问的人想知道什么、为适合这个岗位加分、简练有力。这一条代替 ApplyPilot 的"写 2–3 句、引用简历里的成就"。
+- 填表 agent 用同一份投递指令（`apply_bridge.build_prompt`）和同一个模型（`apply.model`），所以本模块不另改代码，开放题规则和模型都跟着换。
+- 示例要求清单的 `open_answers_specific` 原来写"开放题写 2–3 句……引用简历里的真实经历"，和新规则冲突，改成新规则的意思（规格 2.4，`docs/examples/applicant/checklist.example.yaml`），id 不变。用户自己的 `checklist.yaml` 不动：它的 `open_answers_grounded`（紧扣题目、只用简历和知识库里的事实）和新规则一致。
+- 以后做独立评审时，`form_fill.reviewer_model` 不能弱于 Opus 5.5（规格 4.5：不弱于填表 agent 用的模型）。

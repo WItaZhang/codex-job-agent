@@ -13,6 +13,7 @@ from typing import Protocol
 from urllib.parse import urlsplit
 
 from ..domain import InvariantError
+from .matching import NAVIGATION, is_empty, norm
 from .models import PageState, ReadField
 
 # Runs in each frame. Returns {"url", "scope", "controls": [...], "pairs": [...], "actions": [...], "notices": [...]};
@@ -399,6 +400,25 @@ RECEIVED_WORDS = re.compile(
 )
 
 
+# Page chrome that is not a field (decision 23): widget text and block titles that read as a label when empty.
+WIDGET_TEXT = frozenset({"application", "items selected", "or", "options expanded", "options collapsed"})
+SECTION_TOGGLE = re.compile(
+    r"^(work (history|experience)|education|websites?|languages?|certifications?)( optional)? \d+$"
+)
+
+
+def is_page_chrome(question: str, value: str, required: bool = False) -> bool:
+    """A step bar ("completed step 1 of 6"), or empty widget text or a block title ("items selected", "or", "Work
+    History (Optional) 1") that is not required. Widget text with a value is a field: "Options Expanded" holding the
+    skills picked."""
+    q = norm(question)
+    if NAVIGATION.match(q):
+        return True
+    if required or not is_empty(value):
+        return False
+    return q in WIDGET_TEXT or bool(SECTION_TOGGLE.match(q))
+
+
 class Redactor(Protocol):
     def mask(self, text: str) -> str: ...
 
@@ -564,6 +584,7 @@ def normalize(raw: dict) -> tuple[ReadField, ...]:
                     {"question": question, "control": "review", "value": value, "options": (), "required": False}
                 )
 
+    drafts = [d for d in drafts if not is_page_chrome(d["question"], d["value"], d["required"])]
     seen = {(d["question"].lower(), d["value"].lower()) for d in drafts if d["control"] != "review"}
     kept = [d for d in drafts if d["control"] != "review" or (d["question"].lower(), d["value"].lower()) not in seen]
     return tuple(

@@ -26,6 +26,7 @@ from . import runner
 from .compare import MARK, placeholder
 from .inputs import load_answers, profile_field_paths
 from .models import AnswerEntry, ReadField
+from .readback import is_page_chrome
 from .redact import VERSION, Redactor
 from .report import job_report, write_reports
 
@@ -138,7 +139,9 @@ def _job(job_dir: Path) -> tuple[dict, tuple[ReadField, ...]]:
     meta.setdefault("page_dir", str(job_dir))
     try:
         rows = json.loads(readback.read_text(encoding="utf-8"))
-        return meta, tuple(ReadField.model_validate(row) for row in rows)
+        fields = (ReadField.model_validate(row) for row in rows)
+        # page chrome saved before decision 23 is left out; the other fields keep their numbers
+        return meta, tuple(f for f in fields if not is_page_chrome(f.question, f.value, f.required))
     except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValidationError):
         return {**meta, "status": "readback_failed", "notes": [*meta.get("notes", []), f"{READBACK_FILE} 读不出来"]}, ()
 

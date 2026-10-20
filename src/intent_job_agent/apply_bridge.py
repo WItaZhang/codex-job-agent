@@ -12,6 +12,7 @@ codes. The changes are this project's risk controls (plan, slice 6):
 - the copied everyday Chrome profile loses saved passwords, cards and form autofill before Chrome starts;
 - extra rules: never accept arbitration agreements, never enter an SSN or payment details, one tab per job;
 - the places where on-site work is fine and the relocation answer come from `applicant.yaml`, not one city;
+- open-ended questions follow the user's rule (on the question, no piled-up experience), not "cite an achievement";
 - the full stream is logged under the data directory and summarised (other sites opened, emails sent).
 
 Nothing here stores the applicant profile in the project database.
@@ -129,6 +130,19 @@ _LOCATION_CHECK = re.compile(
     r"== LOCATION CHECK \(do this FIRST before any form\) ==\n.*?Check EARLY, save time\.", re.S
 )
 _RELOCATION = re.compile(r"^  - Location/relocation: lives in (.+), cannot relocate$", re.M)
+_OPEN_ENDED = re.compile(r"^Open-ended questions \(.*Connect it to a real achievement from the resume\..*$", re.M)
+
+# The user's rule for open-ended questions, in place of ApplyPilot's (spec 4.10 item 5).
+OPEN_ANSWERS = (
+    'Open-ended questions ("Why do you want this role?", "Tell us about yourself", "What interests you?") -> '
+    "Before writing, work out what the person asking wants to learn from this question, and answer exactly that. "
+    "Stay on the question: do not recite the resume or pile up experiences; bring in a fact from the resume or "
+    "profile only when it directly answers the question, and use only the one or two strongest. Every sentence "
+    "should strengthen the case that this candidate fits THIS job, tied to something specific in the job "
+    "description. Be concise and forceful: short, direct sentences, no filler, no generic praise of the company, "
+    'no "I am passionate about...". Stay within any length limit the form gives; otherwise usually 2-4 sentences. '
+    "Never invent experience, numbers or facts that are not in the resume, the profile or the files you may read."
+)
 
 
 def location_check(places: tuple[str, ...] | list[str]) -> str:
@@ -155,9 +169,12 @@ def location_check(places: tuple[str, ...] | list[str]) -> str:
 
 
 def localize(text: str, places: tuple[str, ...] | list[str] = (), relocation: str | None = None) -> str:
-    """Replace ApplyPilot's single-city location check and its fixed "cannot relocate" with the applicant's own
-    answers. Each replaced passage must be found exactly once, so a reworded vendor prompt stops the run instead
-    of silently keeping ApplyPilot's rules."""
+    """Replace ApplyPilot's open-ended answer rule with the user's (always), and its single-city location check
+    and fixed "cannot relocate" with the applicant's own answers. Each replaced passage must be found exactly
+    once, so a reworded vendor prompt stops the run instead of silently keeping ApplyPilot's rules."""
+    text, found = _OPEN_ENDED.subn(lambda _: OPEN_ANSWERS, text)
+    if found != 1:
+        raise InvariantError("ApplyPilot's open-ended question rule was not found in its prompt; update apply_bridge")
     if places:
         text, found = _LOCATION_CHECK.subn(lambda _: location_check(places), text)
         if found != 1:
@@ -172,8 +189,8 @@ def localize(text: str, places: tuple[str, ...] | list[str] = (), relocation: st
 
 
 def build_prompt(spec: ApplySpec, data_dir: Path, settings: Settings, profile: Path | None = None, read_dirs=()) -> str:
-    """ApplyPilot's prompt for this job (its dry run when stopping before submit), with the applicant's places
-    and relocation answer, plus the extra rules."""
+    """ApplyPilot's prompt for this job (its dry run when stopping before submit), with the user's open-ended
+    answer rule and the applicant's places and relocation answer, plus the extra rules."""
     from .vendor.applypilot.apply import prompt
 
     configure(data_dir, settings, profile)
@@ -390,7 +407,8 @@ def letter_date() -> str:
 # --- running applications (adapted from ApplyPilot's launcher.run_job) -----------------------------------
 
 
-def _cdp_alive(port: int) -> bool:
+def cdp_alive(port: int) -> bool:
+    """Whether a Chrome answers on this debugging port (the form-fill module checks it without starting one)."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1):
             return True
@@ -404,7 +422,7 @@ def ensure_chrome(settings: Settings, worker_id: int = 0) -> int:
     from .vendor.applypilot.apply import chrome
 
     port = chrome.BASE_CDP_PORT + worker_id
-    if _cdp_alive(port):
+    if cdp_alive(port):
         return port
     profile_dir = chrome.setup_worker_profile(worker_id)
     strip_profile(profile_dir, settings.apply.chrome_profile_strip)
@@ -525,7 +543,7 @@ class ChromeRunner:
     def __call__(self, spec: ApplySpec) -> ApplyOutcome:
         try:
             configure(self.data_dir, self.settings, self.profile)
-            if self.port is None or not _cdp_alive(self.port):
+            if self.port is None or not cdp_alive(self.port):
                 self.port = ensure_chrome(self.settings)
             return run_application(spec, self.data_dir, self.settings, self.profile, self.port, self.read_dirs)
         except Exception as error:  # one broken run must not stop the batch; nothing reached the site

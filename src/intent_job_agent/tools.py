@@ -1229,7 +1229,10 @@ class Toolbox:
         the list, answers.yaml and checklist.yaml first and starts nothing if any of them is invalid. Runs in the
         background in the applying Chrome, one job at a time, and not while an apply step runs. Each job's last
         page is read back into the run's feasibility.md for the user to mark against the open tab. Poll
-        form_fill_status. `list_path`: the list file (absolute, or relative to the project folder)."""
+        form_fill_status. `list_path`: the list file (absolute, or relative to the project folder).
+        When mail, bank, payment, password-manager or school tabs are open in that Chrome, the result lists their
+        sites under `personal_tabs` with a `warning`: show it to the user. A `warning` also says when that Chrome was
+        not running yet, so the tabs could not be checked. The run goes on regardless."""
         if _running(self._form_fill_run):
             raise InvariantError("A form-fill run is still running; check form_fill_status")
         if _running(self._apply_run):
@@ -1248,13 +1251,23 @@ class Toolbox:
             runner=self.form_fill_runner
             or form_fill.FormFillRunner(self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read),
         )
-        report = form_fill.begin_feasibility(ctx, list_path, inputs.jobs)
+        try:  # only a reminder (decision 23); it never starts Chrome, so other tool calls do not wait
+            tabs = ctx.runner.open_tabs()
+        except Exception:  # noqa: BLE001 - the run itself will say what is wrong with the browser
+            tabs = None
+        found = form_fill.personal_tabs(
+            tabs or [], self.settings.apply.blocked_origins, [e.url for e in inputs.jobs.jobs]
+        )
+        personal = [inputs.redactor.mask(origin) for origin in found]
+        report = form_fill.begin_feasibility(ctx, list_path, inputs.jobs, personal, checked=tabs is not None)
         run = {
             "run_id": run_id,
             "status": "running",
             "error": None,
             "list": str(Path(list_path).expanduser().resolve()),
             "feasibility": str(report),
+            "personal_tabs": personal,
+            "personal_tabs_checked": tabs is not None,
             "jobs": [
                 {"n": n, "job_id": e.id, "company": e.company, "title": e.title, "state": "queued", "outcome": None}
                 for n, e in enumerate(inputs.jobs.jobs, start=1)
@@ -1278,7 +1291,18 @@ class Toolbox:
             threading.Thread(target=work, name="intent-agent-form-fill", daemon=True).start()
         else:
             work()
-        return {"run_id": run_id, "status": run["status"], "jobs": len(run["jobs"]), "feasibility": run["feasibility"]}
+        result = {
+            "run_id": run_id,
+            "status": run["status"],
+            "jobs": len(run["jobs"]),
+            "feasibility": run["feasibility"],
+            "personal_tabs": personal,
+        }
+        if personal:
+            result["warning"] = form_fill.PERSONAL_TABS_WARNING.format(tabs="、".join(personal))
+        elif tabs is None:
+            result["warning"] = form_fill.PERSONAL_TABS_UNCHECKED
+        return result
 
     @_tool("prepare")
     def form_fill_status(self) -> dict:
@@ -1313,6 +1337,8 @@ class Toolbox:
             "error": run["error"],
             "list": run["list"],
             "feasibility": run["feasibility"],
+            "personal_tabs": run.get("personal_tabs", []),
+            "personal_tabs_checked": run.get("personal_tabs_checked", True),
             "jobs": jobs,
         }
 

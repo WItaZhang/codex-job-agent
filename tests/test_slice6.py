@@ -874,6 +874,56 @@ def test_a_changed_applypilot_prompt_stops_the_run(box, monkeypatch, section):
         prompt_for(box, job)
 
 
+# --- open-ended questions and the model (spec 4.10 item 5, spec.decisions.md decision 1) ------------------------
+
+APPLYPILOTS_OPEN_ANSWERS = "Connect it to a real achievement from the resume"
+
+
+def screening(text):
+    return text[text.index("== SCREENING QUESTIONS") : text.index("== STEP-BY-STEP")]
+
+
+@pytest.mark.parametrize("mode", ["stop", "submit"])
+def test_open_questions_follow_the_users_rule_in_place_of_applypilots(box, mode):
+    write_applicant(box.data_dir)
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    text = apply_bridge.build_prompt(box._apply_spec(job, mode), box.data_dir, box.settings, box._applicant().profile)
+    assert APPLYPILOTS_OPEN_ANSWERS not in text and "Write 2-3 sentences" not in text
+    assert text.count(apply_bridge.OPEN_ANSWERS) == 1
+    assert apply_bridge.OPEN_ANSWERS in screening(text)  # in ApplyPilot's place, not a second rule further down
+    assert "Hard facts -> answer truthfully" in screening(text)  # the rest of the section stays
+
+
+def test_the_rule_says_what_the_user_asked_for():
+    """User's words (2026-10-19): stay on the question, don't pile up experience, work out the answer the
+    interviewer wants, make the candidate more competitive, concise and forceful."""
+    rule = apply_bridge.OPEN_ANSWERS.lower()
+    assert rule.startswith("open-ended questions")
+    assert "wants to learn" in rule and "answer exactly that" in rule
+    assert "pile up experiences" in rule and "one or two strongest" in rule
+    assert "fits this job" in rule and "concise and forceful" in rule
+    assert "length limit" in rule and "never invent" in rule
+
+
+def test_a_reworded_open_question_rule_stops_the_run_without_any_applicant_options(box, monkeypatch):
+    """The replacement is not optional: without it the agent would keep ApplyPilot's "connect it to an
+    achievement", so a reworded vendor prompt fails the run (spec section 10 item 67 sends the job back)."""
+    from intent_job_agent.vendor.applypilot.apply import prompt
+
+    write_applicant(box.data_dir)
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    monkeypatch.setattr(prompt, "_build_screening_section", lambda *args: "== REWORDED ==")
+    with pytest.raises(InvariantError, match="open-ended"):
+        prompt_for(box, job)
+
+
+def test_the_apply_agent_runs_on_opus_5_5(tmp_path):
+    command = apply_bridge.claude_command(settings(), tmp_path / "mcp.json")
+    assert command[command.index("--model") + 1] == "claude-opus-5-5"
+
+
 FAKE_CLAUDE_REPEATS_THE_END = """#!/usr/bin/env python3
 import json, sys
 sys.stdin.read()
@@ -908,11 +958,12 @@ APPLY_DISALLOWED = (
     "mcp__gmail__list_email_labels,mcp__gmail__create_filter,mcp__gmail__list_filters,mcp__gmail__get_filter,"
     "mcp__gmail__delete_filter"
 )
-# The /apply command line as it was before the form-fill options existed (configs/default.yaml).
+# The /apply command line as it was before the form-fill options existed (configs/default.yaml), with the
+# model of spec.decisions.md decision 1.
 APPLY_COMMAND = [
     "claude",
     "--model",
-    "sonnet",
+    "claude-opus-5-5",
     "-p",
     "--mcp-config",
     "/x/mcp.json",

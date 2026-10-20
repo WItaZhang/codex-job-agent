@@ -215,7 +215,7 @@ items:
     rule: 选填的工作经历、教育经历、技能栏，简历里有的都要填上。
     level: missing
   - id: open_answers_specific
-    rule: 开放题写 2–3 句，提到这个岗位或公司的具体内容，引用简历里的真实经历，不写空话。
+    rule: 开放题紧扣题目，回答提问的人想知道的那一点；不堆砌经历，只用最有力的一两条简历事实；说明为什么适合这个岗位；简练有力，不写空话。
     level: format
 ```
 
@@ -262,8 +262,10 @@ items:
 **整体结论**：每个岗位一个。
 
 - **可能已提交**：录制时页面出现了"申请已收到"之类的文字。这一条优先于其他结论，写在报告第一行（5.6）。
+- **不符合申请资格**：页面写明不收这类申请人、如实作答会被系统自动拒（例如"不收在读学生和毕业不满 10 个月的人"），填表 agent 停在那一页（5.5）。报告引用它备注里的原文，不再列要补的栏（用户 2026-10-17）。
 - **可以提交**：没有问题，每一栏都读得出来。本模块自己不提交，这只表示用户可以提交。
 - **检查后可提交**：只剩缺漏或格式与写法的问题，或者有读不出、来源未录到的栏（列出来请用户看），或者评审失败。
+  - 没有一栏由代码核对为对时（例如全是联系方式和自己推断的栏），报告写明"没有一栏由代码核对为对，请逐栏看"（用户 2026-10-17）。
 - **不能提交**：还有错的事实或无依据的猜测（5.2）。
 - **没填完**：要写明是哪一种。可能的种类有：
   - 门槛；
@@ -442,6 +444,10 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - "一行两段"：一段题目文字加一段值。这一行要有同样形状的相邻行，或者紧跟在小标题后面。
 
   题组框里面的说明文字不当作这种题目。
+- 不是填写项的东西不算栏，读回时去掉（用户 2026-10-17）：
+  - 步骤条，例如 "completed step 1 of 6"、"step 3 of 6"；
+  - 空着、又不是必填的控件文字和区块标题，例如 "items selected"、"or"、"Options Expanded"、"Application"、"Work History (Optional) 1"。这类题目下面有值的（例如 "Options Expanded" 里选了 Python），照常保留。
+  - 已经存下的页重出报告时，也按同样的规则去掉，编号不变。
 - **读回值从哪里来**：多步表单里，点了下一步，前面的页就不在页面上了。所以：
   - 每页的读回值，取这一页最后一次 `checkpoint("filled")` 时代码读到的值。
   - 这一页没有 filled 时的读回，就改用代码自动补录的那份（4.2），报告里注明是补录的。补录的是离开这一页之前的值。
@@ -461,6 +467,9 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 1. **对题**：把每一栏对到一条标准答案。
    - 用题目原文去匹配各条的 `asks` 和代码自带的常见写法，忽略大小写和标点。`asks` 优先于代码自带的写法。
      - `asks` 的短语要作为完整的词出现在题目里，例如 "location" 不匹配 "relocation"。
+     - 整词对不上、代码自带的常见写法也对不上时，再放宽一次：短语里的词按顺序出现、中间一共最多夹 2 个词，也算对上。例如 "years of experience" 对上 "years of engineering experience"（用户 2026-10-17）。
+       - 夹在中间的词不能是 not、no、never 这类否定词："currently not require sponsorship" 不算 "currently require sponsorship"。
+       - 放宽只用在对题上；分段时判断一个栏名是不是题目，只看整词。
      - 代码自带的常见写法要和题目整句一样才算，例如 First name、Email、Phone、Address、LinkedIn。它们对到 `name.*`，或者 `from_profile` 指向对应字段的 `contact.*` 条目。
      - 题目整句就是 Location、City、Current location 这类写法、又不在经历段里的，对到 `from_profile` 指向城市的那条（用户 2026-10-17）。"Preferred location" 这类问偏好地点的题不算。
    - 能匹配上几条时，取匹配到的最长短语，因为它最具体。例如 "now or in the future" 比 "require sponsorship" 更具体。
@@ -486,6 +495,12 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
    - 空着包括停在占位上，例如 "No Response"、"Select One"、"No Selection"、"-- Make a Selection --"、"N/A"。Yes/No 题停在这类占位上也算空着，不算答了 No。
    - 勾选框只看勾没勾：没勾是 No，勾上是 Yes，不管旁边写的是什么字。
    - 代码读不出的日期、月份、起止，记"未审查"，不记错。
+   - 意思相同的写法（用户 2026-10-17）：
+     - 选项末尾的括号里是地名（国家或美国的州，例如 "I prefer not to disclose (United States of America)"），整句对不上时去掉这个括号再比一次。括号里是别的内容的不去掉，因为它常常就是选项之间的区别（"Master's Degree (in progress)" 和 "(completed)"）。`otherwise` 也这样比。
+     - 问"怎么知道这个岗位"这类题，"<岗位的公司名> Careers Website" 和 "Company website" 算同一种写法。比较时：
+       - 末尾的括号去掉；
+       - 公司名当作 company，公司名里的 Inc、LLC 这类词不算，名字也可以只取前面几个词（"Perplexity AI" 对 "Perplexity Careers Website"）；
+       - careers、jobs 这类词不算；website、page、portal 都当作 site。
    - 没对上标准答案、页面上空着的栏，记"没有标准答案"；其中必填的算缺漏，单独列出（不填交不了）。
 3. **核验来源**：
    - 标准答案：声明的键必须存在。
@@ -659,6 +674,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 还是找不到，就重新打开岗位地址，从头做。
   - 重跑算一次真实访问，录制里另存一份（6.2）。
 - 本模块不判断地点资格，也不挑岗位，清单上有的就填。
+- **不符合申请资格**：页面写明不收这类申请人、如实作答会被系统自动拒的（例如不收在读学生），填表 agent 停在那一页，用 "NOTE:" 引用原文，结果是 `not_eligible`，结论是"不符合申请资格"（3.2）。ApplyPilot 原有指令里给工作许可用的 `not_eligible_work_auth` 也算这一种。永远不编一个不真实的答案去过这道题（用户 2026-10-17）。这不是挑岗位：岗位照样在清单上，投不投由用户决定。
 
 ### 5.6 隐私与安全
 
@@ -671,6 +687,11 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 没有 Gmail。邮件验证码按门槛处理（5.5），本模块也从不发邮件。
   - 多了 `checkpoint`、没有 Gmail，这两点是本模块对 spec 4.10 第 6 条（"投递 agent 只有浏览器和 Gmail（读、搜、发信）"）的例外，只对本模块。CLAUDE.md 的投递条款已写明填表 agent 的放行更窄。/apply 不变。
   - 不能用 `browser_run_code_unsafe`。
+- **投递用 Chrome 里的个人标签页**：填表 agent 和用户共用这个 Chrome。"不碰原来开着的标签页"只是写给它的指令，拦不住它读。所以启动前，代码列出开着的这类网站的标签页，只写网站的地址，提醒用户关掉；只提醒，照样启动（用户 2026-10-17）：
+  - `apply.blocked_origins` 里的网站和它们的子域名（邮箱、银行、支付、密码管理）；
+  - 学校系统：域名里有 edu 这一节的（.edu、.edu.cn）；
+  - 清单上岗位地址所在的网站不算。
+  - 查标签页时不为此启动 Chrome。Chrome 还没开时，提醒里写明"没能检查"。
     - Playwright MCP 的说明写明，它在服务进程里执行任意 JavaScript，等同于在本机执行任意代码，和"没有命令行"冲突。
     - 做法：在 `form_fill.disallowed_tools` 里写 `mcp__playwright__browser_run_code_unsafe`，经 `--disallowedTools` 传入。
     - 现在的 `apply.allowed_tools` 用 `mcp__playwright` 放行了整个服务。这个工具在 0.0.83 里不需要 `--caps` 就有，所以现在是放行的。

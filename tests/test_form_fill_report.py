@@ -308,3 +308,45 @@ def test_a_filled_no_option_field_is_not_called_empty(tmp_path):
     report = job_report(meta(), (f,), answers)
     assert report.conclusion == "do_not_submit"
     assert "空着" not in "".join(report.todo[1:]) and "选了一项「I will require sponsorship」" in "".join(report.todo)
+
+
+# --- decision 23 ------------------------------------------------------------------------------------------------
+
+
+def test_not_eligible_comes_right_after_maybe_submitted():
+    assert conclude(meta(agent_result="not_eligible"), [result("missing")]) == ("not_eligible", None)
+    # the result ApplyPilot's own prompt offers for a work-authorization bar means the same here
+    assert conclude(meta(agent_result="not_eligible_work_auth"), [result("missing")]) == ("not_eligible", None)
+    received = meta(agent_result="not_eligible", page={"actions": [], "received": "Thank you for applying!"})
+    assert conclude(received, [])[0] == "maybe_submitted"
+
+
+def test_not_eligible_asks_for_no_answers(tmp_path):
+    note = 'The page says "This position is not open to current students." The true answer is auto-rejected.'
+    rows = page([("Name", "", "text"), ("Location", "", "text"), ("Current education status", "", "select")])
+    report = job_report(meta(agent_result="not_eligible", notes=[note]), rows, load(tmp_path, ERRORS["answers"]))
+    assert report.conclusion == "not_eligible"
+    assert report.todo == (report.todo[0],) and report.todo[0].startswith("不符合申请资格")
+    text = summary_md("r", [report])
+    assert "**结论：不符合申请资格**" in text and note in text and "不符合申请资格 1" in text
+
+
+def test_a_check_first_job_with_nothing_confirmed_says_to_check_every_field(tmp_path):
+    rows = page([("What drew you to Acme?", "The product", "textarea")])
+    report = job_report(meta(), rows, load(tmp_path, {}))
+    assert report.conclusion == "check_then_submit" and "没有一栏由代码核对为对" in report.todo[0]
+
+
+def test_a_check_first_job_with_a_confirmed_field_has_no_such_reminder(tmp_path):
+    rows = page([("First name", "Sam", "text"), ("What drew you to Acme?", "The product", "textarea")])
+    report = job_report(meta(), rows, load(tmp_path, {}))
+    assert report.conclusion == "check_then_submit" and "没有一栏由代码核对为对" not in report.todo[0]
+
+
+def test_the_report_knows_the_jobs_company(tmp_path):
+    answers = load(
+        tmp_path,
+        {"screening.how_heard": {"answer": "Company career site", "kind": "choice", "asks": ["how did you hear"]}},
+    )
+    rows = page([("How did you hear about us?", "Acme Careers Website", "select")])
+    assert job_report(meta(company="Acme"), rows, answers).fields[0].result == "correct"
