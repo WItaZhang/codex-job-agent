@@ -1093,3 +1093,15 @@ def test_form_fill_options_change_only_the_form_fill_run(box, tmp_path, monkeypa
     assert len(written.splitlines()) == 2
     assert not (box.data_dir / box.settings.apply.logs_dir / f"{job}.jsonl").exists()
     assert outcome.status == "waiting" and outcome.notes == ["dry run"]
+
+
+def test_the_checkpoint_service_is_only_added_when_asked():
+    s = settings()
+    entry = {"command": "/venv/bin/python", "args": ["-m", "intent_job_agent.form_fill.checkpoint", "/x/c.json"]}
+    servers = apply_bridge.mcp_config(s, 9222, gmail=False, extra_servers={"checkpoint": entry})["mcpServers"]
+    assert list(servers) == ["playwright", "checkpoint"] and servers["checkpoint"] == entry
+    command = apply_bridge.claude_command(s, Path("/x/mcp.json"), extra_allowed=("mcp__checkpoint__checkpoint",))
+    allowed = command[command.index("--allowedTools") + 1]
+    assert allowed == APPLY_COMMAND[APPLY_COMMAND.index("--allowedTools") + 1] + ",mcp__checkpoint__checkpoint"
+    rest = [part for part in command if part != allowed]
+    assert rest == [part for part in APPLY_COMMAND if part != APPLY_COMMAND[APPLY_COMMAND.index("--allowedTools") + 1]]

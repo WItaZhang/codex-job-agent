@@ -252,3 +252,89 @@ def test_a_saved_page_drops_page_chrome_but_keeps_its_numbers(data):
     summary = cli.run_report(RUN, data, settings())
     report = JobReport.model_validate_json((summary.parent / "acme-ml.json").read_text(encoding="utf-8"))
     assert [row.field_id for row in report.fields] == ["p1.1", "p1.2", "p1.3"]
+
+
+# --- slice 2a: a run recorded page by page (specs/form-fill.md 4.3, 5.3) ----------------------------------------
+
+
+def recorded_run(data, **skips) -> Path:
+    from .test_form_fill_recording import three_pages
+
+    three_pages(
+        data / "form-fill" / "recordings",
+        Redactor.from_profile(json.loads((data / "applicant/profile.json").read_bytes())),
+        **skips,
+    )
+    job = data / "form-fill/runs/run-1/acme-ml"
+    job.mkdir(parents=True)
+    meta = {
+        "job_id": "acme-ml",
+        "company": "Acme",
+        "title": "ML Engineer",
+        "url": "https://jobs.example.test/acme/apply",
+        "status": "filled",
+        "agent_result": "dry_run",
+        "checks": {"not_submitted": True},
+        "page": {"actions": ["Review"], "received": ""},
+        "redaction": 2,
+        "recording": "r",
+        "started": "2026-10-20T10:00:00",
+    }
+    (job / "meta.json").write_text(json.dumps(meta), encoding="utf-8")
+    return job
+
+
+def test_a_recorded_run_is_checked_page_by_page(data):
+    recorded_run(data)
+    summary = cli.run_report("run-1", data, settings())
+    report = JobReport.model_validate_json((summary.parent / "acme-ml.json").read_text(encoding="utf-8"))
+    assert report.recording_id == "r"
+    assert [(p.page, p.read_from, p.title) for p in report.pages] == [
+        (1, "filled", "Info"),
+        (2, "filled", "Experience"),
+        (3, "final", "Voluntary"),
+    ]
+    rows = {row.field_id: row for row in report.fields}
+    assert (rows["p1.1"].key, rows["p1.1"].result, rows["p1.1"].page) == ("name.first", "correct", 1)
+    assert (rows["p1.2"].result, rows["p1.2"].source) == ("correct", "prefilled")
+    assert rows["p1.1"].source == "undeclared" and rows["p1.1"].read_at == "2026-10-20T10:01:00"
+    assert (rows["p2.1"].key, rows["p2.1"].result, rows["p2.1"].read_from) == ("education.ms", "correct", "filled")
+    assert rows["p3.1"].read_from == "final"
+    assert report.conclusion == "check_then_submit"
+
+
+def test_a_page_read_in_the_background_is_marked_as_such(data):
+    recorded_run(data, skip_filled_2=True)
+    summary = cli.run_report("run-1", data, settings())
+    report = JobReport.model_validate_json((summary.parent / "acme-ml.json").read_text(encoding="utf-8"))
+    assert {row.read_from for row in report.fields if row.page == 2} == {"auto"}
+    assert "补录" in summary.read_text(encoding="utf-8")
+
+
+def test_a_page_never_read_is_unreadable_but_the_rest_is_still_checked(data):
+    recorded_run(data, skip_filled_2=True, skip_auto_2=True)
+    summary = cli.run_report("run-1", data, settings())
+    report = JobReport.model_validate_json((summary.parent / "acme-ml.json").read_text(encoding="utf-8"))
+    page2 = [row for row in report.fields if row.page == 2]
+    assert [row.result for row in page2] == ["unreadable", "unreadable"]
+    assert all("未录到" in row.note for row in page2)
+    assert report.conclusion == "check_then_submit"
+    assert "未录到" in summary.read_text(encoding="utf-8")
+
+
+def test_a_recorded_run_with_nothing_read_is_unreadable(data):
+    job = recorded_run(data)
+    import shutil
+
+    shutil.rmtree(data / "form-fill/recordings/r/fills/run-1")
+    summary = cli.run_report("run-1", data, settings())
+    report = JobReport.model_validate_json((summary.parent / "acme-ml.json").read_text(encoding="utf-8"))
+    assert report.conclusion == "unreadable"
+    assert job.name == "acme-ml"
+
+
+def test_the_recordings_last_conclusion_is_written_by_the_report(data):
+    recorded_run(data)
+    cli.run_report("run-1", data, settings())
+    meta = json.loads((data / "form-fill/recordings/r/meta.json").read_text(encoding="utf-8"))
+    assert meta["last"] == {"run": "run-1", "conclusion": "check_then_submit", "reason": None}

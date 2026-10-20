@@ -913,3 +913,74 @@ def test_step_bars_and_empty_widget_text_are_not_fields():
 )
 def test_page_chrome_rule(question, value, required, chrome):
     assert readback.is_page_chrome(question, value, required) is chrome
+
+
+# --- slice 2a: one read as a snapshot for the recorder (specs/form-fill.md 4.3) ----------------------------------
+
+
+def test_a_snapshot_carries_the_step_marker_sections_and_occurrences():
+    node = {"tag": "input", "type": "text", "role": "", "options": [], "required": False}
+    frame = {
+        "url": "https://synthetic.example.test/apply",
+        "step": "",
+        "headings": ["Apply to Synthetic", "Education 1", "Education 2"],
+        "controls": [
+            {**node, "order": 1, "labels": {"label_for": "School"}, "value": "A", "section": "Education 1"},
+            {**node, "order": 2, "labels": {"label_for": "Month"}, "value": "09", "section": "Education 1"},
+            {**node, "order": 3, "labels": {"label_for": "Month"}, "value": "05", "section": "Education 1"},
+            {**node, "order": 4, "labels": {"label_for": "School"}, "value": "B", "section": "Education 2"},
+            {**node, "order": 5, "type": "password", "labels": {"aria_label": "Password"}, "value": "[已填]"},
+        ],
+        "pairs": [],
+    }
+    snap = readback.snapshot({"url": frame["url"], "frames": [frame]}, tab="T9", read_at="2026-10-20T10:00:00")
+    assert (snap.tab, snap.url, snap.read_at) == ("T9", frame["url"], "2026-10-20T10:00:00")
+    assert snap.marker == ("Apply to Synthetic", "Education 1", "Education 2")
+    assert [(f.question, f.section, f.occurrence) for f in snap.fields] == [
+        ("School", "Education 1", 1),
+        ("Month", "Education 1", 1),
+        ("Month", "Education 1", 2),
+        ("School", "Education 2", 1),
+        ("Password", "", 1),
+    ]
+    assert snap.password is True
+
+
+def test_the_current_step_is_the_marker_when_the_page_shows_one():
+    frame = {"url": "u", "step": "My Experience", "headings": ["Synthetic Engineer", "My Experience"], "controls": []}
+    assert readback.snapshot({"url": "u", "frames": [frame]}, tab="T", read_at="").marker == ("My Experience",)
+
+
+def test_normalize_alone_keeps_the_slice_1_fields():
+    node = {"tag": "input", "type": "text", "role": "", "options": [], "required": False, "section": "Education 1"}
+    frame = {"controls": [{**node, "order": 1, "labels": {"label_for": "School"}, "value": "A"}], "pairs": []}
+    assert normalize({"frames": [frame]})[0].section == ""
+
+
+STEPS_HTML = """<!doctype html><html><body>
+<ol><li aria-current="step">My Experience</li><li>Voluntary Disclosures</li></ol>
+<h2>Synthetic Engineer</h2>
+<h3>Education 1</h3>
+<label for="s1">School</label><input id="s1" value="Synthetic State University">
+<label for="d1">Degree</label><button id="d1" type="button" aria-haspopup="listbox">Master of Science</button>
+<h3>Education 2</h3>
+<label for="s2">School</label><input id="s2" value="Example College">
+<label for="d2">Degree</label><button id="d2" type="button" aria-haspopup="listbox">Select One</button>
+<dl><dt>Graduation</dt><dd>12/2026</dd></dl>
+</body></html>"""
+
+
+def test_the_page_script_reads_the_step_headings_sections_and_listbox_buttons(chromium):
+    _, pg, _ = chromium
+    pg.set_content(STEPS_HTML)
+    frame = pg.evaluate(readback.EXTRACT_JS)
+    assert frame["step"] == "My Experience"
+    assert frame["headings"][:3] == ["Synthetic Engineer", "Education 1", "Education 2"]
+    snap = readback.snapshot({"url": "u", "frames": [frame]}, tab="T", read_at="")
+    assert [(f.question, f.control, f.value, f.section, f.occurrence) for f in snap.fields] == [
+        ("School", "text", "Synthetic State University", "Education 1", 1),
+        ("Degree", "select", "Master of Science", "Education 1", 1),
+        ("School", "text", "Example College", "Education 2", 1),
+        ("Degree", "select", "Select One", "Education 2", 1),
+        ("Graduation", "review", "12/2026", "Education 2", 1),
+    ]
