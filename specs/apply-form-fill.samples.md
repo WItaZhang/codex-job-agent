@@ -4,7 +4,7 @@
 
 共同的设定（每个样例都用它，除非样例另有说明）：
 
-- 配置：`review_first: 10`，`batch_size: 30`。
+- 配置：`review_first: 5`（完成标准把它从 10 改成 5，spec 决定 14），`batch_size: 30`。
 - `applicant.yaml` 里"停在提交前"的公司名单写的是 `Stripe`。
 - 每个岗位都已经有求职信：`apply/letters/<岗位编号>.txt` 和 `.pdf`。数据库里记着所选简历是 `main`。
 
@@ -41,15 +41,15 @@ jobs:
 
 ## S2 每个岗位走哪条路
 
-批次 `batch-demo02` 一共 13 个岗位。前 10 个是"先检查"；第 11 个是 Stripe, Inc.，在名单上；第 12、13 个是其他公司。
+批次 `batch-demo02` 一共 8 个岗位。前 5 个是"先检查"；第 6 个是 Stripe, Inc.，在名单上；第 7、8 个是其他公司。
 
 | 步 | 岗位 | 模式 | 走哪条路 | 提交吗 |
 | --- | --- | --- | --- | --- |
-| 第一步 | 1–10 | review | 填表模块 | 不提交，全部停在提交前 |
-| 第二步 | 11 Stripe, Inc. | careful | 填表模块 | 不提交 |
-| 第二步 | 12、13 | submit | ApplyPilot 原流程，指令末尾加上标准答案和要求清单 | 自动提交 |
+| 第一步 | 1–5 | review | 填表模块 | 不提交，全部停在提交前 |
+| 第二步 | 6 Stripe, Inc. | careful | 填表模块 | 不提交 |
+| 第二步 | 7、8 | submit | ApplyPilot 原流程，指令末尾加上标准答案和要求清单 | 自动提交 |
 
-- 第二步按批次里的顺序一个接一个做：先 11（填表模块），再 12、13（ApplyPilot）。
+- 第二步按批次里的顺序一个接一个做：先 6（填表模块），再 7、8（ApplyPilot）。
 - 两步用的是同一个投递用 Chrome，同一时间只有一个岗位在跑。
 - 第二步的摘要（要和弹窗里一字不差）：
 
@@ -61,44 +61,48 @@ jobs:
 | --- | --- | --- | --- | --- |
 | a | 检查后可提交 | waiting | `check_then_submit` | 算 |
 | b | 不能提交：1 个错的事实 | waiting | `do_not_submit` | 算 |
-| c | 可以提交（填表切片 2 有了评审以后才会出现） | waiting | `ok` | 算 |
-| d | 可能已提交 | applied | `maybe_submitted` | 算（另见 S5） |
-| e | 不符合申请资格 | failed | `not_eligible` | 不算 |
-| f | 没填完：门槛（captcha） | failed | `gate:captcha` | 不算 |
-| g | 没填完：门槛（邮件验证码） | failed | `gate:email_verification` | 不算 |
-| h | 没填完：登录或注册失败 | failed | `login_failed` | 不算 |
-| i | 没填完：缺标准答案 | failed | `needs_answer` | 不算 |
-| j | 没填完：卡住或超时 | failed | `stuck` | 不算 |
-| k | 没填完：已下架 | failed | `expired` | 不算 |
-| l | 没填完：只收邮件 | failed | `email_only` | 不算 |
-| m | 没填完：跳到了别的岗位 | failed | `wrong_job` | 不算 |
-| n | 没填完：已经申请过 | applied | `already_applied` | 算（和现在一样，spec §10 第 63 条） |
-| o | 没填完：程序没跑起来 | pending | `system_error` | 不算（退回待投，spec §10 第 67 条） |
-| p | 读不出：读回失败，但填表 agent 说填完了，标签页还在 | waiting | `unreadable` | 算 |
-| q | 读不出：标签页丢失 | failed | `tab_lost` | 不算 |
+| c | 可能已提交 | applied | `maybe_submitted` | 算（另见 S5） |
+| d | 不符合申请资格 | failed | `not_eligible` | 不算 |
+| e | 没填完：门槛（captcha） | failed | `gate:captcha` | 不算 |
+| f | 没填完：门槛（邮件验证码） | failed | `gate:email_verification` | 不算 |
+| g | 没填完：登录或注册失败 | failed | `login_failed` | 不算 |
+| h | 没填完：缺标准答案 | failed | `needs_answer` | 不算 |
+| i | 没填完：卡住或超时 | failed | `stuck` | 不算 |
+| j | 没填完：已下架 | failed | `expired` | 不算 |
+| k | 没填完：只收邮件 | failed | `email_only` | 不算 |
+| l | 没填完：跳到了别的岗位 | failed | `wrong_job` | 不算 |
+| m | 没填完：已经申请过 | applied | `already_applied` | 算（和现在一样，spec §10 第 63 条） |
+| n | 没填完：程序没跑起来 | pending | `system_error` | 不算（退回待投，spec §10 第 67 条） |
+| o | 读不出：读回失败，但填表 agent 说填完了，标签页还在 | waiting | `unreadable` | 算 |
+| p | 读不出：标签页丢失 | failed | `tab_lost` | 不算 |
 
+- 没有"可以提交"：那要独立评审（填表切片 2c），评审冻结。
 - 数据库里的备注写成：`<原因>；<结论的中文>；填表运行 <运行编号>`。例如 `do_not_submit；不能提交：1 个错的事实；填表运行 20261020-101500-ab12`。
   - 服务重启以后，`apply_status` 没有了这一步的运行记录，仍然可以凭这个运行编号找到报告。
+  - 结果码写在开头，完成标准（spec §9"怎么数"）按它分类：
+    - e（captcha）、g（登录或注册失败），以及门槛里的 `gate:sso_required`、`gate:arbitration`、`gate:ssn_required`、`gate:payment_required`，属于允许的几种；
+    - f（邮件验证码）、h、i、j、l、p 是要修的失败；
+    - d（不符合申请资格）、k（只收邮件）归哪一类，由完成标准那边定。
 - ApplyPilot 自动提交的那些岗位照旧：APPLIED 记成 applied，其余记成 failed 并附结果码（spec §10 第 58 条）。
 
 ## S4 第一步全都没成功，整批作废（规则不变，判断换成上表的最后一列）
 
-- 第一步 10 个的结果：4 个 f（captcha），3 个 k（已下架），2 个 o（程序没跑起来），1 个 q（标签页丢失）。没有一个"算"。
+- 第一步 5 个的结果：2 个 e（captcha），1 个 j（已下架），1 个 n（程序没跑起来），1 个 p（标签页丢失）。没有一个"算"。
   - 这一批作废，`apply_status` 的 `void` 为真，不给第二步的摘要。
-  - o 的 2 个已经退回待投。
-- 同样 10 个，其中 1 个换成 b（不能提交）："算"的有 1 个，可以开始第二步。
+  - n 的那 1 个已经退回待投。
+- 同样 5 个，其中 1 个换成 b（不能提交）："算"的有 1 个，可以开始第二步。
 
 ## S5 可能已提交：这一步马上停下，整批作废
 
-- 第一步做到第 3 个时，结果是 d（最后一页写着 "Thank you, your application has been received"）。
+- 第一步做到第 3 个时，结果是 c（最后一页写着 "Thank you, your application has been received"）。
   - 第 3 个记成 applied（`maybe_submitted`）。
-  - 第 4–10 个不再做，仍是待投，标签页没打开过。
+  - 第 4、5 个不再做，仍是待投，标签页没打开过。
   - 这一批作废，不能开始第二步。`apply_status` 的说明："填表模块可能点了提交，这一批已停下。请先打开第 3 个的标签页确认；没交的话说'第 3 个没交'，它会改回待投。"
 - 原因：填表模块承诺永远不提交，出现这种结果说明有问题，先停下来查。
 
 ## S6 重跑
 
-- 第一步里第 4 个（`job_d4`）的结果是 f（captcha）。用户在标签页里手动过了验证，然后说"重跑 4"。
+- 第一步里第 4 个（`job_d4`）的结果是 e（captcha）。用户在标签页里手动过了验证，然后说"重跑 4"。
   1. `mark_applications(["job_d4"], "pending")`；
   2. `prepare_apply_batch(only=["job_d4"])`：生成新批次，只有这一个岗位，模式是 review，走填表模块；
   3. 展示摘要，用户说"开始"后调用 `start_applying`（弹窗）。
@@ -131,7 +135,7 @@ jobs:
 `apply_status` 里，填表模块做的每个岗位多出这些字段：`via: form_fill`、`conclusion`（中文）、`headline`、`todo`（编号列出）、`report`（这个岗位报告的路径）、`run_id`、`summary`（这次运行的 summary.md）。宿主 agent 按结论分组展示：
 
 ```
-第一步结束：10 个里 6 个停在提交前等你检查，3 个没填完，1 个程序没跑起来（已退回待投）。
+第一步结束：5 个里 3 个停在提交前等你检查，1 个没填完，1 个程序没跑起来（已退回待投）。
 报告：data/local/form-fill/runs/20261020-101500-ab12/summary.md
 
 停在提交前（在投递用的 Chrome 里打开对应的标签页，按报告检查后自己提交）：
@@ -154,7 +158,7 @@ jobs:
 
 | 岗位走的路 | 指令里有没有这一条 | 有没有人核对 |
 | --- | --- | --- |
-| 第一步、名单上的公司（填表模块） | 有：要求清单全文都在填表指令里 | 有。切片 1：读回的 Websites 栏列在报告里；对不上标准答案的链接记"未审查"，进"需要你做的事"。填表切片 2 有评审以后：按 `websites_linkedin_github_only` 判定"通过 / 不通过" |
+| 第一步、名单上的公司（填表模块） | 有：要求清单全文都在填表指令里 | 有。切片 1 和 2a：读回的 Websites 栏列在报告里，对不上标准答案的链接记"未审查"，进"需要你做的事"。按 `websites_linkedin_github_only` 判定"通过 / 不通过"要等独立评审（2c），现在冻结 |
 | 第二步自动提交（ApplyPilot） | 本切片以后有：标准答案和要求清单加在指令末尾 | **没有**。自动提交前没有读回，网站带出的多余链接可能照样交出去 |
 
 自动提交的岗位只能做到"指令里有这一条"，没有人核对。计划第 1 节第 2 条写明了这个缺口；要补上，只能等以后"填表、核对后再提交"那个切片。
