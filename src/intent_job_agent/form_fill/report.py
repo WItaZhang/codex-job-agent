@@ -35,6 +35,7 @@ REASONS = {
     "login_failed": "登录或注册失败",
     "wrong_job": "跳到了别的岗位",
     "email_only": "只收邮件",
+    "screening_requires_candidate_written_answers": "筛选题要本人作答",  # /apply's shared rule (spec 5.5)
 }
 AGENT_REASONS = {
     "timeout": "stuck",
@@ -53,6 +54,9 @@ ADVICE = {  # what the user does next, by why the form was not filled (spec 5.5)
     "already_applied": "你已经申请过这个岗位，不用再填。",
     "wrong_job": "页面跳到了别的岗位，请确认清单里的地址。",
     "email_only": "这个岗位只收邮件投递。备注里的邮箱地址已经打码，请到岗位页面上看。",
+    "screening_requires_candidate_written_answers": (  # a rerun would stop on the same page (decision 33)
+        "这一页写明筛选题要你本人作答、不许用 AI 写，原文见备注。写不写由你决定：要投就在标签页里自己写完再提交。"
+    ),
 }
 UNREADABLE = ("tab_lost", "readback_failed", "system_error")
 # RUN_RULES' result, and the one ApplyPilot's own prompt offers for a work-authorization bar (decision 23)

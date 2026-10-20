@@ -817,7 +817,8 @@ class Toolbox:
         """What the user did with jobs on the apply list: applied, skipped, or back to pending. The other listings
         of the same posting change with them (`same_posting`). Not a label and not a signal: it changes neither the
         intent nor any analysis."""
-        self.store.set_application_status(job_ids, status)  # checks the ids and the status before any change
+        # checks the ids and the status before any change; each job the user named is one attempt (spec item 95)
+        self.store.set_application_status(job_ids, status, by_user=True)
         same = self._same_posting(self.store.applications())
         others = [j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids]
         self.store.list_applications(others, _day(None))

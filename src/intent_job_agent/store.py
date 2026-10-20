@@ -44,10 +44,18 @@ CREATE TABLE IF NOT EXISTS apply_batches (id TEXT PRIMARY KEY, day TEXT NOT NULL
                                           created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS dimension_requests (seq INTEGER PRIMARY KEY, text TEXT NOT NULL, label_id TEXT,
                                                created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS apply_attempts (seq INTEGER PRIMARY KEY, job_id TEXT NOT NULL, batch_id TEXT, phase TEXT,
+                                           mode TEXT, via TEXT NOT NULL, status TEXT NOT NULL, reason TEXT,
+                                           run_id TEXT, at TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS apply_attempts_no_update BEFORE UPDATE ON apply_attempts
+BEGIN SELECT RAISE(ABORT, 'apply_attempts is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS apply_attempts_no_delete BEFORE DELETE ON apply_attempts
+BEGIN SELECT RAISE(ABORT, 'apply_attempts is append-only'); END;
 """
 
 
 APPLICATION_STATUSES = ("pending", "applied", "skipped")  # what the user sets
+ATTEMPT_FIELDS = ("job_id", "batch_id", "phase", "mode", "via", "status", "reason", "run_id", "at")
 # What an application run reports: waiting = stopped before submit; pending = never reached the site.
 RUN_STATUSES = ("applied", "waiting", "failed", "pending")
 
@@ -335,27 +343,55 @@ class Store:
                 [(job_id, day, _now()) for job_id in job_ids],
             )
 
-    def set_application_status(self, job_ids: list[str], status: str) -> None:
+    def set_application_status(self, job_ids: list[str], status: str, by_user: bool = False) -> None:
+        """`by_user`: the user changed these jobs themselves (mark_applications): each one whose status changes gets
+        an attempt row (spec section 10 item 95), in the same transaction."""
         if status not in APPLICATION_STATUSES:
             raise InvariantError(f"Status must be one of {list(APPLICATION_STATUSES)}, not {status!r}")
         listed = self.applications()
         unknown = [job_id for job_id in job_ids if job_id not in listed]
         if unknown:
             raise InvariantError(f"Jobs {unknown} were never on the apply list")
+        now = _now()
+        changed = [job_id for job_id in dict.fromkeys(job_ids) if listed[job_id]["status"] != status]
         with self.db:
             self.db.executemany(
                 "UPDATE applications SET status = ?, updated_at = ?, note = NULL WHERE job_id = ?",
-                [(status, _now(), job_id) for job_id in job_ids],
+                [(status, now, job_id) for job_id in job_ids],
             )
+            if by_user:
+                for job_id in changed:
+                    self._add_attempt({"job_id": job_id, "via": "user", "status": status, "at": now})
 
-    def record_application_result(self, job_id: str, status: str, note: str | None) -> None:
+    def record_application_result(
+        self, job_id: str, status: str, note: str | None, attempt: dict | None = None
+    ) -> None:
+        """A run's result. `attempt` (batch_id, phase, mode, via, reason, run_id) also logs it as one attempt, in the
+        same transaction (spec section 10 item 95)."""
         if status not in RUN_STATUSES:
             raise InvariantError(f"Run status must be one of {list(RUN_STATUSES)}, not {status!r}")
+        now = _now()
         with self.db:
             self.db.execute(
                 "UPDATE applications SET status = ?, note = ?, updated_at = ? WHERE job_id = ?",
-                (status, note, _now(), job_id),
+                (status, note, now, job_id),
             )
+            if attempt is not None:
+                self._add_attempt({**attempt, "job_id": job_id, "status": status, "at": now})
+
+    def _add_attempt(self, row: dict) -> None:
+        unknown = set(row) - set(ATTEMPT_FIELDS)
+        if unknown:
+            raise InvariantError(f"Unknown attempt fields: {sorted(unknown)}")
+        self.db.execute(
+            f"INSERT INTO apply_attempts ({', '.join(ATTEMPT_FIELDS)}) VALUES ({', '.join('?' * len(ATTEMPT_FIELDS))})",
+            [row.get(name) for name in ATTEMPT_FIELDS],
+        )
+
+    def apply_attempts(self) -> list[dict]:
+        """Every attempt, oldest first (append-only: the table refuses UPDATE and DELETE)."""
+        rows = self.db.execute(f"SELECT {', '.join(ATTEMPT_FIELDS)} FROM apply_attempts ORDER BY seq")
+        return [dict(row) for row in rows]
 
     def save_cover_letter(self, job_id: str, resume_id: str) -> None:
         """Which resume a saved letter was written from. The files' location is derived from the job id, so no
