@@ -15,6 +15,7 @@ from intent_job_agent.domain import InvariantError, Job
 from intent_job_agent.store import Store
 from intent_job_agent.tools import COMMIT_TOOLS, SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
 
+from .apply_fakes import FormFillFake, write_sheet
 from .conftest import BASE_INTENT, BASE_VOCAB, ROOT, settings
 from .test_slice2f import frontmatter
 
@@ -72,6 +73,7 @@ def write_applicant(data, careful=("Stripe",), skill_dir=None, read_dirs=(), **e
         config["cover_letter_context"] = [str(skill_dir.parent / "facts.md")]
     config.update(extra)
     (folder / "applicant.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    write_sheet(data)  # answers.yaml and checklist.yaml: the reviewed jobs go through the form-fill module
 
 
 class FakeRunner:
@@ -101,6 +103,7 @@ def box(tmp_path):
     )
     box.initialize_intent(str(data / "intent.yaml"))
     box.apply_runner = FakeRunner()
+    box.form_fill_runner = FormFillFake(box)  # reviewed and careful jobs: the form-fill module, outcomes from above
     box.letter_renderer = lambda text, pdf_path, name, day: pdf_path.write_bytes(b"%PDF-1.4 letter")
     box.apply_in_background = False
     return box
@@ -330,7 +333,7 @@ def test_review_phase_then_the_rest(box):
     assert status["phase"] == "review" and status["status"] == "done"
     by_id = {item["job_id"]: item for item in status["jobs"]}
     assert by_id["j00"]["result"] == "waiting" and by_id["j03"]["result"] == "failed"
-    assert by_id["j03"]["reason"] == "arbitration" and by_id["j03"]["notes"] == note
+    assert by_id["j03"]["reason"] == "arbitration" and note[0] in by_id["j03"]["notes"]
     applications = box.store.applications()
     assert applications["j00"]["status"] == "waiting" and applications["j03"]["status"] == "failed"
 
@@ -381,26 +384,28 @@ def test_only_pending_jobs_are_applied_to(box):
 
 def test_checklist_lists_other_sites_and_emails(box):
     write_applicant(box.data_dir)
-    jobs = add_jobs(box, ["Acme"])
+    jobs = add_jobs(box, [f"Co{n}" for n in range(5)] + ["Acme"])  # Acme is submitted by ApplyPilot
     write_letters(box, jobs)
 
     def runner(spec):
+        sent = spec.job_id == "j05"
         return apply_bridge.ApplyOutcome(
-            status="waiting",
+            status="applied" if sent else "waiting",
             reason=None,
             notes=[],
-            other_sites=["mail.example.test"],
-            emails=[{"to": "jobs@acme.test", "subject": "Application"}],
+            other_sites=["mail.example.test"] if sent else [],
+            emails=[{"to": "jobs@acme.test", "subject": "Application"}] if sent else [],
             log=None,
         )
 
     box.apply_runner = runner
     batch = box.prepare_apply_batch(DAY)
     box.start_applying(batch["batch_id"], batch["summary"])
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
     checklist = box.apply_status()["checklist"]
     assert checklist == [
         {
-            "job_id": "j00",
+            "job_id": "j05",
             "other_sites": ["mail.example.test"],
             "emails": [{"to": "jobs@acme.test", "subject": "Application"}],
         }
@@ -614,7 +619,17 @@ def test_pdf_page_count():
 @pytest.mark.parametrize(
     ("skill", "needed"),
     [
-        ("apply", {"get_apply_setup", "prepare_apply_batch", "start_applying", "apply_status", "mark_applications"}),
+        (
+            "apply",
+            {
+                "get_apply_setup",
+                "prepare_apply_batch",
+                "start_applying",
+                "apply_status",
+                "mark_applications",
+                "apply_stats",
+            },
+        ),
         (
             "cover-letter",
             {
@@ -791,11 +806,12 @@ def test_a_crashed_review_step_voids_the_batch_too(box):
     def broken(spec):
         raise RuntimeError("runner exploded")
 
-    box.apply_runner = broken
+    box.apply_runner = broken  # each form-fill job breaks before the site: back to pending, one by one
     batch = box.prepare_apply_batch(DAY)
     box.start_applying(batch["batch_id"], batch["summary"])
     status = box.apply_status()
-    assert status["status"] == "failed" and status["next"] is None and status["void"] is True
+    assert status["next"] is None and status["void"] is True
+    assert {box.store.applications()[j]["status"] for j in jobs[:5]} == {"pending"}
 
 
 def test_each_step_is_logged_with_the_jobs_it_starts(box):
