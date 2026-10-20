@@ -8,18 +8,25 @@ import re
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
 
 from ..domain import InvariantError
+from .columns import mask_snapshot
+from .compare import HIDDEN as HIDDEN_TEXT
+from .compare import PART_EMPTY
 from .matching import NAVIGATION, is_empty, norm
 from .models import PageState, ReadField
+from .recorder import Snapshot
 
-# Runs in each frame. Returns {"url", "scope", "controls": [...], "pairs": [...], "actions": [...], "notices": [...]};
-# "order" is the document order in the frame. An open modal dialog makes the rest of the page inert, so only the
-# dialog is read ("scope": "dialog"), unless nothing in it can be read. "actions" are the visible button texts there,
-# "notices" the page's headings, alerts and status lines (both for check 4).
+# Runs in each frame. Returns {"url", "scope", "controls": [...], "pairs": [...], "actions": [...], "notices": [...],
+# "step", "headings"}; "order" is the document order in the frame. An open modal dialog makes the rest of the page
+# inert, so only the dialog is read ("scope": "dialog"), unless nothing in it can be read. "actions" are the visible
+# button texts there, "notices" the page's headings, alerts and status lines (both for check 4). "step" is the text of
+# the current step (aria-current="step"), "headings" the visible headings read, and each control and pair carries
+# its "section", the nearest heading above it (the page's title and the fields' identity, spec 4.3).
 EXTRACT_JS = r"""() => {
   const NO_TEXT = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SELECT", "OPTION", "TEXTAREA", "INPUT",
     "BUTTON", "IFRAME", "SVG"]);
@@ -27,7 +34,8 @@ EXTRACT_JS = r"""() => {
   const INLINE = new Set(["SPAN", "B", "STRONG", "EM", "I", "SMALL", "ABBR", "SUP", "SUB", "BR", "MARK", "U"]);
   const EDITABLE = '[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"]';
   const WIDGETS = '[role=combobox],[role=listbox],[role=radiogroup],[role=checkbox],[role=switch],' + EDITABLE;
-  const CONTROLS = 'input,select,textarea,' + WIDGETS;
+  const LISTBOX_BUTTONS = 'button[aria-haspopup="listbox"],[role=button][aria-haspopup="listbox"]';
+  const CONTROLS = 'input,select,textarea,' + WIDGETS + ',' + LISTBOX_BUTTONS;
   const TOGGLES = 'button[aria-pressed],[role=button][aria-pressed]';
   const HEADINGS = 'h1,h2,h3,h4,h5,h6,[role=heading]';
   const ACTIONS = 'button,input[type=submit],input[type=button],[role=button]';
@@ -73,6 +81,17 @@ EXTRACT_JS = r"""() => {
   const ownText = (el) => Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.data.trim());
   const hasControl = (el) => el.matches(CONTROLS) || el.querySelector(CONTROLS + "," + TOGGLES) !== null;
   const required = (el) => !!el.required || el.getAttribute("aria-required") === "true";
+  // A CSS path from body, as CONTACT_JS writes it: the element to hide when its field is a contact field (5.6).
+  const pathOf = (el) => {
+    const parts = [];
+    for (let e = el; e && e !== document.body; e = e.parentElement) {
+      if (!e.parentElement) return "";
+      let n = 1;
+      for (let s = e.previousElementSibling; s; s = s.previousElementSibling) n++;
+      parts.unshift(`:nth-child(${n})`);
+    }
+    return ["body", ...parts].join(" > ");
+  };
 
   const read = (root) => {
     // Visible text nodes in document order, for "nearest preceding text".
@@ -84,6 +103,15 @@ EXTRACT_JS = r"""() => {
       if (p.closest('[aria-hidden="true"]') || !shown(p)) continue;
       texts.push(t);
     }
+    // Visible headings in document order, for each field's section (the nearest one above it).
+    const heads = Array.from(root.querySelectorAll(HEADINGS)).filter(shown)
+      .map((h) => [order.get(h), textOf(h).slice(0, 120)]).filter(([, t]) => t);
+    const sectionOf = (el) => {
+      const at = order.get(el);
+      let found = "";
+      for (const [o, t] of heads) { if (o < at) found = t; else break; }
+      return found;
+    };
     const preceding = (el) => {
       let lo = 0, hi = texts.length - 1, found = -1;
       while (lo <= hi) {
@@ -133,7 +161,11 @@ EXTRACT_JS = r"""() => {
       const wrap = el.closest("label");
       const fieldset = el.closest("fieldset");
       const legend = fieldset ? fieldset.querySelector(":scope > legend") : null;
+      // A required mark inside the field's label, legend or wrapping label, even one hidden from screen readers.
+      const star = [...forLabels, wrap, legend].some((l) => !!l
+        && Array.from(l.querySelectorAll("*")).some((e) => e.children.length === 0 && e.textContent.trim() === "*"));
       return {
+        star,
         label_for: forLabels.map(textOf).filter(Boolean).join(" "),
         labelledby: byIds(el.getAttribute("aria-labelledby")),
         aria_label: el.getAttribute("aria-label") || "",
@@ -164,6 +196,30 @@ EXTRACT_JS = r"""() => {
       return "";
     };
 
+    // Pickers: a search box (enterkeyhint=search, type=search, role=searchbox) whose value is the items picked, shown
+    // as options of a list beside it in the same field; what was typed into the box is not a value. The list is read
+    // as part of the picker, not on its own.
+    const consumed = new Set();
+    const picked = new Map();
+    for (const el of root.querySelectorAll("input")) {
+      const t = (el.type || "text").toLowerCase(), r = (el.getAttribute("role") || "").toLowerCase();
+      if (!(el.getAttribute("enterkeyhint") === "search" || t === "search" || r === "searchbox")) continue;
+      const label = (el.labels && el.labels[0]) || null;
+      let box = el.parentElement;
+      if (label) { while (box && !box.contains(label)) box = box.parentElement; }
+      else box = el.closest("[role=group],fieldset") || el.parentElement;
+      if (!box || box === root) continue;
+      const others = Array.from(box.querySelectorAll("input,select,textarea"))
+        .filter((x) => x !== el && !SKIP_TYPES.has((x.type || "").toLowerCase()));
+      if (others.length) continue;  // the box is a whole section, not this one field
+      const own = popup(el);
+      const lists = Array.from(box.querySelectorAll("[role=listbox]")).filter((l) => l !== own);
+      lists.forEach((l) => consumed.add(l));
+      // Only items shown: a list of suggestions kept hidden in the same box is not what was picked.
+      picked.set(el, lists.filter(shown).flatMap((l) => Array.from(l.querySelectorAll("[role=option]")))
+        .filter(shown).map(textOf).filter(Boolean));
+    }
+
     // Yes / No style button groups (aria-pressed): one control per parent with two or more such buttons. A native
     // input kept beside them for the form's sake is read as part of the group, not on its own.
     const toggles = new Map();
@@ -189,14 +245,26 @@ EXTRACT_JS = r"""() => {
       if (!visible) continue;
       const host = el.parentElement && el.parentElement.closest(WIDGETS);
       if (host) continue;  // read as part of the enclosing widget
-      if (role === "listbox" && popups.has(el)) continue;
+      if (role === "listbox" && (popups.has(el) || consumed.has(el))) continue;
       if (role === "radiogroup" && el.querySelector("input[type=radio]")) continue;
       if ((type === "radio" || type === "checkbox") && beside(el)) continue;
+      const labels = labelsOf(el);
+      // A listbox button is a field only when a label names it; menus in the page's header are not.
+      if (el.matches(LISTBOX_BUTTONS) && !labels.label_for && !labels.labelledby) continue;
+      // An icon-only listbox button beside another control is that control's toggle, not a field of its own.
+      if (el.matches(LISTBOX_BUTTONS) && !buttonText(el) && el.parentElement
+        && Array.from(el.parentElement.querySelectorAll(CONTROLS)).some((c) => c !== el)) continue;
       const node = {
         order: order.get(el), tag, type, role, id: el.getAttribute("id") || "", name: el.getAttribute("name") || "",
-        labels: labelsOf(el), value: "", options: [], required: required(el),
+        labels, value: "", options: [], required: required(el), section: sectionOf(el), path: pathOf(el),
       };
-      if (el.matches(EDITABLE) && role !== "combobox") {
+      if (el.matches(LISTBOX_BUTTONS)) {
+        node.listbox_button = true;
+        node.value = buttonText(el);
+      } else if (picked.has(el)) {
+        node.picker = true;
+        node.value = picked.get(el).join("; ");
+      } else if (el.matches(EDITABLE) && role !== "combobox") {
         node.editable = true;
         node.value = el.innerText;
       } else if (role === "combobox") {
@@ -228,6 +296,9 @@ EXTRACT_JS = r"""() => {
           aria_label: gbox ? gbox.getAttribute("aria-label") || "" : "",
         };
         node.labels.inner = innerTitle(groupBox(el));
+        // The title of the box holding this one check box alone (a consent paragraph above its "I agree").
+        const own = el.closest("fieldset,[role=group]");
+        node.own_title = own && own.querySelectorAll(CONTROLS).length === 1 ? innerTitle(own) : "";
         if (gbox && gbox.getAttribute("aria-required") === "true") node.required = true;
         node.checked = !!el.checked;
         node.option_label = Array.from(el.labels || []).map(textOf).filter(Boolean).join(" ")
@@ -242,7 +313,8 @@ EXTRACT_JS = r"""() => {
     for (const [box, buttons] of toggles) {
       controls.push({
         order: order.get(buttons[0]), tag: "button", type: "", role: "togglegroup", id: box.getAttribute("id") || "",
-        name: "", labels: labelsOf(box), value: "", required: required(box),
+        name: "", labels: labelsOf(box), value: "", required: required(box), section: sectionOf(buttons[0]),
+        path: pathOf(box),
         options: buttons.map((b) => ({
           text: buttonText(b), value: "", selected: b.getAttribute("aria-pressed") === "true",
         })),
@@ -259,11 +331,14 @@ EXTRACT_JS = r"""() => {
       const g = el.closest(GROUPS);
       return !!g && root.contains(g) && hasControl(g);
     };
-    const addPair = (q, valueEls, source) => {
+    const addPair = (q, valueEls, source, joiner = " ") => {
       if (used.has(q) || !shown(q) || hasControl(q) || valueEls.some(hasControl) || inField(q)) return;
       used.add(q);
       valueEls.forEach((v) => used.add(v));
-      pairs.push({ order: order.get(q), question: textOf(q), value: valueEls.map(textOf).join(" "), source });
+      pairs.push({
+        order: order.get(q), question: textOf(q), value: valueEls.map(textOf).filter(Boolean).join(joiner), source,
+        section: sectionOf(q), path: valueEls.length === 1 ? pathOf(valueEls[0]) : pathOf(valueEls[0].parentElement),
+      });
     };
     for (const dt of root.querySelectorAll("dt")) {
       const dd = dt.nextElementSibling;
@@ -278,11 +353,11 @@ EXTRACT_JS = r"""() => {
       if (!leaf(el)) continue;
       const v = el.nextElementSibling;
       if (!v || used.has(v)) continue;
-      const t = textOf(el);
+      const t = textOf(el).replace(/\s*\*+$/, "");  // a required mark does not end the question
       const orphanLabel = el.tagName === "LABEL" && !el.control;
       if (!t || t.length > 200 || !(/[:?：？]$/.test(t) || orphanLabel)) continue;
       const vt = textOf(v);
-      if (vt.length > 500 || /[:：]$/.test(vt)) continue;
+      if (vt.length > 500 || /[:：]$/.test(vt) || /^\*+$/.test(vt)) continue;  // the required mark is not a value
       addPair(el, [v], "label");
     }
     // "One row, two parts": a block whose only content is a question text and a value, as review pages list them.
@@ -291,11 +366,24 @@ EXTRACT_JS = r"""() => {
     // shape, or when it follows a small heading on its own; a block holding pairs already read is a section.
     const fillable = controls.some((c) => !(c.type === "checkbox" || c.type === "file" || c.role === "checkbox"
       || c.role === "switch"));
+    // A question part may sit in blocks of its own (one child each) around its text, as rich-text labels do.
+    // Alerts and status lines are notices, never questions.
+    const single = (el) => {
+      for (let e = el; ; ) {
+        if (e.matches('[role=alert],[role=status],[aria-live]')) return false;
+        if (leaf(e)) return true;
+        const kids = Array.from(e.children).filter(shown);
+        if (kids.length !== 1 || ownText(e)) return false;
+        e = kids[0];
+      }
+    };
     const parts = (el) => {
       const kids = Array.from(el.children).filter(shown);
       if (kids.length !== 2 || ownText(el) || hasControl(el)) return null;
       const [q, v] = kids;
-      if (NO_TEXT.has(q.tagName.toUpperCase()) || !leaf(q)) return null;
+      if (NO_TEXT.has(q.tagName.toUpperCase()) || !single(q)) return null;
+      // A list under a heading is a value only inside a titled group (below); elsewhere it is a job description.
+      if (v.matches("ul,ol")) return null;
       const qt = textOf(q), vt = textOf(v);
       if (!qt || !vt || qt.length > 3000 || vt.length > 1000 || /[:：]$/.test(vt)) return null;
       return [q, v, qt, vt];
@@ -319,12 +407,23 @@ EXTRACT_JS = r"""() => {
       if (listed || (headed(el) && qt.length <= 120 && vt.length <= 300)) addPair(q, [v], "row");
     }
 
+    // A heading over a list of items (a review page's picked skills): the items are its value.
+    for (const list of fillable ? [] : root.querySelectorAll("ul,ol")) {
+      const h = list.previousElementSibling;
+      if (!h || !h.matches(HEADINGS) || !shown(list) || hasControl(list)) continue;
+      // Only inside a group the heading titles: a job description's headings over bullet lists are not answers.
+      if (!list.parentElement || !list.parentElement.matches("[role=group],fieldset,[aria-labelledby]")) continue;
+      const items = Array.from(list.children).filter((li) => li.tagName === "LI" && shown(li));
+      if (!items.length || items.some((li) => li.querySelector("ul,ol"))) continue;
+      addPair(h, items, "list", "; ");
+    }
+
     const actions = [];
     for (const b of root.querySelectorAll(ACTIONS)) {
       const t = shown(b) ? buttonText(b) : "";
       if (t && actions.length < 100) actions.push(t);
     }
-    return { controls, pairs, actions };
+    return { controls, pairs, actions, headings: heads.slice(0, 40).map(([, t]) => t) };
   };
 
   const modal = () => {
@@ -347,7 +446,12 @@ EXTRACT_JS = r"""() => {
     const t = shown(n) ? textOf(n) : "";
     if (t && notices.length < 100) notices.push(t.slice(0, 300));
   }
-  return { url: location.href, scope, controls: out.controls, pairs: out.pairs, actions: out.actions, notices };
+  const current = Array.from(page.querySelectorAll('[aria-current="step"]')).find(shown);
+  const step = current ? textOf(current).slice(0, 120) : "";
+  return {
+    url: location.href, scope, controls: out.controls, pairs: out.pairs, actions: out.actions, notices, step,
+    headings: out.headings,
+  };
 }"""
 
 # Runs in each frame for the screenshot blackout. One node per element under body (open shadow roots count as the
@@ -387,7 +491,40 @@ CONTACT_JS = r"""() => {
 }"""
 SCREENSHOT_NOTE = "screenshot-not-saved.txt"
 
+# Runs in the main frame: the page as simplified HTML (no scripts, styles or templates), written from the live DOM
+# without changing it. The elements at the given paths (fields matched to a contact entry) have their text and
+# value-like attributes written as HIDDEN, so a contact value masking by value cannot see never reaches the file.
+SERIALIZE_JS = r"""([paths, hidden]) => {
+  const hide = new Set();
+  for (const p of paths) { try { const e = document.querySelector(p); if (e) hide.add(e); } catch (err) {} }
+  const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "LINK"]);
+  const VOID = new Set(["AREA", "BASE", "BR", "COL", "EMBED", "HR", "IMG", "INPUT", "META", "SOURCE", "TRACK", "WBR"]);
+  const VALUED = new Set(["value", "title", "aria-label", "aria-valuetext", "aria-valuenow", "placeholder", "alt"]);
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const out = [];
+  const walk = (node, masked) => {
+    if (node.nodeType === 3) { out.push(masked ? "" : esc(node.data)); return; }
+    if (node.nodeType !== 1 || SKIP.has(node.tagName)) return;
+    const own = masked || hide.has(node);
+    const tag = node.tagName.toLowerCase();
+    out.push("<" + tag);
+    for (const a of Array.from(node.attributes)) {
+      const v = own && VALUED.has(a.name.toLowerCase()) ? hidden : a.value;
+      out.push(" " + a.name + '="' + esc(v).replace(/"/g, "&quot;") + '"');
+    }
+    out.push(">");
+    if (own && !masked && !VOID.has(node.tagName)) out.push(esc(hidden));
+    for (const c of Array.from(node.childNodes)) walk(c, own);
+    if (!VOID.has(node.tagName)) out.push("</" + tag + ">");
+  };
+  walk(document.documentElement, false);
+  return "<!doctype html>" + out.join("");
+}"""
+
 QUESTION_SOURCES = ("label_for", "labelledby", "aria_label", "wrapping", "legend", "preceding", "placeholder")
+# A date entered in parts (spin buttons labelled Month and Year): the parts of one fieldset are one field, titled by
+# its legend ("From", "To"), its value the parts in page order ("6/2026").
+DATE_PARTS = frozenset({"month", "day", "year", "mm", "dd", "yyyy", "yy"})
 GROUP_SOURCES = ("group_labelledby", "group_aria_label", "legend", "inner", "preceding")
 
 # Check 4 (slice-1 plan, section 2): buttons that still send the form or move it on, and words saying it was received.
@@ -457,6 +594,8 @@ def _pick(sources: dict, order: tuple[str, ...]) -> tuple[str, bool]:
 
 def _control_kind(node: dict) -> str:
     tag, role, typ = node.get("tag", ""), node.get("role", ""), node.get("type", "")
+    if node.get("listbox_button"):  # a button that opens a list of options and shows the one picked
+        return "select"
     if role == "combobox":
         return "combobox"
     if role in ("radiogroup", "togglegroup"):
@@ -489,7 +628,8 @@ def _options(node: dict) -> tuple[list[str], list[str]]:
 
 def _single(node: dict) -> dict:
     kind = _control_kind(node)
-    question, starred = _pick(node.get("labels") or {}, QUESTION_SOURCES)
+    labels = node.get("labels") or {}
+    question, starred = _pick(labels, QUESTION_SOURCES)
     texts, chosen = _options(node)
     if kind == "checkbox":
         value = "Yes" if node.get("checked") else ""
@@ -505,8 +645,34 @@ def _single(node: dict) -> dict:
         "control": kind,
         "value": _clean(value),
         "options": tuple(texts),
-        "required": bool(node.get("required")) or starred,
+        "required": bool(node.get("required")) or starred or bool(labels.get("star")),
+        "section": _clean(node.get("section")),
+        "group_title": _question(labels.get("legend"))[0],
+        "path": str(node.get("path") or ""),
     }
+
+
+def _merge_dates(drafts: list[dict]) -> list[dict]:
+    """Month / Day / Year parts in one fieldset -> one "date" field named by the legend (DATE_PARTS), its parts in
+    page order. A part left empty while another is filled shows as PART_EMPTY: the date is not complete."""
+    out: list[dict] = []
+    for d in drafts:
+        title = d.pop("group_title", "")
+        if not (title and d["control"] == "text" and d["question"].strip().lower() in DATE_PARTS):
+            out.append(d)
+            continue
+        prev = out[-1] if out else None
+        if prev is not None and prev.get("_date") == title:
+            prev["_parts"].append(d["value"])
+            prev["required"] = prev["required"] or d["required"]
+            continue
+        out.append({**d, "question": title, "control": "date", "_date": title, "_parts": [d["value"]]})
+    for d in out:
+        d.pop("_date", None)
+        parts = d.pop("_parts", None)
+        if parts is not None:
+            d["value"] = "/".join(v or PART_EMPTY for v in parts) if any(parts) else ""
+    return out
 
 
 def _group(members: list[dict]) -> dict:
@@ -521,8 +687,20 @@ def _group(members: list[dict]) -> dict:
         "control": _control_kind(first),
         "value": "; ".join(label for m, label in zip(members, labels, strict=True) if m.get("checked") and label),
         "options": tuple(label for label in labels if label),
-        "required": any(m.get("required") for m in members) or starred,
+        "required": any(m.get("required") or (m.get("labels") or {}).get("star") for m in members) or starred,
+        "section": _clean(first.get("section")),
+        "path": str(first.get("path") or ""),
     }
+
+
+def _split_checkbox(node: dict) -> dict:
+    """One of several check boxes sharing a name and a label: its own box's title is its question, when the box
+    holds it alone (two consents, each "I agree"); otherwise its label is (one per work segment)."""
+    draft = _single(node)
+    title, _ = _question(node.get("own_title"))
+    if title and title != _clean(node.get("option_label")):
+        draft["question"] = title
+    return draft
 
 
 def _frame_items(fi: int, frame: dict) -> list[tuple[tuple, str, dict]]:
@@ -546,7 +724,15 @@ def _frame_items(fi: int, frame: dict) -> list[tuple[tuple, str, dict]]:
         if not isinstance(pair, dict):
             raise InvariantError("pair must be an object")
         items.append(((fi, pair.get("order", 0)), "pair", pair))
-    return items
+    out = []
+    for item in items:  # check boxes sharing a name and a label are one field repeated per segment, not a group
+        _, what, payload = item
+        if what == "group" and len(payload) > 1 and _control_kind(payload[0]) == "checkbox":
+            if len({_clean(m.get("option_label")) for m in payload}) == 1:
+                out.extend(((fi, m.get("order", 0)), "split", m) for m in payload)
+                continue
+        out.append(item)
+    return out
 
 
 def _lone_checkbox(members: list[dict]) -> bool:
@@ -558,8 +744,15 @@ def _lone_checkbox(members: list[dict]) -> bool:
     return not inner or inner == _clean(members[0].get("option_label"))
 
 
-def normalize(raw: dict) -> tuple[ReadField, ...]:
-    """Raw nodes from EXTRACT_JS (one entry per frame) -> ReadFields numbered p1.1, p1.2 ... in page order."""
+def normalize(raw: dict, sections: bool = False) -> tuple[ReadField, ...]:
+    """Raw nodes from EXTRACT_JS (one entry per frame) -> ReadFields numbered p1.1, p1.2 ... in page order.
+    `sections`: also keep each field's section and count the same question in the same section (the recorder's
+    identity, spec 4.3); without it the fields are slice 1's."""
+    return _read_fields(raw, sections)[0]
+
+
+def _read_fields(raw: dict, sections: bool) -> tuple[tuple[ReadField, ...], tuple[str, ...], tuple[int, ...]]:
+    """normalize's fields, with each one's element path and frame."""
     if not isinstance(raw, dict) or not isinstance(raw.get("frames"), list):
         raise InvariantError("raw page must be an object with a frames list")
     items = []
@@ -571,25 +764,70 @@ def normalize(raw: dict) -> tuple[ReadField, ...]:
     items.sort(key=lambda item: item[0])  # stable: ties keep extraction order
 
     drafts = []
-    for _, what, payload in items:
+    for (fi, _), what, payload in items:
         if what == "group":
             drafts.append(_single(payload[0]) if _lone_checkbox(payload) else _group(payload))
         elif what == "control":
             drafts.append(_single(payload))
+        elif what == "split":
+            drafts.append(_split_checkbox(payload))
         else:
             question, _ = _question(payload.get("question"))
             value = _clean(payload.get("value"))
             if question and value:
                 drafts.append(
-                    {"question": question, "control": "review", "value": value, "options": (), "required": False}
+                    {
+                        "question": question,
+                        "control": "review",
+                        "value": value,
+                        "options": (),
+                        "required": False,
+                        "section": _clean(payload.get("section")),
+                        "path": str(payload.get("path") or ""),
+                    }
                 )
+        if drafts and "frame" not in drafts[-1]:
+            drafts[-1]["frame"] = fi
 
+    drafts = _merge_dates(drafts)
     drafts = [d for d in drafts if not is_page_chrome(d["question"], d["value"], d["required"])]
     seen = {(d["question"].lower(), d["value"].lower()) for d in drafts if d["control"] != "review"}
     kept = [d for d in drafts if d["control"] != "review" or (d["question"].lower(), d["value"].lower()) not in seen]
-    return tuple(
-        ReadField(id=f"p1.{n}", origin="review_text" if d["control"] == "review" else "control", **d)
-        for n, d in enumerate(kept, start=1)
+    counts: dict[tuple, int] = {}
+    paths, frames = [], []
+    for d in kept:
+        paths.append(d.pop("path", ""))
+        frames.append(d.pop("frame", 0))
+        section = d.pop("section", "")
+        origin = "review_text" if d["control"] == "review" else "control"
+        if sections:
+            key = (origin, norm(section), norm(d["question"]))
+            counts[key] = counts.get(key, 0) + 1
+            d.update(section=section, occurrence=counts[key])
+        d["origin"] = origin
+    fields = tuple(ReadField(id=f"p1.{n}", **d) for n, d in enumerate(kept, start=1))
+    return fields, tuple(paths), tuple(frames)
+
+
+def snapshot(raw: dict, tab: str, read_at: str) -> Snapshot:
+    """One read of a tab for the recorder: the fields with their sections, the page's title (the current step when
+    the page shows one, else every heading read, in order) and whether a password field was shown."""
+    fields, paths, field_frames = _read_fields(raw, sections=True)
+    frames = [f for f in raw.get("frames", []) if isinstance(f, dict) and not f.get("error")]
+    step = next((_clean(f.get("step")) for f in frames if _clean(f.get("step"))), "")
+    headings = tuple(h for f in frames for h in map(_clean, f.get("headings") or []) if h)
+    password = any(
+        isinstance(node, dict) and node.get("type") == "password" for f in frames for node in f.get("controls") or []
+    )
+    return Snapshot(
+        tab=tab,
+        url=str(raw.get("url") or ""),
+        marker=(step,) if step else headings,
+        fields=fields,
+        read_at=read_at,
+        password=password,
+        paths=paths,
+        frames=field_frames,
     )
 
 
@@ -622,10 +860,12 @@ def page_state(raw: dict) -> PageState:
 
 @dataclass(frozen=True)
 class FinalPage:
-    """The final page as read back: its fields and where the form stands."""
+    """The final page as read back: its fields, where the form stands, and the same read as a snapshot for the
+    recorder (slice 2a)."""
 
     fields: tuple[ReadField, ...]
     state: PageState
+    snapshot: Snapshot | None = None
 
 
 # --- tabs -------------------------------------------------------------------------------------------------------
@@ -770,12 +1010,21 @@ def blackout_css(paths: list[str]) -> str:
     return "\n".join(f"{p}, {p} *, {p}::placeholder {{ {BLACK} }}" for p in paths)
 
 
-def _masked_screenshot(page, redactor: Redactor) -> tuple[bytes | None, str]:
-    """A full-page screenshot with every element showing a contact value painted black for the shot only (Playwright
-    adds the stylesheet for the shot and takes it away; the page is left as it is), or None and why when that cannot
-    be done (specs/form-fill.md 5.6)."""
+def serialize(page, hide=()) -> str:
+    """The page's main frame as simplified HTML, with the fields at `hide` ((frame, path)) hidden (SERIALIZE_JS)."""
+    paths = [path for frame, path in hide if frame == 0 and path]
+    return page.main_frame.evaluate(SERIALIZE_JS, [paths, HIDDEN_TEXT])
+
+
+def _masked_screenshot(page, redactor: Redactor, hide=()) -> tuple[bytes | None, str]:
+    """A full-page screenshot with every element showing a contact value, and every field at `hide` ((frame, path)
+    of the fields matched to a contact entry), painted black for the shot only (Playwright adds the stylesheet for
+    the shot and takes it away; the page is left as it is), or None and why when that cannot be done (5.6)."""
     try:
+        if any(frame != 0 for frame, _ in hide):
+            return None, "子框架里有对到联系方式的栏，涂不到"
         paths = contact_paths(page.main_frame.evaluate(CONTACT_JS), redactor)
+        paths += [path for _, path in hide if path and path not in paths]
         for frame in page.frames[1:]:
             if contact_paths(frame.evaluate(CONTACT_JS), redactor):
                 return None, "子框架里有联系方式，涂不到"
@@ -786,7 +1035,7 @@ def _masked_screenshot(page, redactor: Redactor) -> tuple[bytes | None, str]:
         return None, type(exc).__name__
 
 
-def _read_live(port: int, target: dict, redactor: Redactor) -> tuple[dict, str, bytes | None, str]:
+def _read_live(port: int, target: dict, redactor: Redactor, sheet) -> tuple:
     from playwright.sync_api import sync_playwright
 
     # Leaving the context stops the Playwright driver, which drops the CDP connection. browser.close() is never
@@ -794,20 +1043,25 @@ def _read_live(port: int, target: dict, redactor: Redactor) -> tuple[dict, str, 
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
         page = _find_page(browser, target)
-        raw, html = _extract(page), page.content()
-        return raw, html, *_masked_screenshot(page, redactor)
+        raw = _extract(page)
+        snap = snapshot(raw, tab=str(target.get("id", "")), read_at=datetime.now().isoformat(timespec="seconds"))
+        masked, hide, _ = mask_snapshot(snap, redactor, sheet)
+        return raw, masked, serialize(page, hide), *_masked_screenshot(page, redactor, hide)
 
 
-def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor) -> FinalPage:
-    """Read the job tab as it is and save page.html, screenshot.png, readback.json and raw.json (all redacted;
-    contact values in the screenshot are painted black). A screenshot that cannot be blacked out is not saved;
-    screenshot-not-saved.txt says so. Disconnects without closing the browser or the page."""
+def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> FinalPage:
+    """Read the job tab as it is and save page.html, screenshot.png and readback.json, masked by value and by column
+    (`sheet`: the answer sheet, for the fields matched to a contact entry; spec 5.6); contact values in the
+    screenshot are painted black. A screenshot that cannot be blacked out is not saved; screenshot-not-saved.txt
+    says so. Disconnects without closing the browser or the page."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     # Playwright's sync API refuses to run inside an asyncio loop (the MCP server's), so it gets its own thread.
     with ThreadPoolExecutor(max_workers=1) as pool:
-        raw, html, shot, why = pool.submit(_read_live, int(port), target, redactor).result()
-    fields, state = normalize(raw), page_state(raw)
+        raw, snap, html, shot, why = pool.submit(_read_live, int(port), target, redactor, sheet or {}).result()
+    state = page_state(raw)
+    fields = tuple(f.model_copy(update={"id": f"p1.{n}"}) for n, f in enumerate(snap.fields, start=1))
+    fields = tuple(f.model_copy(update={"section": "", "occurrence": 1}) for f in fields)
     (out / "page.html").write_text(redactor.mask(simplify_html(html)), encoding="utf-8")
     if shot is None:
         (out / SCREENSHOT_NOTE).write_text(redactor.mask(f"截图未存：打码失败（{why}）\n"), encoding="utf-8")
@@ -815,8 +1069,7 @@ def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor) 
         (out / "screenshot.png").write_bytes(shot)
     dumped = [f.model_dump(mode="json") for f in fields]
     (out / "readback.json").write_text(_dump(redactor.mask_json(dumped)), encoding="utf-8")
-    (out / "raw.json").write_text(_dump(redactor.mask_json(raw)), encoding="utf-8")
-    return FinalPage(fields, state)
+    return FinalPage(fields, state, snap)
 
 
 def _dump(obj) -> str:

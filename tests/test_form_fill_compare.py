@@ -842,3 +842,13 @@ def test_another_sites_careers_page_is_not_the_company_website(tmp_path, value):
     answers = load(tmp_path, HOW_HEARD)
     row = by_id(check_page([field("How Did You Hear About Us?", value, "select")], answers, company="Acme Synthetic"))
     assert (row["p1.1"].result, row["p1.1"].severity) == ("wrong", "fact")
+
+
+def test_a_date_with_an_empty_part_is_a_gap_not_a_match():
+    """Review #14: "?/2024" (the month empty) is not the year alone."""
+    from intent_job_agent.form_fill.models import ReadField
+
+    entry = AnswerEntry(key="availability.start", answer="2026-12-14", kind="date", asks=("start date",))
+    fields = (ReadField(id="p1.1", question="Start date", origin="control", control="date", value="?/2026"),)
+    (result,) = check_page(fields, {"availability.start": entry})
+    assert (result.result, result.severity) == ("wrong", "missing")

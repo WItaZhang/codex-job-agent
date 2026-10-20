@@ -41,6 +41,8 @@ from .cover_letter_check import BANNED_WORDS, check_letter
 from .discovery import DiscoveryError, fetch_board
 from .domain import DIMENSIONS, Compensation, IntentModel, InvariantError, Job, Level, Vocabulary
 from .engine import Engine
+from .form_fill import cli as form_fill_report
+from .form_fill import recording as form_fill_recording
 from .form_fill import runner as form_fill
 from .importing import inside, normalize_tags, parse_jobs
 from .llm import NoModelClient
@@ -1227,9 +1229,13 @@ class Toolbox:
     def start_form_fill(self, list_path: str) -> dict:
         """Fill every job on a form-fill list up to the final submit button and stop there; never submits. Checks
         the list, answers.yaml and checklist.yaml first and starts nothing if any of them is invalid. Runs in the
-        background in the applying Chrome, one job at a time, and not while an apply step runs. Each job's last
-        page is read back into the run's feasibility.md for the user to mark against the open tab. Poll
-        form_fill_status. `list_path`: the list file (absolute, or relative to the project folder).
+        background in the applying Chrome, one job at a time, and not while an apply step runs. Each job's pages
+        are recorded as the agent fills them (recordings/<recording id>/) and listed in the run's feasibility.md
+        for the user to mark against the open tab; at the end every job gets its report and the run a summary.md.
+        A job already recorded is not visited again unless its last run hit a gate, a login, a missing answer, a
+        broken page, a stuck agent or a lost tab, or the list says revisit: true: it is listed under `skipped` (its
+        recording can be retested without the site). Poll form_fill_status. `list_path`: the list file (absolute,
+        or relative to the project folder).
         When mail, bank, payment, password-manager or school tabs are open in that Chrome, the result lists their
         sites under `personal_tabs` with a `warning`: show it to the user. A `warning` also says when that Chrome was
         not running yet, so the tabs could not be checked. The run goes on regardless."""
@@ -1259,7 +1265,24 @@ class Toolbox:
             tabs or [], self.settings.apply.blocked_origins, [e.url for e in inputs.jobs.jobs]
         )
         personal = [inputs.redactor.mask(origin) for origin in found]
+        visit, skipped = [], []
+        for entry in inputs.jobs.jobs:
+            rec_id = form_fill_recording.recording_id(entry.url)
+            needed, last = form_fill_recording.needs_visit(form_fill.recordings_root(ctx) / rec_id, entry.revisit)
+            if needed:
+                visit.append(entry)
+            else:
+                skipped.append(
+                    {
+                        "job_id": entry.id,
+                        "recording_id": rec_id,
+                        "last_run": last.get("run"),
+                        "last_conclusion": last.get("conclusion"),
+                    }
+                )
         report = form_fill.begin_feasibility(ctx, list_path, inputs.jobs, personal, checked=tabs is not None)
+        (ctx.run_dir / form_fill_report.SKIPPED_FILE).write_text(json.dumps(skipped, ensure_ascii=False), "utf-8")
+        skipped_ids = {item["job_id"] for item in skipped}
         run = {
             "run_id": run_id,
             "status": "running",
@@ -1268,8 +1291,18 @@ class Toolbox:
             "feasibility": str(report),
             "personal_tabs": personal,
             "personal_tabs_checked": tabs is not None,
+            "summary": None,
+            "skipped": skipped,
             "jobs": [
-                {"n": n, "job_id": e.id, "company": e.company, "title": e.title, "state": "queued", "outcome": None}
+                {
+                    "n": n,
+                    "job_id": e.id,
+                    "company": e.company,
+                    "title": e.title,
+                    "state": "skipped" if e.id in skipped_ids else "queued",
+                    "outcome": None,
+                    "recording_id": form_fill_recording.recording_id(e.url),
+                }
                 for n, e in enumerate(inputs.jobs.jobs, start=1)
             ],
         }
@@ -1278,10 +1311,13 @@ class Toolbox:
         def work():
             try:
                 for item, entry in zip(run["jobs"], inputs.jobs.jobs, strict=True):
+                    if item["state"] == "skipped":
+                        continue
                     item["state"] = "running"
                     item["outcome"] = form_fill.run_job(entry, ctx)
                     item["state"] = "done"
                 form_fill.finish_feasibility(ctx)
+                run["summary"] = str(form_fill_report.run_report(run_id, self.data_dir, self.settings))
                 run["status"] = "done"
             except Exception as error:  # run_job reports per-job failures itself; this is a broken run
                 run["error"] = ctx.redactor.mask(f"{type(error).__name__}: {error}")[:300]
@@ -1297,6 +1333,7 @@ class Toolbox:
             "jobs": len(run["jobs"]),
             "feasibility": run["feasibility"],
             "personal_tabs": personal,
+            "skipped": skipped,
         }
         if personal:
             result["warning"] = form_fill.PERSONAL_TABS_WARNING.format(tabs="、".join(personal))
@@ -1308,8 +1345,9 @@ class Toolbox:
     def form_fill_status(self) -> dict:
         """Progress of the current or last form-fill run (it never submits): per job the state, the status (filled,
         gate, tab_lost, readback_failed, system_error), the filling agent's own result, how many fields were read
-        back, the saved page folder, the automatic checks and the notes (contact details masked), and the path of
-        feasibility.md."""
+        back, the saved page folder, the recording id, the automatic checks and the notes (contact details masked);
+        the jobs not visited because they were recorded before (`skipped`), and the paths of feasibility.md and,
+        once the run is done, summary.md."""
         run = self._form_fill_run
         if run is None:
             return {"status": "idle"}
@@ -1329,6 +1367,7 @@ class Toolbox:
                     "page_dir": outcome.page_dir if outcome else None,
                     "checks": dict(outcome.checks) if outcome else {},
                     "notes": list(outcome.notes) if outcome else [],
+                    "recording_id": item.get("recording_id"),
                 }
             )
         return {
@@ -1339,6 +1378,8 @@ class Toolbox:
             "feasibility": run["feasibility"],
             "personal_tabs": run.get("personal_tabs", []),
             "personal_tabs_checked": run.get("personal_tabs_checked", True),
+            "summary": run.get("summary"),
+            "skipped": run.get("skipped", []),
             "jobs": jobs,
         }
 

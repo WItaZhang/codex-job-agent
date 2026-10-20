@@ -34,6 +34,7 @@ class ListEntry(_Model):
     resume: str
     cover_letter: str
     revisit: bool = False
+    ignore_filled_on_page: int | None = Field(default=None, ge=1, strict=True)  # feasibility check 8 only (6.1)
 
 
 class JobList(_Model):
@@ -73,8 +74,10 @@ class ChecklistItem(_Model):
 
 
 class ReadField(_Model):
-    """One value read back from the final page. `origin` is a form control or a question/value pair shown as text
-    (a review page). `id` is p<page>.<n> in page order; slice 1 reads one page, so it is always p1."""
+    """One value read back from a page. `origin` is a form control or a question/value pair shown as text (a review
+    page). `id` is p<page>.<n>: slice 1 numbers the final page in page order; the recorder (slice 2a) keeps each
+    field's number for good (spec 4.3). `section` is the nearest heading above the field and `occurrence` counts the
+    same question in the same section; `appeared_after` names the field just above one that appeared later."""
 
     id: str
     question: str
@@ -83,6 +86,9 @@ class ReadField(_Model):
     value: str
     options: tuple[str, ...] = ()
     required: bool = False
+    section: str = ""
+    occurrence: int = 1
+    appeared_after: str | None = None
 
 
 class PageState(_Model):
@@ -99,6 +105,12 @@ class PageState(_Model):
 
 Result = Literal["correct", "wrong", "no_answer", "ambiguous", "not_reviewed", "unreadable"]
 Severity = Literal["fact", "guess", "missing", "format", "none"]
+# Where a page's values come from (spec 4.3): its last checkpoint("filled"), the background read before the page was
+# left, the read after the filling agent quit (the page it ended on), or nothing at all.
+ReadFrom = Literal["filled", "auto", "final", "unrecorded"]
+# Slice 2a's sources (spec 5.3): page prefill told by code, no blank read to tell it from, or not declared (the
+# filling agent's declarations come with slice 2c).
+Source = Literal["prefilled", "unrecorded", "undeclared"]
 
 
 class CheckResult(_Model):
@@ -115,6 +127,19 @@ class CheckResult(_Model):
     note: str = ""
     segment: int | None = None  # the education or work segment the field belongs to, in page order
     candidates: tuple[str, ...] = ()  # the entries an ambiguous field matched
+    page: int | None = None
+    read_from: ReadFrom | None = None
+    read_at: str = ""
+    source: Source | None = None
+
+
+class PageInfo(_Model):
+    """One page of a recorded run, as the report lists it."""
+
+    page: int
+    title: str = ""
+    read_from: ReadFrom
+    read_at: str = ""
 
 
 Conclusion = Literal[
@@ -137,3 +162,5 @@ class JobReport(_Model):
     todo: tuple[str, ...] = ()
     page_dir: str | None = None
     notes: tuple[str, ...] = ()
+    recording_id: str | None = None
+    pages: tuple[PageInfo, ...] = ()

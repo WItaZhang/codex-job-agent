@@ -207,9 +207,10 @@ def build_prompt(spec: ApplySpec, data_dir: Path, settings: Settings, profile: P
     return localize(base, spec.onsite_ok, spec.relocation) + extra_rules(spec.mode, read_dirs)
 
 
-def mcp_config(settings: Settings, cdp_port: int, gmail: bool = True) -> dict:
+def mcp_config(settings: Settings, cdp_port: int, gmail: bool = True, extra_servers: dict | None = None) -> dict:
     """ApplyPilot's MCP servers at pinned versions, with the browser kept off the configured high-risk sites.
-    `gmail=False` leaves the Gmail server out (the form-fill module, specs/form-fill.md 5.6)."""
+    `gmail=False` leaves the Gmail server out and `extra_servers` adds the form-fill module's own (its checkpoint
+    service, specs/form-fill.md 4.2, 5.6)."""
     from .vendor.applypilot import config
 
     servers = {
@@ -226,17 +227,23 @@ def mcp_config(settings: Settings, cdp_port: int, gmail: bool = True) -> dict:
     }
     if gmail:
         servers["gmail"] = {"command": "npx", "args": ["-y", settings.apply.mcp.gmail]}
+    servers.update(extra_servers or {})
     return {"mcpServers": servers}
 
 
 def claude_command(
-    settings: Settings, mcp_config_path: Path, read_dirs=(), denied=(), extra_disallowed: tuple = ()
+    settings: Settings,
+    mcp_config_path: Path,
+    read_dirs=(),
+    denied=(),
+    extra_disallowed: tuple = (),
+    extra_allowed: tuple = (),
 ) -> list[str]:
     """ApplyPilot's headless Claude Code call, with an allowlist instead of skipping permission checks, and
     without the user's own MCP servers. No built-in tools, unless the user listed folders to read: then only the
     read-only file tools, in restricted mode (file tools confined to those folders, no code-running tools, no
     user or project settings), with the `denied` paths refused even inside them. `extra_disallowed` is added to
-    the refused tools (the form-fill module's own list)."""
+    the refused tools and `extra_allowed` to the allowed ones (the form-fill module's own lists)."""
     files: list[str] = []
     tools = settings.apply.builtin_tools
     if read_dirs:
@@ -259,7 +266,7 @@ def claude_command(
         "--tools",
         tools,
         "--allowedTools",
-        ",".join(settings.apply.allowed_tools),
+        ",".join([*settings.apply.allowed_tools, *extra_allowed]),
         "--disallowedTools",
         ",".join([*settings.apply.disallowed_tools, *extra_disallowed]),
         "--output-format",
@@ -443,17 +450,20 @@ def run_application(
     extra_prompt: str = "",
     gmail: bool = True,
     extra_disallowed: tuple = (),
+    extra_servers: dict | None = None,
+    extra_allowed: tuple = (),
 ) -> ApplyOutcome:
-    """One headless run. The keyword options are the form-fill module's (specs/form-fill.plan.md section 1): its
-    own log file, each log line passed through `mask` before it is written, text added after the prompt, no
-    Gmail server (written to its own MCP config file, so /apply's stays as it is) and more refused tools.
-    Without them the run is /apply's, unchanged."""
+    """One headless run. The keyword options are the form-fill module's (specs/form-fill.plan.md section 1,
+    form-fill.slice2a.plan.md): its own log file, each log line passed through `mask` before it is written, text
+    added after the prompt, no Gmail server (written to its own MCP config file, so /apply's stays as it is), more
+    refused tools, its own servers (the checkpoint service) and their allowed tools. Without them the run is
+    /apply's, unchanged."""
     from .vendor.applypilot import config
 
     data_dir, profile = Path(data_dir).resolve(), Path(profile).resolve()
     text = build_prompt(spec, data_dir, settings, profile, read_dirs) + extra_prompt
     mcp_path = config.APP_DIR / (".mcp-apply-0.json" if gmail else ".mcp-form-fill-0.json")
-    mcp_path.write_text(json.dumps(mcp_config(settings, port, gmail=gmail)), encoding="utf-8")
+    mcp_path.write_text(json.dumps(mcp_config(settings, port, gmail=gmail, extra_servers=extra_servers)), "utf-8")
     if log_path is None:
         logs = Path(data_dir) / settings.apply.logs_dir
         logs.mkdir(parents=True, exist_ok=True)
@@ -468,7 +478,12 @@ def run_application(
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
     proc = subprocess.Popen(
         claude_command(
-            settings, mcp_path, read_dirs, denied=[Path(data_dir), profile], extra_disallowed=extra_disallowed
+            settings,
+            mcp_path,
+            read_dirs,
+            denied=[Path(data_dir), profile],
+            extra_disallowed=extra_disallowed,
+            extra_allowed=extra_allowed,
         ),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,

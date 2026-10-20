@@ -350,3 +350,79 @@ def test_the_report_knows_the_jobs_company(tmp_path):
     )
     rows = page([("How did you hear about us?", "Acme Careers Website", "select")])
     assert job_report(meta(company="Acme"), rows, answers).fields[0].result == "correct"
+
+
+# --- the merge review of 2026-10-20 (decision 32) ----------------------------------------------------------------
+
+
+def _pages(tmp_path):
+    from intent_job_agent.form_fill.recording import PageRead
+
+    answers = load(
+        tmp_path,
+        {
+            "education.ms": {
+                "kind": "record",
+                "school": "Example State University",
+                "degree": "Master of Science",
+                "major": "Data Science",
+                "start": "2025-08",
+                "end": "2027-05",
+            },
+            "experience.acme": {
+                "kind": "record",
+                "company": "Acme Synthetic",
+                "title": "Intern",
+                "start": "2024-06",
+                "end": "2024-08",
+            },
+        },
+    )
+    education = page(
+        [
+            ("School", "Example State University", "text"),
+            ("Degree", "Master of Science", "text"),
+            ("School", "Fake Synthetic College", "text"),
+            ("Degree", "Bachelor of Arts", "text"),
+        ]
+    )
+    work = tuple(
+        f.model_copy(update={"id": f.id.replace("p1.", "p2.")})
+        for f in page(
+            [
+                ("Company", "Acme Synthetic", "text"),
+                ("Job Title", "Intern", "text"),
+                ("Company", "Fake Synthetic Corp", "text"),
+                ("Job Title", "Research Assistant", "text"),
+            ]
+        )
+    )
+    pages = [PageRead(1, "Education", "filled", "", education, {}), PageRead(2, "Work", "filled", "", work, {})]
+    return pages, answers
+
+
+def test_extra_segments_on_two_pages_are_both_listed(tmp_path):
+    """Review #6: segment numbers are per page; the report keeps the two pages' segments apart."""
+    pages, answers = _pages(tmp_path)
+    report = job_report(meta(), (), answers, pages=pages)
+    text = "\n".join(report.todo)
+    assert "Fake Synthetic College" in text and "Fake Synthetic Corp" in text
+    assert report.todo[0].startswith("不能提交：2 个错的事实")
+
+
+def test_a_received_page_seen_while_recording_makes_it_maybe_submitted():
+    """Review #10."""
+    assert conclude(meta(received_seen="Your application was sent"), [result()]) == ("maybe_submitted", None)
+
+
+def test_fields_without_a_recorded_source_are_listed_for_the_user(tmp_path):
+    """Review #29, #30."""
+    from intent_job_agent.form_fill.recording import PageRead
+
+    answers = load(tmp_path, {"work_auth.us": {"answer": "Yes", "kind": "yes_no", "asks": ["authorized to work"]}})
+    fields = page([("Are you authorized to work in the US?", "Yes", "text")])
+    report = job_report(
+        meta(), (), answers, pages=[PageRead(1, "Questions", "filled", "", fields, {"p1.1": "unrecorded"})]
+    )
+    assert report.conclusion == "check_then_submit"
+    assert any("来源未录到" in item and "p1.1" in item for item in report.todo[1:])
