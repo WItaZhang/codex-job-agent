@@ -92,7 +92,7 @@ class FormFillFake:
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text("".join(options["mask"](line + "\n") for line in lines), encoding="utf-8")
         if outcome.status != "pending" and spec.job_id not in self.no_tab:  # a run that never started opened no tab
-            self.tabs.append({"id": f"N-{spec.job_id}", "type": "page", "url": url})
+            self.tabs.append({"id": f"N{len(self.fills)}-{spec.job_id}", "type": "page", "url": url})  # a new id
         notes, sites, emails = list(outcome.notes), list(outcome.other_sites), list(outcome.emails)
         return apply_bridge.ApplyOutcome(outcome.status, outcome.reason, notes, sites, emails, str(log))
 
@@ -101,4 +101,4 @@ class FormFillFake:
         out_dir.mkdir(parents=True, exist_ok=True)
         dumped = [field.model_dump(mode="json") for field in self.fields]
         (out_dir / "readback.json").write_text(json.dumps(redactor.mask_json(dumped)), encoding="utf-8")
-        return readback.FinalPage(self.fields, self.states.get(target["id"].removeprefix("N-"), self.state))
+        return readback.FinalPage(self.fields, self.states.get(target["id"].split("-", 1)[1], self.state))
