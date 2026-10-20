@@ -515,9 +515,10 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - 子 agent 打完整标签时用同一条规则（第 35 条）。规则加入之前已经打好标签的岗位不自动改：只读列出受影响的岗位，由用户逐个决定是否用 `correct_tags` 修正。
     - **地点的写法**（2026-10-18 用户选择，起因是 Workday 各公司的写法不同，见第 19 条）：一条地点里可以有几个地方，用 `;`、`|`、`/`、`or` 隔开（" - " 不算隔开）。读之前先规整：各种破折号都当 "-"，带点的缩写去掉点（"D.C." 当 "DC"，"U.S." 当 "US"），连续的空白（包括不换行空格、制表符）当一个空格。每个地方去掉括号和表示 work_mode 的词（Remote、Hybrid、Work From Home、WFH、Remote-First、On-site、In Office 等，和读 work_mode 用的是同一组词；只按整词去掉，词和词之间是空格还是连字符都一样）。两边至少有一边是空格的 "-" 是分段的破折号，词里面的连字符（"Winston-Salem"）不算；去掉词后留下的空段不算一段（"United States - Remote -Texas"、"USA - Remote-CA" 按 "United States - Texas"、"USA - CA" 读）。然后认下面几种写法：
       - 城市在前："San Francisco, CA"、"Seattle, WA, United States"、"London, UK"；
-      - 国家在前："US, CA, Santa Clara"、"India, Bengaluru"、"United States of America, McLean, Virginia"。三段的只认美国和加拿大：州或省占一段，另一段是城市。两段都能当州或省时，一段是缩写、另一段是全名的，缩写是州或省，全名是城市（"US, NY, New York"、"USA, New York, NY" 都读成 `us.new_york`）；两段都是全名或都是缩写的算认不出（"United States of America, Washington, District of Columbia"）；
-      - 地区 - 城市："California - Palo Alto"、"Israel - Tel Aviv"，地区是国家、美国的州或加拿大的省。地区是州或省时，后一段总是城市，和州同名的也一样（"New York - New York" 读成 `us.new_york`）；只有地区是国家、后一段是它的州或省时（"USA - California"），才读成国家；
-      - 只写国家，或者国家加州、省（"US, CA"、"Remote - US"），读成国家。
+      - 国家在前："US, CA, Santa Clara"、"India, Bengaluru"、"United States of America, McLean, Virginia"。三段的只认美国和加拿大：后两段里一段是州或省，另一段按下面的"城市位置"读；两种分法都读不通，或者读出不同的城市时，算认不出；
+      - 地区 - 城市："California - Palo Alto"、"Israel - Tel Aviv"，地区是国家、美国的州或加拿大的省；地区是国家、后一段是它的州或省时（"USA - California"）读成国家；
+      - 只写国家，或者国家加州、省（"US, CA"、"US, New York"、"Remote - US"），读成国家。
+      - **城市位置**，所有写法用同一条规则，宁可没把握，不能有把握地读错：站在城市位置上的一段，是州或省（全名、缩写或带点的缩写）、国家、两个字母以内或带数字的、或者不是地名的词，都不当城市，整个 location 算没把握。例外是和州或省同名的知名城市（New York、Washington、Quebec，名单写在代码里）：旁边一段正是它所在的州或省时当城市。"New York, NY"、"New York - New York"、"US, NY, New York"、"USA, New York, NY"、"Washington, D.C."、"District of Columbia - Washington" 读成 `us.new_york` 或 `us.washington`；"New York - NY"、"NY, New York"、"US, GA, Georgia"、"US, WA, Washington"、"California, CA"、"Washington - Washington" 算认不出。
       - 认不出的地方（只写城市的 "San Jose"、地址代码 "US FL JAX 347"、"USA.VA.Reston"、不是地点的词，包括站在城市位置上的 "Virtual"、"Nationwide"、"Multiple Locations" 这类词，名单写在代码里）让整个 location 维度算没把握，交给子 agent。几个地方用 " - " 连在一起的（"San Francisco, CA - New York, NY"）也算认不出，不能只读出其中一个。国家名单写在代码里，比原来多收一些常见国家。
       - 从地点读 work_mode 时，一条地点里有几个地方的，只有每个地方都写了同一种（例如都写 Remote）才读出；只有一部分写了 Remote、Hybrid 这类词时，work_mode 算没把握，交给子 agent（2026-10-18 用户确认）。`workplace_type`、`is_remote` 字段照旧优先。
 32. **硬约束预筛**只看有把握的维度：命中 exclude，或某个有 require 的维度在有把握读出的标签里一个都不满足，就先放一边。没把握的维度一律放行。预筛不写库，每次按当前意图重新计算，所以意图改了，被放一边的岗位会回来。

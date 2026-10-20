@@ -85,7 +85,7 @@ def test_after_a_state_the_city_is_read_even_when_a_state_has_its_name(location,
 @pytest.mark.parametrize(
     ("location", "tags"),
     [
-        ("United States of America, Washington, District of Columbia", set()),  # two full names: either is the state
+        ("United States of America, Washington, District of Columbia", {"location.us.washington"}),  # beside DC
         ("US, NY, CA", set()),  # two codes: no city
         ("US, NY, New York", {"location.us.new_york"}),  # a code beside a full name: the code is the state
         ("USA, New York, NY", {"location.us.new_york"}),

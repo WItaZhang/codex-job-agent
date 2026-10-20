@@ -83,7 +83,7 @@
 | A9 | Massachusetts - Cambridge; Digital | 认不出（Digital 不是地点，整个 location 没把握） |
 | A10 | San Francisco, CA - New York, NY | 认不出 |
 
-## 决定 5（2026-10-20）：州 - 城市，城市和州同名时也读成城市
+## 决定 5（2026-10-20）：州 - 城市，城市和州同名时也读成城市（已被决定 10 取代）
 
 - 合并前审查（进度会话，4 个视角分头找、每条 3 个 agent 试着反驳，3 票成立）发现："New York - New York" 读成 `location.us`，"District of Columbia - Washington" 也只读出 `location.us`，还算有把握。意图有 `require location.us.new_york` 时，这种岗位在打标签前就被放到一边；刷新地点时，子 agent 原来打的 `us.new_york` 也会被换成 `us`。
 - 原因：后一段是州名就只读国家，这条不管前一段是国家还是州都生效了。
@@ -91,7 +91,7 @@
 
 **规则写在** `spec.md` §10 第 31 条。
 
-## 决定 6（2026-10-20）：国家在前的三段写法，两段都能当州时只认"缩写加全名"
+## 决定 6（2026-10-20）：国家在前的三段写法，两段都能当州时只认"缩写加全名"（已被决定 10 取代）
 
 - 合并前审查发现（3 票成立）："United States of America, Washington, District of Columbia" 读成 `us.district_of_columbia`，"USA, New York, NY" 读成 `us.ny`，"US, Washington, DC" 读成 `us.dc`，都算有把握。原因：代码只看第二段是不是州，是就把第三段当城市。
 - 审查建议：两段都能当州时一律算没把握，交给子 agent。
@@ -130,5 +130,22 @@
   - work_mode 词的词和词之间是空格还是连字符都算（work-from-home、in-office），Remote-First 也算 remote。
   - 两边至少一边有空格的 "-" 是分段的破折号；去掉词后留下的空段一律丢掉。决定 8 的规则照旧，只是不再要求破折号两边都有空格。
   - 测试改成组合矩阵（`tests/test_location_matrix.py`）：每种写法乘上空白、破折号和 work_mode 词的变体。
+
+**规则写在** `spec.md` §10 第 31 条。
+
+## 决定 10（2026-10-20）：城市位置用同一条守门规则，所有写法都一样（取代决定 5、6）
+
+- 复核发现（每条 1 个 agent 重跑证据再试相近写法，新问题各由 3 个 agent 试着反驳），决定 5、6 只修好了原来的证据：
+  - 决定 5 带进新问题：州后面跟它自己的缩写，缩写被读成城市（"New York - NY" 读成 `us.ny`，"Ontario - ON" 读成 `canada.on`）。刷新地点时，子 agent 原来打对的 `us.new_york` 会被换成 `us.ny`。
+  - 决定 6 的理由（缩写只可能是州）没考虑到全名多半也是州："US, GA, Georgia" 读成 `us.georgia`，"Canada, BC, British Columbia" 读成 `canada.british_columbia`。
+  - 城市在前的写法是同一类错："NY, New York" 读成 `us.ny`，"California, CA" 读成 `us.california`，"District of Columbia, Washington, United States" 读成 `us.district_of_columbia`。
+- 定下的（按用户 2026-10-19 授权全部按推荐项，即复核的推荐修法 (c)）：
+  - **一条守门规则用在所有写法的城市位置上**：是州或省（全名、缩写、带点的缩写）、国家、两个字母以内或带数字的、或者不是地名的词，就不当城市。
+  - **读不成城市时算没把握，不退到国家**（复核让本会话在两者里选，按"宁可没把握，不能有把握地读错"选了这个）。退到国家看起来没错，但 location 会算有把握：意图有 `require location.us.new_york` 时，预筛会在打标签前把 "New York - NY" 放到一边；刷新地点时也会把子 agent 打的城市标签换成只有国家。
+  - **和州或省同名的知名城市用一份短名单作例外**：New York（纽约州）、Washington（DC）、Quebec（魁北克省），只在旁边一段正是它所在的州或省时当城市。这样 "New York, NY"、"US, NY, New York"、"USA, New York, NY"、"Washington, D.C." 这类常见写法仍读得出；"US, WA, Washington"（华盛顿州的 Washington 不是这个城市）算没把握。
+  - 这条比决定 5 窄：州后面跟一个和州同名、又不在名单里的词（"Georgia - Georgia"、"California - Washington"），现在算没把握。
+  - 国家在前的三段写法，两种分法（第二段是州或第三段是州）都试，只有一种读得通、或者两种读出同一个城市时才算读出。"United States of America, Washington, District of Columbia" 因此读成 `us.washington`（决定 6 原来让它算没把握）。
+  - 加拿大三段城市在前的写法（"Toronto, ON, Canada"），中间一段现在也必须是省，和美国一样。
+- 测试是组合矩阵：每种写法 × 州写成全名、缩写、带点缩写 × 城市位置上是本州的城市、本州缩写、本州全名、别的州 × 美国和加拿大的各种国家名。
 
 **规则写在** `spec.md` §10 第 31 条。

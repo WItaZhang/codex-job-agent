@@ -89,3 +89,86 @@ def test_a_work_mode_word_beside_a_country_or_a_city_is_taken_out():
         ]
     cases.append(("India, Work From Home", ({"location.india", "work_mode.remote"}, BOTH)))
     assert not wrong(cases)
+
+
+# --- the city position: one rule in every format ----------------------------------------------------
+
+# (country, state name, code, a city of that state)
+STATE_CITIES = [
+    ("us", "California", "CA", "Santa Clara"),
+    ("us", "Texas", "TX", "Austin"),
+    ("us", "Georgia", "GA", "Atlanta"),
+    ("us", "Washington", "WA", "Seattle"),
+    ("us", "Virginia", "VA", "McLean"),
+    ("canada", "Ontario", "ON", "Toronto"),
+    ("canada", "British Columbia", "BC", "Vancouver"),
+]
+# Well-known cities named like a state or province, read as the city only beside that state or province.
+NAMED_LIKE_A_STATE = [
+    ("us", "New York", "NY", "New York"),
+    ("us", "District of Columbia", "DC", "Washington"),
+    ("canada", "Quebec", "QC", "Quebec"),
+]
+NAMES = {"us": ("US", "USA", "United States", "United States of America"), "canada": ("Canada",)}
+FORMATS = {
+    "state - city": "{s} - {c}",
+    "country, state, city": "{k}, {s}, {c}",
+    "country, city, state": "{k}, {c}, {s}",
+    "city, state": "{c}, {s}",  # US only, as before
+    "city, state, country": "{c}, {s}, {k}",
+}
+
+
+def forms(name: str, code: str) -> tuple[str, ...]:
+    """A state as its name, its code and its code with dots."""
+    return name, code, ".".join(code) + "."
+
+
+def matrix(rows, city_of, expected) -> list[tuple[str, tuple]]:
+    """Every format x every country name x every form of the state, with `city_of(row)` in the city position;
+    `expected(row, format, form)` where form 0, 1, 2 is the state written as its name, code, dotted code."""
+    cases = []
+    for row, (fmt, text), state in itertools.product(rows, FORMATS.items(), range(3)):
+        country, name, code, _ = row
+        if fmt == "city, state" and country != "us":
+            continue
+        for k in NAMES[country]:
+            location = text.format(k=k, s=forms(name, code)[state], c=city_of(row))
+            cases.append((location, expected(row, fmt, state)))
+    return cases
+
+
+def test_a_city_of_the_state_is_read_in_every_format():
+    cases = matrix(STATE_CITIES, lambda r: r[3], lambda r, *_: city(r[0], r[3].casefold().replace(" ", "_")))
+    assert not wrong(cases)
+
+
+def test_a_state_or_province_in_the_city_position_is_not_read_as_a_city():
+    for written in (lambda r: r[1], lambda r: r[2], lambda r: ".".join(r[2]) + "."):  # its name, code, dotted code
+        assert not wrong(matrix(STATE_CITIES, written, lambda *_: UNSURE))
+    other = {"California": "Texas", "Texas": "California"}  # another state's name or code
+    rows = [row for row in STATE_CITIES if row[1] in other]
+    assert not wrong(matrix(rows, lambda r: other[r[1]], lambda *_: UNSURE))
+    assert not wrong(matrix(rows, lambda r: {"Texas": "TX", "California": "CA"}[other[r[1]]], lambda *_: UNSURE))
+
+
+def test_a_city_named_like_its_state_is_read_beside_that_state_only():
+    named = lambda r, *_: city(r[0], r[3].casefold().replace(" ", "_"))  # noqa: E731
+    assert not wrong(matrix(NAMED_LIKE_A_STATE, lambda r: r[3], named))
+
+    # The state's code in the city position and its name, also the city's, in the state position: country first,
+    # either part can be the state, so the name is the city ("US, New York, NY"); other formats keep their order.
+    def swapped(r, fmt, form):
+        return named(r) if fmt.startswith("country,") and form == 0 and r[1] == r[3] else UNSURE
+
+    assert not wrong(matrix(NAMED_LIKE_A_STATE, lambda r: r[2], swapped))
+    elsewhere = [  # beside another state, or where no state stands
+        ("Washington - Washington", UNSURE),
+        ("US, WA, Washington", UNSURE),
+        ("Washington, WA", UNSURE),
+        ("California - New York", UNSURE),
+        ("District of Columbia, Washington, United States", UNSURE),
+        ("US, New York", ({"location.us"}, LOCATION)),  # a country and its state
+        ("USA - Washington", ({"location.us"}, LOCATION)),
+    ]
+    assert not wrong(elsewhere)

@@ -21,18 +21,19 @@ _US_STATES = {
     "tn": "tennessee", "tx": "texas", "ut": "utah", "vt": "vermont", "va": "virginia", "wa": "washington",
     "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming",
 }  # fmt: skip
-_STATE_NAMES = set(_US_STATES.values())
 _CA_PROVINCES = {
     "ab": "alberta", "bc": "british columbia", "mb": "manitoba", "nb": "new brunswick",
     "nl": "newfoundland and labrador", "ns": "nova scotia", "nt": "northwest territories", "nu": "nunavut",
     "on": "ontario", "pe": "prince edward island", "qc": "quebec", "sk": "saskatchewan", "yt": "yukon",
 }  # fmt: skip
-# The states or provinces a place may name besides its city (spec §10 item 31: only the US and Canada).
-_REGIONS = {
-    "us": set(_US_STATES) | _STATE_NAMES,
-    "canada": set(_CA_PROVINCES) | set(_CA_PROVINCES.values()),
+# The states or provinces a place may name besides its city (spec §10 item 31: only the US and Canada): code -> name.
+_REGION_CODES = {"us": _US_STATES, "canada": _CA_PROVINCES}
+# Well-known cities named like a state or province: read as the city only beside that state or province.
+_NAMED_LIKE_REGION = {
+    ("us", "new york", "new york"),
+    ("us", "district of columbia", "washington"),
+    ("canada", "quebec", "quebec"),
 }
-_REGION_CODES = {"us": set(_US_STATES), "canada": set(_CA_PROVINCES)}
 _COUNTRIES = {
     "us": "us", "usa": "us", "u.s.": "us", "u.s.a.": "us", "united states": "us",
     "united states of america": "us", "america": "us",
@@ -110,34 +111,40 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.casefold()).strip("_")
 
 
-def _ref(country: str, city: str) -> str | None:
-    """A city-level ref; None for what is no city name (empty, an address code with digits, a country, a word
-    such as "Nationwide")."""
-    slug, low = _slug(city), " ".join(city.casefold().split())
-    if not slug or any(c.isdigit() for c in city) or low in _COUNTRIES or low in _NOT_PLACES:
+def _region(country: str | None, text: str) -> str | None:
+    """The full name of the state or province `text` names in `country` ("NY" or "New York" -> "new york")."""
+    low, codes = text.casefold(), _REGION_CODES.get(country or "", {})
+    return codes.get(low) or (low if low in codes.values() else None)
+
+
+def _city(country: str, text: str, region: str | None = None) -> str | None:
+    """The city position, the same rule in every format (spec §10 item 31): a city-level ref, or None when what
+    stands there names no city: a code (two letters or fewer, or with digits), a country, a state or province (a
+    well-known city named like one counts beside that state only, "New York, NY"), or a word such as "Nationwide"."""
+    slug, low = _slug(text), " ".join(text.casefold().split())
+    if len(slug.replace("_", "")) <= 2 or any(c.isdigit() for c in text) or low in _COUNTRIES or low in _NOT_PLACES:
+        return None
+    if (
+        any(_region(c, low) for c in _REGION_CODES)
+        and (country, _region(country, region or ""), low) not in _NAMED_LIKE_REGION
+    ):
         return None
     return f"location.{country}.{slug}"
 
 
-def _is_region(country: str | None, text: str) -> bool:
-    return text in _REGIONS.get(country or "", ())
-
-
 def _region_city(part: str) -> str | None:
     """ "California - Palo Alto", "Israel - Tel Aviv": a country, US state or Canadian province, then the city."""
-    pieces = [p.strip(" ,") for p in part.split(" - ") if p.strip(" ,")]
+    pieces = part.split(" - ")
     if len(pieces) != 2 or any("," in p for p in pieces):  # "San Francisco, CA - New York, NY" is not read
         return None
-    region, city = (p.casefold() for p in pieces)
-    country = _COUNTRIES.get(region)
-    if country:
-        if _is_region(country, city) or _COUNTRIES.get(city) == country:  # "USA - California": the country only
+    region, city = pieces
+    country = _COUNTRIES.get(region.casefold())
+    if country:  # "USA - California": a country and its state name no city
+        if _region(country, city) or _COUNTRIES.get(city.casefold()) == country:
             return f"location.{country}"
-    else:  # after a state or province comes the city, even one named like a state ("New York - New York")
-        country = next((c for c in _REGIONS if _is_region(c, region)), None)
-        if country is None:
-            return None
-    return _ref(country, pieces[1])
+        return _city(country, city)
+    country = next((c for c in _REGION_CODES if _region(c, region)), None)
+    return _city(country, city, region) if country else None
 
 
 def _place(part: str) -> str | None:
@@ -153,26 +160,23 @@ def _place(part: str) -> str | None:
     if head and tail and head != tail:  # two countries in one place
         return None
     if len(low) == 2:
-        if head and (_is_region(head, low[1]) or tail == head):  # "US, CA": the country only
+        if head and (_region(head, tokens[1]) or tail == head):  # "US, CA": the country only
             return f"location.{head}"
-        if _is_region("us", low[1]):  # "New York, NY": the first part is the city
-            return _ref("us", tokens[0])
+        if _region("us", tokens[1]):  # "Austin, TX": the first part is the city
+            return _city("us", tokens[0], tokens[1])
         if tail:  # "London, UK"; "Texas, United States" names a region, not a city
-            return f"location.{tail}" if _is_region(tail, low[0]) else _ref(tail, tokens[0])
-        return _ref(head, tokens[1]) if head else None  # "India, Bengaluru"
+            return f"location.{tail}" if _region(tail, tokens[0]) else _city(tail, tokens[0])
+        return _city(head, tokens[1]) if head else None  # "India, Bengaluru"
     if len(low) == 3:
         if tail:  # "Seattle, WA, United States"
-            return _ref(tail, tokens[0]) if tail != "us" or _is_region("us", low[1]) else None
-        if head in _REGIONS:  # "US, CA, Santa Clara"; "United States of America, McLean, Virginia"
-            regions = [_is_region(head, t) for t in low[1:]]
-            if all(regions):  # either could be the state: only a code beside a full name tells ("US, NY, New York")
-                regions = [t in _REGION_CODES[head] for t in low[1:]]
-                if all(regions) or not any(regions):
-                    return None
-            if regions[0]:
-                return _ref(head, tokens[2])
-            if regions[1]:
-                return _ref(head, tokens[1])
+            region = tokens[1] if _region(tail, tokens[1]) else None
+            if region is None and tail in _REGION_CODES:
+                return None
+            return _city(tail, tokens[0], region)
+        if head in _REGION_CODES:  # "US, CA, Santa Clara"; "United States of America, McLean, Virginia"
+            pairs = ((tokens[1], tokens[2]), (tokens[2], tokens[1]))  # either part may be the state
+            readings = {_city(head, city, region) for region, city in pairs if _region(head, region)} - {None}
+            return readings.pop() if len(readings) == 1 else None
     return None
 
 
