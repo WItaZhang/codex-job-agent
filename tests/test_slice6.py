@@ -798,6 +798,32 @@ def test_a_crashed_review_step_voids_the_batch_too(box):
     assert status["status"] == "failed" and status["next"] is None and status["void"] is True
 
 
+def test_each_step_is_logged_with_the_jobs_it_starts(box):
+    write_applicant(box.data_dir)
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    batch = box.prepare_apply_batch(DAY)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
+    steps = [json.loads(d["payload"]) for d in box.store.decisions() if d["kind"] == "apply"]
+    assert [(s["batch_id"], s["phase"]) for s in steps] == [(batch["batch_id"], "review"), (batch["batch_id"], "rest")]
+    assert steps[0]["job_ids"] == jobs[:5] and steps[1]["job_ids"] == jobs[5:]
+    assert all(s["approved_via"] for s in steps)
+
+
+def test_a_rest_step_without_any_success_does_not_void_the_batch(box):
+    write_applicant(box.data_dir)
+    jobs = add_jobs(box, COMPANIES[:7])
+    write_letters(box, jobs)
+    box.apply_runner = FakeRunner({job: ("failed", "captcha", []) for job in jobs[5:]})
+    batch = box.prepare_apply_batch(DAY)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
+    status = box.apply_status()
+    assert status["status"] == "done" and status["void"] is False and status["next"] is None
+    assert {box.store.applications()[j]["status"] for j in jobs[5:]} == {"failed"}
+
+
 # --- where on-site work is fine, and relocation (spec section 10 items 69 and 70) ----------------------------
 
 RELOCATE = "Yes, I am willing to relocate anywhere in the United States."
