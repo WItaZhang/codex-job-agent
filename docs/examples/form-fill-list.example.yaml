@@ -1,6 +1,8 @@
 # 示例，值都是编的：复制到 data/local/form-fill/lists/ 下，改成你要填的岗位（specs/form-fill.md 2.1）。
 # 有一条不对，整份清单都不运行：id 不能重复；url 必须是 https；resume 必须是 applicant.yaml 里的简历 id；
 # 求职信的 .txt 和同名 .pdf 都要存在。
+# 已经录制过、上次结论是"可以提交 / 检查后可提交 / 不能提交 / 可能已提交 / 不符合申请资格"，或者已下架、跳到了别的
+# 岗位、只收邮件、已经申请过的岗位，这次不真实访问（4.1）；要再访问，写 revisit: true。
 jobs:
   - id: acme-ml-01                  # 清单内唯一；/apply 生成的清单用岗位编号
     url: https://job-boards.greenhouse.io/acme/jobs/1234567   # 申请页地址
@@ -15,3 +17,10 @@ jobs:
     resume: research
     cover_letter: none              # 不交求职信
     revisit: true                   # 已有录制也真实访问一次（见 4.1）；不写就是 false
+  - id: gamma-sci-03
+    url: https://gamma.wd1.myworkdayjobs.com/en-US/External/job/Austin-TX/Research-Scientist_R-0042
+    company: Gamma Labs
+    title: Research Scientist
+    resume: research
+    cover_letter: none
+    ignore_filled_on_page: 2        # 只用于可行性验证（6.1 第 8 项）：忽略第 2 页的 checkpoint("filled")，看补录接不接得上
