@@ -174,7 +174,7 @@ class FakeBrowser:
         )
         return apply_bridge.ApplyOutcome(status, reason, notes, [], [], str(log))
 
-    def read(self, target, out_dir, redactor):
+    def read(self, target, out_dir, redactor, sheet=None):
         self.reads.append(target)
         if self.fail.get(target["id"].removeprefix("N-")) == "read":
             raise ReadbackError("job tab not found in the browser")
@@ -644,7 +644,7 @@ def test_form_filling_waits_for_an_apply_step(ff):
 class NoScreenshotBrowser(FakeBrowser):
     """Reads the page but, like readback.read_final_page when the blackout fails, leaves the screenshot out."""
 
-    def read(self, target, out_dir, redactor):
+    def read(self, target, out_dir, redactor, sheet=None):
         final = super().read(target, out_dir, redactor)
         (out_dir / readback.SCREENSHOT_NOTE).write_text("截图未存：打码失败（子框架里有联系方式）", encoding="utf-8")
         return final
@@ -897,3 +897,74 @@ def test_the_final_read_goes_into_the_recording_after_the_checkpoints(ff):
     report = json.loads((run_dir(box, result) / "acme-ml-01.json").read_text(encoding="utf-8"))
     assert [(page["page"], page["read_from"]) for page in report["pages"]] == [(1, "filled"), (2, "final")]
     assert {row["field_id"] for row in report["fields"]} >= {"p1.1", "p2.1", "p2.4"}
+
+
+# --- the merge review of 2026-10-20 (decision 32) ----------------------------------------------------------------
+
+
+def test_two_entries_of_one_posting_are_refused(ff):
+    """Review #32: one posting, one recording, one real visit (spec 6.5)."""
+    box, path = ff
+    jobs = yaml.safe_load(open(path, encoding="utf-8"))["jobs"]
+    jobs[1]["url"] = jobs[0]["url"] + "?utm_source=linkedin"
+    write_list(box.data_dir / "form-fill" / "lists", jobs)
+    with pytest.raises(InvariantError, match="same posting"):
+        box.start_form_fill(path)
+    assert box.form_fill_runner.calls == []
+
+
+def test_the_service_gets_the_sheet_phrases_but_no_answer(ff):
+    box, path = ff
+    box.start_form_fill(path)
+    (_, options), _ = box.form_fill_runner.calls
+    config = json.loads(open(options["extra_servers"]["checkpoint"]["args"][-1], encoding="utf-8").read())
+    assert config["sheet"]["contact.email"]["from_profile"] == "personal.email"
+    assert "work_auth.authorized_us" in config["sheet"] and "answer" not in config["sheet"]["work_auth.authorized_us"]
+    assert "Yes" not in json.dumps(config["sheet"])
+
+
+def test_a_received_page_seen_while_recording_fails_the_submit_check(ff):
+    """Review #10: the final page may have moved on; a page recorded on the way said it was received."""
+    box, path = ff
+
+    class SentFake(FakeBrowser):
+        def fill(self, spec, **options):
+            outcome = super().fill(spec, **options)
+            config = json.loads(open(options["extra_servers"]["checkpoint"]["args"][-1], encoding="utf-8").read())
+            store = RecordingStore(recordings(box), config["rec_id"], config["run_id"], Redactor.from_profile(PROFILE))
+            store.note_received("Your application was sent", spec.url)
+            return outcome
+
+    box.form_fill_runner = SentFake()
+    result = box.start_form_fill(path)
+    report = json.loads((run_dir(box, result) / "acme-ml-01.json").read_text(encoding="utf-8"))
+    assert report["conclusion"] == "maybe_submitted"
+    assert box.form_fill_status()["jobs"][0]["checks"]["not_submitted"] is False
+
+
+def test_the_feasibility_table_names_a_missing_mhtml_and_network_record(ff):
+    """Review #31: 6.1-5 checks the MHTML (or why it is not there) and a single-page form's network.json."""
+    box, path = ff
+    result = box.start_form_fill(path)
+    report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+    row = next(line for line in report.splitlines() if line.startswith("| 6.1-5 存得下"))
+    assert "不通过" in row and "network.json" in row
+
+
+def test_the_final_read_is_masked_by_column(ff):
+    """Review #17: a contact field's text that profile.json does not hold never reaches final.json."""
+    box, path = ff
+
+    class OddPhone(FakeBrowser):
+        def read(self, target, out_dir, redactor, sheet=None):
+            final = super().read(target, out_dir, redactor, sheet)
+            odd = ReadField(
+                id="p1.5", question="Mobile number", origin="control", control="text", value="call me later"
+            )
+            return readback.FinalPage((*final.fields, odd), final.state)
+
+    box.form_fill_runner = OddPhone()
+    result = box.start_form_fill(path)
+    final = recordings(box) / recording_id("https://jobs.example.test/acme-ml-01") / "fills" / result["run_id"]
+    text = (final / "final.json").read_text(encoding="utf-8")
+    assert "call me later" not in text and "[其他值，已隐去]" in text

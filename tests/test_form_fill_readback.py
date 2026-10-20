@@ -1081,3 +1081,86 @@ def test_workday_like_review_page_rows_in_a_real_browser(chromium):
         ("Skills and Strengths (Optional)", "Python; PyTorch"),
     ]
     assert all(f.control == "review" for f in snap.fields)
+
+
+# --- the merge review of 2026-10-20 (decision 32) ----------------------------------------------------------------
+
+POSTING_HTML = """<!doctype html><html><body>
+<div><h2>Synthetic Engineer</h2><div>Austin, TX / Platform / Full-time</div></div>
+<div><div><p>Synthetic Labs builds synthetic tools.</p></div>
+  <div><h3>What you'll do</h3><ul><li>Build synthetic pipelines</li><li>Write synthetic tests</li></ul></div>
+  <div><h3>What we look for</h3><ul><li>Two years of synthetic experience</li></ul></div></div>
+<a href="#apply">Apply for this job</a></body></html>"""
+
+PARTS_HTML = """<!doctype html><html><body><h3>My Experience</h3>
+<div role="group"><h5>Work History 1</h5><label for="co">Company</label><input id="co" value="Synthetic Labs">
+ <fieldset><legend><label><span>From</span></label></legend><div role="group">
+   <input role="spinbutton" aria-label="Month" value=""><input role="spinbutton" aria-label="Year" value="2024"></div>
+ </fieldset>
+ <fieldset><legend><label><span>To</span></label></legend><div role="group">
+   <input role="spinbutton" aria-label="Month" value="8"><input role="spinbutton" aria-label="Year" value=""></div>
+ </fieldset></div><button type="button">Save and Continue</button></body></html>"""
+
+ODD_CONTROLS_HTML = """<!doctype html><html><body><h1>Apply: Synthetic Engineer</h1><form>
+ <fieldset><legend>Are you a protected veteran?<span aria-hidden="true">*</span></legend>
+  <label><input type="radio" name="vet" value="y"> Yes</label>
+  <label><input type="radio" name="vet" value="n"> No</label>
+ </fieldset>
+ <label id="loc-label" for="loc">Location (City)</label>
+ <div><input id="loc" role="combobox" aria-labelledby="loc-label" aria-controls="loc-list" value="Austin, TX">
+  <button id="loc-btn" type="button" aria-haspopup="listbox" aria-labelledby="loc-label loc-btn"><svg width="9"
+   height="9"></svg></button></div>
+ <ul id="loc-list" role="listbox" hidden></ul>
+ <div><label for="sk">Skills</label><div><input id="sk" enterkeyhint="search" value="">
+  <ul role="listbox" aria-label="Suggestions" style="display:none"><li role="option">Python</li>
+   <li role="option">SQL</li></ul></div></div>
+ <fieldset><label for="q1"></label><div><p>Do you consent to Synthetic storing your data?</p></div>
+  <div><input type="checkbox" id="c0" name="I agree" checked><label for="c0">I agree</label></div></fieldset>
+ <fieldset><label for="q2"></label><div><p>May Synthetic contact you about future roles?</p></div>
+  <div><input type="checkbox" id="c1" name="I agree"><label for="c1">I agree</label></div></fieldset>
+ <button type="submit">Submit application</button></form></body></html>"""
+
+
+def _snap_of(pg, html):
+    pg.set_content(html)
+    return readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+
+
+def test_a_job_description_with_headings_over_lists_has_no_field(chromium):
+    """Review #13: a posting page stays unnumbered (spec 4.3)."""
+    _, pg, _ = chromium
+    assert _snap_of(pg, POSTING_HTML).fields == ()
+
+
+def test_a_date_with_an_empty_part_shows_which_part_is_empty(chromium):
+    """Review #14."""
+    _, pg, _ = chromium
+    snap = _snap_of(pg, PARTS_HTML)
+    assert [(f.question, f.value) for f in snap.fields if f.control == "date"] == [("From", "?/2024"), ("To", "8/?")]
+
+
+def test_radio_stars_toggles_hidden_suggestions_and_consents(chromium):
+    """Review #22 (hidden suggestions are not picked), #23 (a combobox's toggle is not a field), #24 (a hidden star
+    in a legend is required), #25 (each consent keeps its own question)."""
+    _, pg, _ = chromium
+    pg.set_content(ODD_CONTROLS_HTML)
+    pg.check("#c0")
+    snap = readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+    assert [(f.question, f.control, f.value, f.required) for f in snap.fields] == [
+        ("Are you a protected veteran?", "radio", "", True),
+        ("Location (City)", "combobox", "Austin, TX", False),
+        ("Skills", "text", "", False),
+        ("Do you consent to Synthetic storing your data?", "checkbox", "Yes", False),
+        ("May Synthetic contact you about future roles?", "checkbox", "", False),
+    ]
+
+
+def test_the_saved_page_hides_contact_fields_by_path(chromium):
+    """Review #17: the simplified HTML never writes the value or text of a field matched to a contact entry."""
+    _, pg, _ = chromium
+    pg.set_content(
+        '<html><body><label for="a">Address</label><input id="a" value="34 Oak Avenue">'
+        '<p id="r">34 Oak Avenue</p><label for="s">School</label><input id="s" value="Old U"></body></html>'
+    )
+    html = readback.serialize(pg, [(0, "body > :nth-child(2)"), (0, "body > :nth-child(3)")])
+    assert "34 Oak Avenue" not in html and "Old U" in html and "[其他值，已隐去]" in html

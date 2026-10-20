@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from ..domain import InvariantError
 from .columns import mask_snapshot
 from .compare import HIDDEN as HIDDEN_TEXT
+from .compare import PART_EMPTY
 from .matching import NAVIGATION, is_empty, norm
 from .models import PageState, ReadField
 from .recorder import Snapshot
@@ -381,6 +382,8 @@ EXTRACT_JS = r"""() => {
       if (kids.length !== 2 || ownText(el) || hasControl(el)) return null;
       const [q, v] = kids;
       if (NO_TEXT.has(q.tagName.toUpperCase()) || !single(q)) return null;
+      // A list under a heading is a value only inside a titled group (below); elsewhere it is a job description.
+      if (v.matches("ul,ol")) return null;
       const qt = textOf(q), vt = textOf(v);
       if (!qt || !vt || qt.length > 3000 || vt.length > 1000 || /[:：]$/.test(vt)) return null;
       return [q, v, qt, vt];
@@ -647,9 +650,6 @@ def _single(node: dict) -> dict:
         "group_title": _question(labels.get("legend"))[0],
         "path": str(node.get("path") or ""),
     }
-
-
-PART_EMPTY = "?"  # an empty part of a date entered in parts ("?/2024": the month is empty)
 
 
 def _merge_dates(drafts: list[dict]) -> list[dict]:

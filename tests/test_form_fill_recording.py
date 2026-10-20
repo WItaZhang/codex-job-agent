@@ -383,3 +383,119 @@ def test_a_page_with_neither_read_is_unrecorded(tmp_path, redactor):
 def test_nothing_in_the_recording_is_a_contact_value(tmp_path, redactor):
     three_pages(tmp_path, redactor)
     assert leaks(tmp_path) == []
+
+
+# --- the merge review of 2026-10-20 (decision 32) ----------------------------------------------------------------
+
+
+def test_the_report_of_an_older_run_does_not_change_the_last_conclusion(tmp_path, redactor):
+    """Review #15."""
+    for run in ("20261019-100000-aaaa", "20261020-100000-bbbb"):
+        RecordingStore(tmp_path, "r", run, redactor).write_meta(URL, "Acme", "ML Engineer")
+    rec = tmp_path / "r"
+    recording.note_conclusion(rec, "20261020-100000-bbbb", "check_then_submit", None)
+    recording.note_conclusion(rec, "20261019-100000-aaaa", "not_filled", "stuck")
+    assert recording.needs_visit(rec, revisit=False) == (
+        False,
+        {"run": "20261020-100000-bbbb", "conclusion": "check_then_submit", "reason": None},
+    )
+
+
+def test_a_changed_form_is_closed_in_its_own_folder_by_the_runner_too(tmp_path, redactor):
+    """Review #16, #19: the runner's store, made before the service switched to form-v2, follows it."""
+    first = RecordingStore(tmp_path, "r", "run-1", redactor)
+    first.begin_run()
+    first.save(Recorder().observe(snap(field("Email"), field("School")), "blank"), "blank", capture())
+    first.add_network({"url": "https://jobs.example.test/v1", "status": 200, "headers": {}, "body_text": "v1"})
+    rec1 = Recorder()
+    rec1.observe(snap(field("Email"), field("School")), "blank")
+    first.save_state(rec1)
+    assert recording.finish_network(first)
+    runner_side = RecordingStore(tmp_path, "r", "run-2", redactor)
+    runner_side.begin_run()
+    service_side = RecordingStore(tmp_path, "r", "run-2", redactor)
+    rec = Recorder()
+    service_side.add_network({"url": "https://jobs.example.test/v2", "status": 200, "headers": {}, "body_text": "v2"})
+    service_side.save(rec.observe(snap(field("Email"), field("Portfolio")), "blank"), "blank", capture())
+    service_side.save_state(rec)
+    runner_side.save_state(runner_side.load_recorder())  # the runner's final read writes the state again
+    assert json.loads((runner_side.fill_dir / "state.json").read_text())["form_dir"] == "form-v2"
+    assert recording.finish_network(runner_side)
+    assert [e["url"] for e in json.loads((tmp_path / "r" / "form" / "network.json").read_text())] == [
+        "https://jobs.example.test/v1"
+    ]
+    assert [e["url"] for e in json.loads((tmp_path / "r" / "form-v2" / "network.json").read_text())] == [
+        "https://jobs.example.test/v2"
+    ]
+    assert not list(tmp_path.rglob("network.partial.jsonl"))
+
+
+def test_a_visit_to_an_unchanged_form_keeps_the_first_blank_form(tmp_path, redactor):
+    """Review #18: spec 6.2, only another fills/<run>/."""
+    first = RecordingStore(tmp_path, "r", "run-1", redactor)
+    first.save(Recorder().observe(snap(field("School")), "blank"), "blank", capture("<p>first blank</p>"))
+    again = RecordingStore(tmp_path, "r", "run-2", redactor)
+    again.save(
+        Recorder().observe(snap(field("School", "Old U")), "blank"), "blank", capture("<p>second, prefilled</p>")
+    )
+    assert "first blank" in (tmp_path / "r" / "form" / "p1.html").read_text()
+    assert (again.fill_dir / "p1.prefilled.json").is_file()
+
+
+@pytest.mark.parametrize(
+    ("headers", "body"),
+    [
+        ({}, b'{"email": "sam.synthetic@example.test"}'),
+        ({"content-type": "application/x-ndjson"}, b'{"phone": "555-010-0199"}\n'),
+        ({"content-type": "application/octet-stream"}, b"sam.synthetic@example.test"),
+        ({"content-type": "text/plain", "x-candidate-email": "sam.synthetic@example.test"}, b"ok"),
+    ],
+)
+def test_contact_details_are_looked_for_in_every_body_and_header(redactor, headers, body):
+    """Review #20."""
+    assert recording.network_entry(event(headers=headers, body=body), redactor) == (None, True)
+
+
+def test_documents_are_never_kept(redactor):
+    assert recording.network_entry(event(headers={"content-type": "application/pdf"}, body=b"%PDF"), redactor) == (
+        None,
+        False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://boards.greenhouse.io/embed/job_app?for=acme&token=1234567", "greenhouse-acme-1234567"),
+        ("https://acme.wd1.myworkdayjobs.com/en-US/External/job/Austin-TX/Engineer_1234567", "workday-acme-1234567"),
+        ("https://wd1.myworkdaysite.com/recruiting/acme/External/job/Austin/Engineer_R-0042", "workday-acme-r-0042"),
+    ],
+)
+def test_more_known_platform_addresses_get_readable_ids(url, expected):
+    """Review #26."""
+    assert recording_id(url) == expected
+
+
+def test_an_address_cannot_lead_a_recording_out_of_its_folder(tmp_path, redactor):
+    """Review #27."""
+    rec = recording_id("https://www.linkedin.com/jobs/search/?currentJobId=../../../../outside")
+    assert rec.startswith("other-www.linkedin.com-") and "/" not in rec and ".." not in rec
+    with pytest.raises(ValueError):
+        RecordingStore(tmp_path, "linkedin-../../outside", "run-1", redactor)
+
+
+def test_state_json_holds_no_contact_detail(tmp_path, redactor):
+    """Review #28: reads are masked before they are placed on a page, and state.json is masked again."""
+    from intent_job_agent.form_fill.columns import mask_snapshot
+
+    rec, store = Recorder(), RecordingStore(tmp_path, "r", "run-1", redactor)
+    raw_snap = snap(
+        field("Contact me at sam.synthetic@example.test instead of 555-010-0199"),
+        marker=("Signed in as sam.synthetic@example.test",),
+    )
+    masked, _, _ = mask_snapshot(raw_snap, redactor, {})
+    store.save(rec.observe(masked, "blank"), "blank", capture())
+    store.save_state(rec)
+    text = (store.fill_dir / "state.json").read_text()
+    for secret in ("sam.synthetic", "sam synthetic", "555-010-0199", "555 010 0199", "5550100199"):
+        assert secret not in text

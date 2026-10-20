@@ -4,9 +4,9 @@
 import json
 
 import pytest
-from intent_job_agent.form_fill.recorder import Recorder, Snapshot, prefilled_sources
 
 from intent_job_agent.form_fill.models import ReadField
+from intent_job_agent.form_fill.recorder import Recorder, Snapshot, prefilled_sources
 
 URL = "https://jobs.example.test/acme/apply"
 
@@ -259,3 +259,13 @@ def test_every_stage_is_known(stage):
 def test_an_unknown_stage_is_refused():
     with pytest.raises(ValueError):
         Recorder().observe(snap(*INFO), "submitted")
+
+
+def test_a_follow_up_that_went_away_does_not_freeze_the_background_read():
+    """Review #5: once the shorter page shows twice in a row, it is the page, and its values are kept."""
+    rec = Recorder()
+    rec.observe(snap(f("Sponsorship?", "Yes"), f("Which visa?", "H-1B"), f("Years")), "blank")
+    assert rec.observe(snap(f("Sponsorship?", "Yes"), f("Which visa?", "H-1B"), f("Years")), "auto").keep
+    assert not rec.observe(snap(f("Sponsorship?", "No"), f("Years")), "auto").keep  # maybe the page going away
+    later = rec.observe(snap(f("Sponsorship?", "No"), f("Years", "5")), "auto")
+    assert later.keep and [x.value for x in later.fields] == ["No", "5"]

@@ -71,7 +71,8 @@ def conclude(meta: dict, results) -> tuple[str, str | None]:
     """(conclusion, why not filled) from the job's meta.json and its check results."""
     checks, page = meta.get("checks") or {}, meta.get("page") or {}
     status, agent = meta.get("status") or "filled", meta.get("agent_result")
-    if page.get("received") or (checks.get("not_submitted") is False and agent != "already_applied"):
+    received = page.get("received") or meta.get("received_seen")  # the final page, or any page recorded (5.6)
+    if received or (checks.get("not_submitted") is False and agent != "already_applied"):
         return "maybe_submitted", None
     if agent in NOT_ELIGIBLE:
         return "not_eligible", None
@@ -97,7 +98,7 @@ def _count(results, severity: str) -> int:
 def _headline(meta: dict, conclusion: str, reason: str | None, results) -> str:
     job = meta.get("job_id", "")
     if conclusion == "maybe_submitted":
-        said = (meta.get("page") or {}).get("received")
+        said = (meta.get("page") or {}).get("received") or meta.get("received_seen")
         why = f"最后一页写着「{said}」" if said else "第 4 项（没有提交）没通过"
         return f"可能已提交：{why}。请先打开标签页确认，再决定怎么办。"
     if conclusion == "not_eligible":
@@ -230,6 +231,7 @@ def check_pages(pages, answers, contacts: bool = True, company: str = "") -> tup
     its page, where the values come from, when they were read and the field's source. A page never read back has
     every field unreadable."""
     results: list[CheckResult] = []
+    offset = 0  # segments are numbered per page; numbered on across pages they stay apart in the report
     for page in pages:
         where = {"page": page.page, "read_from": page.read_from, "read_at": page.read_at}
         if page.read_from == "unrecorded":
@@ -238,12 +240,15 @@ def check_pages(pages, answers, contacts: bool = True, company: str = "") -> tup
                 for f in page.fields
             ]
             continue
-        for r in check_page(page.fields, answers, contacts=contacts, company=company) if page.fields else ():
-            results.append(r.model_copy(update={**where, "source": page.sources.get(r.field_id)}))
+        checked = check_page(page.fields, answers, contacts=contacts, company=company) if page.fields else ()
+        for r in checked:
+            segment = None if r.segment is None else r.segment + offset
+            results.append(r.model_copy(update={**where, "source": page.sources.get(r.field_id), "segment": segment}))
+        offset += 1 + max((r.segment for r in checked if r.segment is not None), default=-1)
     return tuple(results)
 
 
-def _page_items(pages) -> list[str]:
+def _page_items(pages, results=()) -> list[str]:
     items = []
     for page in pages:
         if page.read_from == "unrecorded" and page.fields:
@@ -252,6 +257,10 @@ def _page_items(pages) -> list[str]:
                 f"第 {page.page} 页{title}没录到读回值：这一页的 {len(page.fields)} 栏读不出（{UNRECORDED}），"
                 "请你在标签页里看这一页。"
             )
+    unrecorded = [r for r in results if r.source == "unrecorded" and r.field_id]
+    if unrecorded:  # spec 3.2, 5.3: no blank read, so code cannot tell what the site filled in
+        listed = "；".join(f"{r.field_id} {r.question}「{r.value}」" for r in unrecorded)
+        items.append(f"这几栏的页没有填之前的录制，分不出是不是网站预填的（来源未录到），请在标签页里看一眼：{listed}")
     return items
 
 
@@ -275,7 +284,7 @@ def job_report(meta: dict, fields, answers, contacts: bool = True, pages=None) -
         conclusion=conclusion,
         not_filled_reason=reason,
         fields=results,
-        todo=todo_items(meta, conclusion, reason, results) + tuple(_page_items(pages or ())),
+        todo=todo_items(meta, conclusion, reason, results) + tuple(_page_items(pages or (), results)),
         page_dir=meta.get("page_dir"),
         notes=tuple(meta.get("notes") or ()),
         recording_id=meta.get("recording"),

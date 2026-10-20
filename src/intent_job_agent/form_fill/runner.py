@@ -30,6 +30,7 @@ from ..applicant import Applicant
 from ..config import Settings
 from ..domain import InvariantError
 from . import checkpoint, readback, recording
+from .columns import mask_snapshot
 from .inputs import load_answers, load_checklist, load_list, profile_field_paths
 from .models import RECORD_FIELDS, AnswerEntry, ChecklistItem, JobList, JobReport, ListEntry, PageState, ReadField
 from .recorder import Snapshot
@@ -201,6 +202,15 @@ def load_inputs(list_path: str | Path, applicant: Applicant, settings: Settings)
             problems.append(
                 f"{list_path}: job ids name folders, so they must start with a letter or digit and hold only "
                 f"letters, digits, '.', '_' and '-': {unsafe}"
+            )
+        by_recording: dict[str, list[str]] = {}
+        for entry in jobs.jobs:
+            by_recording.setdefault(recording_id(entry.url), []).append(entry.id)
+        twice = {rec: ids for rec, ids in by_recording.items() if len(ids) > 1}
+        if twice:  # one posting, one real visit (spec 6.5): two entries would share and overwrite one recording
+            problems.append(
+                f"{list_path}: these entries are the same posting (one recording each): "
+                + "; ".join(f"{', '.join(ids)} ({rec})" for rec, ids in twice.items())
             )
     try:
         checklist = load_checklist(applicant.folder / settings.form_fill.checklist_file)
@@ -426,6 +436,7 @@ class _Seen:
     checkpoints: tuple[dict, ...] = ()
     browser_errors: tuple[str, ...] = ()
     files: dict | None = None  # check 5 of spec 6.1: per page, what is missing
+    network: bool = False  # the recording has a network.json from a single-page form
 
 
 def recordings_root(ctx: RunContext) -> Path:
@@ -462,6 +473,7 @@ def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, po
         stuck_after=form_fill.stuck_after,
         ignore_filled_on_page=entry.ignore_filled_on_page,
         network_max_mb=form_fill.network_max_mb,
+        sheet=checkpoint.sheet_phrases(ctx.answers),
     )
     path = job_dir / CHECKPOINT_FILE
     path.write_text(config.model_dump_json(indent=2) + "\n", encoding="utf-8")
@@ -504,13 +516,18 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         if outcome.status != "pending":  # pending: the agent never started (apply_bridge.outcome_status)
             seen.filled, seen.tabs_before = True, len(_pages(before))
             status, page_dir = _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store)
+    received = None
     if (store.fill_dir / recording.STATE_FILE).is_file():  # the recording was begun for this run
         try:
-            finish_network(store)
+            seen.network = finish_network(store)
             finish_meta(store)
             seen.pages = tuple(read_run(store.rec_dir, ctx.run_id))
+            received = store.received()
         except Exception as error:  # noqa: BLE001 - the recording could not be closed; the report says unreadable
             notes.append(f"the recording could not be read back: {_error(error)}")
+    if received:  # a page read while the agent worked said the application was received (spec 5.6)
+        checks["not_submitted"] = False
+        notes.append(f"录制时有一页写着「{received.get('text')}」（{received.get('url')}）")
     _recording_checks(entry, ctx, store, seen, checks)
     seen.scan = ctx.redactor.scan([job_dir])
     checks["redaction_hits"] = total_hits(seen.scan)
@@ -538,6 +555,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         "submit_warnings": list(seen.signs),
         "redaction": REDACTION_VERSION,  # how this job's saved files were masked (redact.VERSION)
         "recording": store.rec_id,
+        "received_seen": received.get("text") if received else None,
         "notes": list(result.notes),
         "started": started,
         "finished": _now(),
@@ -570,13 +588,13 @@ def _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store
         notes.append("the job's tab was not found")
     else:
         try:
-            final = ctx.runner.read(seen.target, job_dir, ctx.redactor)
+            final = ctx.runner.read(seen.target, job_dir, ctx.redactor, ctx.answers)
             seen.fields, seen.state = tuple(final.fields), final.state
             status, page_dir = "filled", str(job_dir)
             left_out = job_dir / readback.SCREENSHOT_NOTE
             if left_out.is_file():
                 notes.append(left_out.read_text(encoding="utf-8").strip())
-            record_final(store, final, seen.target, ctx.settings.form_fill.stuck_after)
+            record_final(store, final, seen.target, ctx)
         except Exception as error:  # noqa: BLE001 - the page could not be read; the tab stays as it is
             status = "readback_failed"
             notes.append(f"read back failed: {_error(error)}")
@@ -587,14 +605,15 @@ def _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store
     return ("gate" if gate else status), page_dir
 
 
-def record_final(store: RecordingStore, final: readback.FinalPage, target: dict, stuck_after: int) -> None:
-    """The read made after the filling agent quit, placed on its page of the recording (final.json) with the numbers
-    the checkpoint service gave (state.json)."""
-    recorder = store.load_recorder(stuck_after)
+def record_final(store: RecordingStore, final: readback.FinalPage, target: dict, ctx: RunContext) -> None:
+    """The read made after the filling agent quit, masked by value and by column, placed on its page of the
+    recording (final.json) with the numbers the checkpoint service gave (state.json)."""
+    recorder = store.load_recorder(ctx.settings.form_fill.stuck_after)
     snap = final.snapshot or Snapshot(
         tab=str(target.get("id", "")), url=str(target.get("url", "")), marker=(), fields=final.fields, read_at=_now()
     )
-    store.save(recorder.observe(snap, "final"), "final", None)
+    masked, _, _ = mask_snapshot(snap, ctx.redactor, ctx.answers)
+    store.save(recorder.observe(masked, "final"), "final", None)
     store.save_state(recorder)
 
 
@@ -637,21 +656,32 @@ def _recording_checks(entry: ListEntry, ctx: RunContext, store: RecordingStore, 
         for e in logged
     )
     checks["checkpoint_in_time"] = bool(logged) and all(float(e.get("seconds") or 0) <= timeout for e in logged)
+    store.load_recorder()  # the form folder the checkpoint service used (form-v2/ when the form changed)
+    forms = list(dict.fromkeys([store.form_dir, store.rec_dir / "form"]))
     missing = {}
     for page in seen.pages:
+        if page.read_from == "unrecorded" and not page.fields:
+            continue
+        stem = f"p{page.page}"
         lacking = [
             name
-            for name in (f"p{page.page}.structure.json", f"p{page.page}.html", f"p{page.page}.png")
-            if not _non_empty(store.form_dir / name) and not _non_empty(store.rec_dir / "form" / name)
+            for name in (f"{stem}.structure.json", f"{stem}.html", f"{stem}.png")
+            if not any(_non_empty(form / name) for form in forms)
         ]
+        if not any(
+            (form / f"{stem}.mhtml").is_file() or (form / f"{stem}.mhtml.not-saved.txt").is_file() for form in forms
+        ):
+            lacking.append(f"{stem}.mhtml（也没有写明为什么没存）")
         if lacking:
             missing[page.page] = lacking
+    if len(seen.pages) == 1 and not seen.network:
+        missing["网络记录"] = ["network.json（单页表应有；有密码栏、登录后的页面或没录到时没有）"]
     seen.files = missing
     checks["pages_saved"] = bool(seen.pages) and not missing
-    folders = [store.fill_dir, store.form_dir]
+    folders = [store.fill_dir, *forms]
     scan = ctx.redactor.scan([f for f in folders if f.is_dir()])
     hits = sum(sum(v.values()) for name, v in scan.items() if name != "_skipped" and not name.endswith(".mhtml"))
-    hits += sum(mhtml_hits(m.read_text(encoding="utf-8"), ctx.redactor) for m in store.form_dir.glob("*.mhtml"))
+    hits += sum(mhtml_hits(m.read_text(encoding="utf-8"), ctx.redactor) for form in forms for m in form.glob("*.mhtml"))
     checks["recording_hits"] = hits
     if entry.ignore_filled_on_page is not None:
         page = next((p for p in seen.pages if p.page == entry.ignore_filled_on_page), None)
@@ -778,7 +808,10 @@ def _check_rows(result: JobOutcome, seen: _Seen, ctx: RunContext) -> list[str]:
     slow = [e for e in calls if float(e.get("seconds") or 0) > timeout]
     off = [e for e in calls if e.get("tab_url") != e.get("agent_url") or e.get("result") == "no_tab"]
     errors = list(seen.browser_errors)
-    files = "；".join(f"第 {n} 页缺 {'、'.join(names)}" for n, names in (seen.files or {}).items())
+    files = "；".join(
+        (f"第 {n} 页缺 " if isinstance(n, int) else f"{n}：缺 ") + "、".join(names)
+        for n, names in (seen.files or {}).items()
+    )
     rows += [
         f"| 找得到标签页 | {_passed(checks['tab_found'])} | {_cell(tab, redactor, META_FILE)} |",
         f"| 6.1-1 不干扰 Playwright MCP | {_passed(not errors)} | "
@@ -941,8 +974,8 @@ class FormFillRunner:
             spec, self.data_dir, self.settings, self.profile, self._port(), self.read_dirs, **options
         )
 
-    def read(self, target: dict, out_dir: Path, redactor: Redactor) -> readback.FinalPage:
-        return readback.read_final_page(self._port(), target, out_dir, redactor)
+    def read(self, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> readback.FinalPage:
+        return readback.read_final_page(self._port(), target, out_dir, redactor, sheet)
 
     def _port(self) -> int:
         if self.port is None:
