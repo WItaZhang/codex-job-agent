@@ -1,6 +1,6 @@
 # /apply 接入填表模块：样例（synthetic）
 
-计划见 `apply-form-fill.plan.md`。下面的公司、岗位编号、批次和运行编号都是编的（synthetic）。写测试时，这些样例会转成 `tests/fixtures/apply_form_fill/samples.yaml`，届时本文件改为指向那份文件。
+计划见 `apply-form-fill.plan.md`。下面的公司、岗位编号、批次和运行编号都是编的（synthetic）。S3、S7、S12 的数据已经转成 `tests/fixtures/apply_form_fill/samples.yaml`，以那份文件为准，它还多了几例（S3 的 o2、p2，S7 的 b2、f）；其余样例写在工具层的测试里（`tests/test_apply_form_fill.py`）。
 
 共同的设定（每个样例都用它，除非样例另有说明）：
 

@@ -1,0 +1,120 @@
+# SYNTHETIC samples for wiring form-fill into /apply (specs/apply-form-fill.samples.md, plan section 1).
+# Every company, id, value and date here is made up.
+
+# S3: one form-fill job's report -> the apply-list status, the reason recorded first in the note, and whether it
+# counts as "something in this step worked" (spec section 10 items 68, 89).
+mapping:
+  - {id: a, report: {conclusion: check_then_submit, status: filled, agent_result: dry_run},
+     expect: {status: waiting, reason: check_then_submit, worked: true}}
+  - {id: b, report: {conclusion: do_not_submit, status: filled, agent_result: dry_run},
+     expect: {status: waiting, reason: do_not_submit, worked: true}}
+  - {id: c, report: {conclusion: maybe_submitted, status: filled, agent_result: dry_run},
+     expect: {status: applied, reason: maybe_submitted, worked: true}}
+  - {id: d, report: {conclusion: not_eligible, status: filled, agent_result: not_eligible},
+     expect: {status: failed, reason: not_eligible, worked: false}}
+  - {id: e, report: {conclusion: not_filled, status: gate, agent_result: captcha, not_filled_reason: gate},
+     expect: {status: failed, reason: captcha, worked: false}}
+  - {id: f, report: {conclusion: not_filled, status: gate, agent_result: email_verification, not_filled_reason: gate},
+     expect: {status: failed, reason: email_verification, worked: false}}
+  - {id: g, report: {conclusion: not_filled, status: filled, agent_result: login_issue, not_filled_reason: login_failed},
+     expect: {status: failed, reason: login_issue, worked: false}}
+  - {id: h, report: {conclusion: not_filled, status: filled, agent_result: needs_answer, not_filled_reason: needs_answer},
+     expect: {status: failed, reason: needs_answer, worked: false}}
+  - {id: i, report: {conclusion: not_filled, status: filled, agent_result: timeout, not_filled_reason: stuck},
+     expect: {status: failed, reason: timeout, worked: false}}
+  - {id: j, report: {conclusion: not_filled, status: filled, agent_result: stuck, not_filled_reason: stuck},
+     expect: {status: failed, reason: stuck, worked: false}}
+  - {id: k, report: {conclusion: not_filled, status: filled, agent_result: expired, not_filled_reason: expired},
+     expect: {status: failed, reason: expired, worked: false}}
+  - {id: l, report: {conclusion: not_filled, status: filled, agent_result: email_only, not_filled_reason: email_only},
+     expect: {status: failed, reason: email_only, worked: false}}
+  - {id: m, report: {conclusion: not_filled, status: filled, agent_result: wrong_job, not_filled_reason: wrong_job},
+     expect: {status: failed, reason: wrong_job, worked: false}}
+  - {id: n, report: {conclusion: not_filled, status: filled, agent_result: already_applied,
+                     not_filled_reason: already_applied},
+     expect: {status: applied, reason: already_applied, worked: true}}
+  - {id: o, report: {conclusion: not_filled, status: system_error, agent_result: system_error,
+                     not_filled_reason: system_error},
+     expect: {status: pending, reason: system_error, worked: false}}
+  - {id: o2, report: {conclusion: unreadable, status: system_error, agent_result: null},  # broke before the agent
+     expect: {status: pending, reason: system_error, worked: false}}
+  - {id: p, report: {conclusion: unreadable, status: readback_failed, agent_result: dry_run},
+     expect: {status: waiting, reason: unreadable, worked: true}}
+  - {id: p2, report: {conclusion: unreadable, status: filled, agent_result: dry_run},  # filled, no field read
+     expect: {status: waiting, reason: unreadable, worked: true}}
+  - {id: q, report: {conclusion: unreadable, status: tab_lost, agent_result: dry_run},
+     expect: {status: failed, reason: tab_lost, worked: false}}
+  - {id: r, report: {conclusion: not_filled, status: filled, agent_result: screening_requires_candidate_written_answers,
+                     not_filled_reason: screening_requires_candidate_written_answers},
+     expect: {status: failed, reason: screening_requires_candidate_written_answers, worked: false}}
+
+# S7: profile.json against answers.yaml on the six one-to-one fields (spec section 10 item 92). `conflicts` names
+# the pairs that disagree, as "<profile field> / <answers key>"; values are never named.
+consistency:
+  - id: a
+    profile:
+      work_authorization: {legally_authorized_to_work: "Yes", require_sponsorship: "No"}
+      compensation: {salary_expectation: "85000"}
+      eeo_voluntary: {gender: Decline to self-identify, race_ethnicity: Decline to self-identify,
+                      veteran_status: I am not a protected veteran, disability_status: I do not wish to answer}
+    answers:
+      work_auth.authorized_us: {answer: "Yes"}
+      compensation.expected: {answer: "85000"}
+      eeo.gender: {answer: Decline to self-identify}
+      eeo.race: {answer: "decline to self identify"}
+      eeo.veteran: {answer: I am not a protected veteran}
+      eeo.disability: {answer: I do not wish to answer}
+    conflicts: []
+  - id: b
+    profile: {compensation: {salary_expectation: "$90,000"}}
+    answers: {compensation.expected: {answer: "85000"}}
+    conflicts: [compensation.salary_expectation / compensation.expected]
+  - id: b2  # the same number written differently
+    profile: {compensation: {salary_expectation: "85k"}}
+    answers: {compensation.expected: {answer: "85,000"}}
+    conflicts: []
+  - id: c  # sponsorship is never compared: profile.json has one item for now and future
+    profile: {work_authorization: {legally_authorized_to_work: "Yes", require_sponsorship: "No"}}
+    answers:
+      work_auth.authorized_us: {answer: "Yes"}
+      work_auth.sponsorship_future: {answer: "Yes"}
+    conflicts: []
+  - id: d  # a spelling in accept counts
+    profile: {eeo_voluntary: {veteran_status: I am not a protected veteran}}
+    answers: {eeo.veteran: {answer: I am not a veteran, accept: [I am not a protected veteran]}}
+    conflicts: []
+  - id: e  # one side not written: not compared
+    profile: {eeo_voluntary: {disability_status: I do not wish to answer, gender: Male}}
+    answers: {eeo.gender: {answer: Female}}
+    conflicts: [eeo_voluntary.gender / eeo.gender]
+  - id: f
+    profile: {work_authorization: {legally_authorized_to_work: "No"}}
+    answers: {work_auth.authorized_us: {answer: "Yes"}}
+    conflicts: [work_authorization.legally_authorized_to_work / work_auth.authorized_us]
+
+# S12: attempts of one week (Monday 2026-10-26 to Sunday 11-01), read in UTC, and what apply_stats gives.
+stats:
+  week: "2026-10-26"
+  attempts:
+    - {job_id: job_a1, via: form_fill, status: waiting, reason: check_then_submit, at: "2026-10-26T15:00:00+00:00"}
+    - {job_id: job_a1, via: user, status: applied, reason: null, at: "2026-10-27T09:00:00+00:00"}
+    - {job_id: job_b2, via: form_fill, status: failed, reason: captcha, at: "2026-10-26T15:10:00+00:00"}
+    - {job_id: job_b2, via: form_fill, status: waiting, reason: check_then_submit, at: "2026-10-27T10:00:00+00:00"}
+    - {job_id: job_b2, via: user, status: applied, reason: null, at: "2026-10-27T11:00:00+00:00"}
+    - {job_id: job_c3, via: applypilot, status: applied, reason: null, at: "2026-10-28T16:00:00+00:00"}
+    - {job_id: job_d4, via: applypilot, status: applied, reason: already_applied, at: "2026-10-28T16:10:00+00:00"}
+    - {job_id: job_e5, via: applypilot, status: failed, reason: wrong_job_redirect, at: "2026-10-28T16:20:00+00:00"}
+    - {job_id: job_f6, via: applypilot, status: pending, reason: system_error, at: "2026-10-28T16:30:00+00:00"}
+    - {job_id: job_g7, via: applypilot, status: failed, reason: expired, at: "2026-10-29T16:00:00+00:00"}
+    - {job_id: job_h8, via: form_fill, status: waiting, reason: do_not_submit, at: "2026-10-29T17:00:00+00:00"}
+    - {job_id: job_h8, via: user, status: skipped, reason: null, at: "2026-10-30T08:00:00+00:00"}
+    - {job_id: job_x0, via: applypilot, status: failed, reason: captcha, at: "2026-10-25T23:59:59+00:00"}  # week before
+    - {job_id: job_x9, via: applypilot, status: applied, reason: null, at: "2026-11-02T00:00:00+00:00"}  # week after
+  expect:
+    submitted: 3
+    failed: 3
+    success_rate: 0.5
+    allowed: {captcha: 1, expired: 1}
+    to_fix: {wrong_job_redirect: 1}
+    not_counted: {waiting: 3, maybe_submitted: 0, already_applied: 1, pending: 1, user_skipped: 1, user_pending: 0}
+    met: false
