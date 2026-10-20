@@ -63,3 +63,22 @@
 - 核对时主目录数据库里没有一条地点写了几个地方，所以新规则只影响以后的 Workday 多地点岗位。
 
 **规则写在** `spec.md` §10 第 31 条。
+
+## 决定 4（2026-10-20）：重写地点读法样例 A1–A10
+
+- 决定 3 说样例 A1–A10 已经和用户核对过，放在 `tests/fixtures/` 里，但那个文件从没提交过。原来的开发会话 10-18 起停了，样例只留下决定 3 里写的 A2、A10。
+- 2026-10-20 换由新会话接着做本切片。用户原话（在进度会话里）："接管 Workday 地点：在它的 worktree 里开新会话接着做，所有选项选推荐的那个"；10-19 也说过"所有选项选推荐的那个"。
+- 这次按 `spec.md` §10 第 31 条列出的写法重新起草 A1–A10（合成），A2、A10 照决定 3，写进 `tests/fixtures/workday_locations.yaml`。按用户 2026-10-19 的授权（全部按推荐项）定下，没有再逐条和用户核对。
+
+| # | 地点原文 | 读出 |
+| --- | --- | --- |
+| A1 | US, CA, Santa Clara | us.santa_clara |
+| A2 | US, CA, Santa Clara; US, CA, Remote; US, NY, New York; US, WA, Seattle | us.santa_clara、us、us.new_york、us.seattle；work_mode 没把握 |
+| A3 | California - Palo Alto; California - San Francisco | us.palo_alto、us.san_francisco |
+| A4 | India, Bengaluru | india.bengaluru |
+| A5 | United States of America, McLean, Virginia | us.mclean |
+| A6 | Israel - Tel Aviv | israel.tel_aviv |
+| A7 | US, CA | us |
+| A8 | USA.VA.Reston | 认不出 |
+| A9 | Massachusetts - Cambridge; Digital | 认不出（Digital 不是地点，整个 location 没把握） |
+| A10 | San Francisco, CA - New York, NY | 认不出 |
