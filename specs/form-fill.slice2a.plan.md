@@ -40,6 +40,8 @@
 
 ## 2. 可行性验证（规格 6.1）
 
+**按决定 29，在本切片合并后、在主目录的会话里做**：worktree 里的开发会话用的工具服务是从主目录启动的，跑 main 的代码。清单已起草（进度会话笔记目录里的 `form-fill-2a-feasibility-list.yaml`）。发现的问题另开"2a 收尾"切片修。
+
 - 3 个真实岗位：一个 Greenhouse 或 Lever 单页表、一个 Workday、一个领英快速申请。我从投递清单里挑，作为推荐项列给你；你批准 `start_form_fill` 的弹窗。每个岗位只访问一次，永远不点提交。
 - Workday 的那个，清单里写 `ignore_filled_on_page: 2`（第 8 项）。
 - 第 7 项（重放自检）在 2b 做，用这次留下的录制，不再访问网站。
@@ -110,17 +112,18 @@ checkpoint.py   MCP 服务：checkpoint 工具、后台读页、经 CDP 读标�
 2. 写第 5 节的测试并提交。这时测试会失败。
 3. 写 `recorder.py`、`recording.py`、`checkpoint.py` 和运行器的改动，测试通过后提交。每完成一块就提交一次。
 4. 问你能不能用主目录已存的两份 Workday 页面（第 7 节）。复现、写合成测试、修读回，提交。
-5. 可行性验证：3 个岗位，你批准弹窗。结果表给你看。
-6. 按结果修，在存下的录制上重出报告，不再访问网站。
-7. `git merge main`，跑完四条验证命令，结果给你看。然后告诉你"这个切片做完了，可以合并"，到主目录的会话里输入 `/merge <本分支名>`。
+   - 2026-10-20 做完（决定 28）：Review 页 34 栏 → 53 栏，My Experience 页的 Degree、Field of Study、日期、"I currently work here" 都读对了。
+5. `git merge main`，跑完四条验证命令，结果给你看。然后告诉你"这个切片做完了，可以合并"，到主目录的会话里输入 `/merge <本分支名>`。
+6. 合并后在主目录的会话里做可行性验证：3 个岗位，你批准弹窗，结果表给你看（决定 29）。
+7. 按结果修，放在"2a 收尾"切片里，在存下的录制上重出报告，不再访问网站。
 
 每次提交前都跑：`uv sync --locked`、`uv run ruff check src tests`、`uv run ruff format --check src tests`、`uv run python -m pytest -q`。
 
 ## 7. 需要你的地方
 
 - **用已存的 Workday 页面**：主目录 `data/local/form-fill/runs/` 下 10-17 的两份（`20261017-085904-a375` 的 My Experience 页，`20261017-213100-2b5b` 的 Review 页）。只读打码后的 `page.html`、`raw.json`、`readback.json` 和 `meta.json`，不读 `log.jsonl`、`profile.json`、`.env`。
-- **可行性验证的真实数据**：这个 worktree 里没有 `data/local/`。推荐做法：在 worktree 里建一个指向主目录 `data/local/` 的链接（git 忽略的路径），让本会话的工具服务用你的投递资料和清单；录制和报告也就落在主目录的 `data/local/` 下。
-- **3 个岗位**：我从投递清单里挑，列给你，你批准 `start_form_fill` 的弹窗。
+- **可行性验证的真实数据**：你 10-20 同意了。后来发现工具服务本来就用主目录的 `data/local/`，但跑的是 main 的代码，所以验证改到合并后做（决定 29）。
+- **3 个岗位**：已经挑好（决定 29），合并后在主目录会话里由你批准 `start_form_fill` 的弹窗。
 
 ## 8. 下一个切片
 

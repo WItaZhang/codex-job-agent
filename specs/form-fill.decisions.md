@@ -512,3 +512,21 @@
   - 填写页 "I currently work here" 读成了 "Work History (Optional) 1"：两段经历的勾选框名字相同，被当成了一组选项。改为名字相同、旁边的字也相同的勾选框是每段各一栏。
 - 重读结果（同一份页面，改之前 → 改之后）：Review 页 34 栏（3 栏读成 `*`）→ 53 栏，决定 23 列的漏读都读到了；My Experience 页的 Degree、Field of Study、日期、"I currently work here" 都读对了。
 - 离线重读的局限：存下的页面去掉了脚本和样式，本来被样式藏起来的东西会显示出来（例如下拉按钮旁边藏着的编号输入框）。真实页面上它们看不见，不读。是否完全修好，以可行性验证（6.1）在真实页面上的读回为准。
+
+## 2026-10-20 决定 29（用户授权按推荐项）：可行性验证在合并后、在主目录的会话里做
+
+- 发现：
+  - 桌面版里，worktree 里的开发会话用的工具服务（intent-agent）是从主目录启动的（Claude Code 的 `--project-config-root` 指向主目录），跑的是 main 的代码和主目录的 `data/local/`。在本会话调用 `start_form_fill`，跑的是切片 1 的代码。
+  - 用脚本直接跑新代码会绕过宿主的弹窗批准，不允许（CLAUDE.md：提交级工具只能由用户本人批准）。
+  - 宿主也不让 worktree 会话写主目录的 `data/local/`。所以用户 10-20 同意的"在 worktree 里建指向 data/local 的链接"不再需要，没有建。
+- 决定：
+  - 切片 2a 按离线验证合并：合成页面测试（含真浏览器）、`checkpoint` 服务按 Claude Code 的启动方式跑的 stdio 冒烟测试、两份已存 Workday 页面的离线重读（决定 28）。
+  - 合并后，在主目录的会话里做 6.1 的可行性验证。3 个岗位的清单已经起草好，放在进度会话的笔记目录里（`form-fill-2a-feasibility-list.yaml`）：
+    - 单页表：Twitch Applied Scientist（Greenhouse）。投递清单里没有 Greenhouse、Lever、Ashby 的岗位，这一个取自岗位库里还没投的岗位；
+    - Workday：Salesforce Senior / Lead Member of Technical Staff - AI Research（10-19 投递清单第 184 位，同一个租户，已有账号），第 2 页写 `ignore_filled_on_page: 2`；
+    - 领英：Kikoff Senior Machine Learning Engineer（10-19 投递清单第 6 位）。
+  - 验证发现的问题，另开一个"2a 收尾"切片修，和切片 1 的 form-fill-s1-finish 一样。
+- 没选的做法：
+  - 在终端里从 worktree 目录另开一个会话，专门跑验证：要用户自己开终端、到那边批准，步骤多。
+  - 验证完才合并：要先解决工具服务的启动位置，会拖住 2b。
+- 原因：用户 2026-10-19 授权全部按推荐项（决定 25 的原话）。
