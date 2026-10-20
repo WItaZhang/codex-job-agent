@@ -210,6 +210,23 @@ def test_the_detail_location_is_kept_beside_applypilots_row(box, monkeypatch):
         db.close()
 
 
+def test_a_failed_record_never_costs_applypilot_the_detail(box, monkeypatch):
+    fake = FakeWorkday(monkeypatch, listed="Seattle, WA")
+    fake.location = "Washington - Seattle"
+    connect, calls = ap_workday.get_connection, []
+
+    def locked_once():
+        calls.append(1)
+        if len(calls) == 1:  # the first call is the bridge recording the detail's places
+            raise sqlite3.OperationalError("database is locked")
+        return connect()
+
+    monkeypatch.setattr(ap_workday, "get_connection", locked_once)
+    discover(box)
+    job = the_job(box)
+    assert job.location == "Seattle, WA" and job.description.startswith("SYNTHETIC posting.")
+
+
 # --- refreshing stored jobs (item 18) ---------------------------------------------------------------
 
 
