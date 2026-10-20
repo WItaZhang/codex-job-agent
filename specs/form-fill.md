@@ -1,8 +1,12 @@
 # 填表模块（form-fill）规格
 
-状态：正文按 2026-10-15 定下的决定写，决定和原因见 `form-fill.decisions.md`。还没定的只有第 8 节（第一版范围），标了"待你确认"。录制的触发方式（4.2、4.3）和重放以哪种做法为主（6.4）都要经过 6.1 的可行性验证。验证结果推翻它们时，改写本规格。本规格写的是整个模块；按切片先做哪一部分、哪些暂时简化，见 `form-fill.plan.md`（切片 1：用现有填表 agent 填到提交前，只读回最后一页、核对、出报告）。
+状态：正文按已定的决定写，决定和原因见 `form-fill.decisions.md`。第一版范围（第 8 节）已定（决定 25）。录制的触发方式（4.2、4.3）和重放以哪种做法为主（6.4）都要经过 6.1 的可行性验证。验证结果推翻它们时，改写本规格。
 
-按 CLAUDE.md 的开发流程，下一步是做样例和最小切片计划。切片计划确认之前不写实现代码。切片的第一步是验证能不能录制（6.1）。
+本规格写的是整个模块。按切片先做哪一部分、哪些暂时简化，见各切片的计划（决定 26）：
+
+- 切片 1（已合并）：`form-fill.plan.md`。用现有填表 agent 填到提交前，只读回最后一页、核对、出报告。
+- 切片 2a：`form-fill.slice2a.plan.md`。逐页录制（`checkpoint`、换页补录、录制目录）和 Workday 读回。
+- 切片 2b：重放（6.4）。切片 2c：独立评审（4.5）和当场修正（4.6）。计划在各自开始时写。
 
 ## 1. 目标和使用场景
 
@@ -50,13 +54,15 @@ jobs:
     resume: research
     cover_letter: none              # 不交求职信
     revisit: true                   # 已有录制也真实访问一次（见 4.1）
+    ignore_filled_on_page: 2        # 只用于可行性验证（6.1 第 8 项）：忽略第 2 页的 checkpoint("filled")
 ```
 
 - 校验规则：
   - `id` 不能重复；
   - `url` 必须是 https；
   - `resume` 必须在 applicant.yaml 里；
-  - 求职信的 .txt 和 .pdf 都要存在。
+  - 求职信的 .txt 和 .pdf 都要存在；
+  - `ignore_filled_on_page` 可选，是正整数。
 
   有一条不对，整份清单都不运行。
 - 清单只说明填哪个岗位、用哪份简历和哪封求职信。选岗位、选简历、写求职信都不归本模块管。
@@ -314,6 +320,7 @@ rounds: [{round, fix_list: [field_id], review: ok | failed}]
 fields: [{
   field_id, page, group, group_index, appeared_after, control, required,
   question, options[], value, read_at,                     （value 和 options 里的联系方式打码）
+  read_from: filled | auto | final | unrecorded             （4.3：filled 时的读回、补录、结束时重读、未录到）
   source: {type: answer | resume | cover_letter | inferred | prefilled | unrecorded | none, ref},
   checks: [{by: code | reviewer,
             result: correct | wrong | no_answer | ambiguous | unreadable | source_mismatch
@@ -387,14 +394,16 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 文件名照 ApplyPilot 的写法，因为招聘方看得到文件名。
   - 核对上传时靠目录区分是哪个文件，不靠文件名（4.4）。
 - 先核对页面上的职位和公司与清单是否一致。对不上就停下（跳到了别的岗位），在报告里写出页面上的职位。
-- 每一页都调用两次 `checkpoint`：
+- 每一页都调用两次 `checkpoint`，每次都带上当前页的地址（Playwright 回复里的 Page URL）：
   - 填之前调用 `checkpoint("blank")`。代码录下空表，并把这一页每栏的编号和题目返回给填表 agent。
   - 填完、点"下一步"之前调用 `checkpoint("filled")`。代码在这时读回这一页（4.3）。
   - 最后一页停在提交按钮之前，同样调用 `checkpoint("filled")`。
-  - 网站打开了新标签页或弹窗时，填表 agent 在哪个标签页里，`checkpoint` 就录哪个（4.3）。
-- 代码另外在每次页面跳转时自动补录一份，不靠填表 agent 调用，防止它忘了调用 `checkpoint`。
-  - 补录读的是离开这一页之前的值，不是新页的空表。
-  - Workday 这类单页应用换页时没有真正的页面跳转，也要补录得到。
+  - 网站打开了新标签页或弹窗时，填表 agent 在哪个标签页里，`checkpoint` 就录哪个：代码在这次运行开始后新开的标签页里按地址找，找不到再用上一次 `checkpoint` 的那个（4.3）。
+  - `checkpoint` 是本模块自己的 MCP 服务，和 Playwright MCP 一起由填表 agent 的 Claude Code 启动，随它退出。它经 CDP 连投递用的 Chrome，整个运行保持一个连接。
+- 代码另外自动补录，不靠填表 agent 调用，防止它忘了调用 `checkpoint`：
+  - `checkpoint` 服务在后台每隔一段时间（配置，默认 1 秒）读一次岗位的标签页，只读不改。换页时，上一页最后一次读到的值就是这一页的补录。
+  - 所以补录读的是离开这一页之前的值，不是新页的空表；Workday 这类单页应用换页时没有真正的页面跳转，也补录得到。
+  - 离开前最后不到一个间隔里填的值可能没录到，所以 `checkpoint("filled")` 仍是主要的读回。
   - `checkpoint` 加自动补录这套做法，要经过 6.1 的可行性验证（第 3、8 项）。验证结果推翻它时，改写本规格。
 - 结束时输出一份 JSON（用无界面 Claude Code 的 `--json-schema`），代码按 schema 校验。内容如下：
   - `status`：`filled` / `gate` / `login_failed` / `needs_answer` / `expired` / `wrong_job` / `email_only` / `already_applied` / `page_error` / `stuck`。
@@ -456,11 +465,17 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 某一页既没有 filled 时的读回，也没有自动补录，这一页的栏都记为"读不出（未录到）"。
 - 读不出的栏记为"读不出"。这是本模块的问题，不是填表的问题。只要有读不出的栏，结论最多是"检查后可提交"。
 - **编号规则**：
-  - **页的标识**：先看步骤标题或主标题。页面没有标题时，用栏目结构的指纹。新出现了追问栏、原有的栏都还在时，不算换页。退回到见过的页时，沿用原来的页号。
-  - **栏的身份**：由三样组成：页、所在题组和它是第几段、题目原文。
+  - **页的标识**：
+    - 先看标题：当前步骤（`aria-current="step"`）的文字；没有时，取对话框或整页里全部标题的文字。地址（不含查询参数）和标题都一样，就是同一页。
+    - 页面没有标题时，用栏目结构的指纹（全部题目原文）。
+    - 新出现了追问栏、原有的栏都还在时，不算换页。
+    - 标题一样、栏目却完全不同（两边各 2 栏以上、没有一栏相同）时，算换页。
+    - 退回到见过的页时，沿用原来的页号。
+    - 一栏都没有的页（例如岗位介绍页）不编页号。
+  - **栏的身份**：由四样组成：页、所在题组（这一栏前面最近的标题）、题目原文、同一题组里同一题目第几次出现。
     - 同一身份第一次出现时分配序号，以后不再改。
-    - 后来出现的栏（例如选了 Yes 才出现的追问），取这一页还没用过的下一个序号，并记下 `appeared_after`（触发它的栏）。
-  - 同一页题目原文相同的栏，靠"第几段"区分。例如两段 Education 都有 School 栏：编号不同，报告里写明是 education 第几段。
+    - 后来出现的栏（例如选了 Yes 才出现的追问），取这一页还没用过的下一个序号，并记下 `appeared_after`：它前面最近的、已经编过号的栏。代码看不出是哪一栏触发的，取最近的。
+  - 同一页题目原文相同的栏，靠题组和"第几次出现"区分。例如两段 Education 都有 School 栏：编号不同，报告里写明是 education 第几段。
 
 ### 4.4 对题和核对（代码）
 
@@ -722,7 +737,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 录制里不存联系方式的明文，也不存密码：
     - 保存前，代码按上面两种方式打码：和 `profile.json` 相同的文字换成引用，例如 `{{personal.email}}`；其余按格式打码。
     - 截图里，代码按页面元素找出显示命中文字的元素，截图时给这些元素本身加样式涂黑。样式跟着元素走，所以对话框这类浏览器顶层元素里的也能涂到；盖在页面上的遮罩盖不到顶层元素。涂黑失败的截图不保存，记为"截图未存：打码失败"。
-    - MHTML 是编码过的整页，按文字替换不一定处理得到。打码做不到时不存 MHTML，只存简化 HTML 和截图（6.1 第 6 项验证）。
+    - MHTML 是编码过的整页，按文字替换处理不到。代码按 MIME 拆开，逐段解码、打码后写回；写回后的文件打码扫描仍有命中，就不存 MHTML，只存简化 HTML 和截图（6.1 第 6 项验证）。
     - 密码栏从不读值。
 - **简历**：交给评审之前由代码打码。先按 `profile.json` 的联系方式逐项替换，再用通用的邮箱、电话格式兜底。spec 3.3 要求这样做，但代码里还没有实现，本模块新写这个函数。起草标准答案用的 `get_redacted_resume`（第 9 节）也用它。
 - **页面内容不可信**：页面上写给 AI 的话，填表 agent 和评审一律不理。评审材料里的页面文字要标明是数据。
@@ -778,7 +793,7 @@ Playwright MCP 0.0.83 有 `--save-session` 和 `--output-dir`，但不能录 HAR
    - 截图由你看一遍涂黑。
    - MHTML 打码做不到时，改成不存 MHTML。
 7. **重放自检**：至少一个单页表通过 6.3 的重放自检。
-8. **换页时自动补录**：在多步表单的某一页，让填表 agent 填完后不调用 `checkpoint("filled")` 就翻页（或者测试时代码忽略这一次调用）。
+8. **换页时自动补录**：在多步表单的某一页，让代码忽略这一页的 `checkpoint("filled")`（清单里写 `ignore_filled_on_page`，2.1），相当于填表 agent 填完后没调用就翻了页。
    - 补录拿到的必须是离开前这一页的填入值，和截图一致，不是下一页的空表。
    - Workday 这类单页应用里的换页也要补录得到。
 
@@ -797,19 +812,23 @@ data/local/form-fill/
     logs/<岗位 id>.jsonl        填表 agent 的完整运行记录（写入时已按 5.6 打码，agent 不能读）
     uploads/<岗位 id>/          这个岗位上传用的简历和求职信 PDF
   recordings/<录制编号>/
-    meta.json                   地址、公司、职位、平台、录制日期、页数、能重测什么
+    meta.json                   地址、公司、职位、平台、录制日期、页数、能重测什么、最近一次的运行和结论
     form/                       空表（填之前录；只有结构，不存值）
-      p1.structure.json         每栏：编号、题目原文、控件、必填、选项、位置
+      p1.structure.json         每栏：编号、题组、题目原文、控件、必填、选项
       p1.mhtml                  整页，给人看（打码做不到时不存）
       p1.html                   去掉脚本的简化页面
-      p1.png                    截图
-      network.json              这一页加载时的 GET 响应（去掉 cookie 和认证头），给重放用；
-                                非 GET 请求只记方法和去掉查询参数的地址，不存内容（6.4 用）
+      p1.png                    截图（联系方式涂黑）
+      network.json              第一页加载时的 GET 响应（去掉 cookie 和认证头），给重放用
     fills/<运行编号>/           某一次填写（和空表分开存）
+      state.json                页的标识和每页的编号表（代码接着编号用）
+      checkpoints.json          每次 checkpoint：阶段、页号、填表 agent 给的地址、代码读的标签页的地址、用时
+      requests.json             非 GET 请求：只记方法和去掉查询参数的地址，不存内容（6.4 用）
       p1.prefilled.json         blank 时页面上已有的值（联系方式按 5.6 打码）
-      p1.values.json            每栏读回值和读回时间（联系方式按 5.6 打码）
-      p1.filled.html            把读回值写进去的页面（同样打码）
+      p1.values.json            最后一次 filled 时每栏的读回值和读回时间（联系方式按 5.6 打码）
+      p1.auto.json              后台补录的这一页最后一次读到的值（同样打码）
+      p1.filled.html            填完时的简化页面（同样打码；读回值以 p1.values.json 为准）
       p1.filled.png             截图（联系方式涂黑）
+      final.json                填表 agent 退出后对当前页的重新读回
       round1/ round2/           每轮修正后的读回
       filler_output.json        填表 agent 的结构化结果（来源声明）
       review_input.json         每轮评审拿到的材料
@@ -823,9 +842,9 @@ data/local/form-fill/
   - 其他网站：用 `other-<host>-<地址哈希前 8 位>`。
 - `form/` 只存题目、控件、选项、必填、位置。`checkpoint("blank")` 时页面上已有的值（网站或领英预填的）不存进 `form/`，存在 `fills/<运行编号>/p<n>.prefilled.json`。
 - 网络记录的规则：
-  - 只存 GET 请求的响应。非 GET 请求只记方法和地址，不存内容。
+  - 只存第一页加载时 GET 请求的响应。非 GET 请求只记方法和地址，不存内容。
   - 地址或内容里有联系方式（按 5.6 的两种方式判断）的请求，整条丢掉。
-  - 需要登录的页面不存网络记录，例如 Workday 的账号页和领英。
+  - 需要登录的页面不存网络记录，例如 Workday 的账号页和领英。代码这样判定：运行结束后，只有一页、没出现过密码栏、也没有一条响应带着联系方式（说明是登录后的页面）的录制，才留下 `network.json`，其余删掉。多步表单本来就只能重测核对（6.3），用不上网络记录。
 - 同一个岗位再次真实访问时：表单没变，就只多一份 `fills/<运行编号>/`；表单变了，就另存一份 `form-v2/`。
 - 录制全部保留，不自动删除，由用户自己删。每页的 MHTML 加截图大约几 MB。
 
@@ -947,7 +966,9 @@ data/local/form-fill/
 
 和项目其他部分一样：`uv run python -m pytest -q`、`uv run ruff check src tests`、`uv run ruff format --check src tests`。
 
-## 8. 第一版范围（待你确认）
+## 8. 第一版范围
+
+已定（决定 25）。按切片分步做（决定 26，见本规格开头）。
 
 **第一版做**：读清单 → 填表 → 停在提交前 → 读回 → 对照标准答案核对 → 独立评审 → 当场修正（最多 2 轮）→ 报告和录制。每个问题带一个评审猜测的原因类别。
 
@@ -993,7 +1014,7 @@ data/local/form-fill/
   - 修正轮数（2）；
   - 填表模型和 `reviewer_model`；
   - 单个岗位的超时、`fix_timeout_seconds`；
-  - `checkpoint` 的时限、判定卡住的次数（3）；
+  - `checkpoint` 的时限、判定卡住的次数（3）、后台补录读页的间隔（1 秒）；
   - `allowed_tools`、`disallowed_tools`；
   - 提交按钮词表；
   - 重放端口；
@@ -1008,5 +1029,5 @@ data/local/form-fill/
 
 ## 10. 未决问题
 
-- 只有第 8 节（第一版范围）还没定。
-- 6.1 的可行性验证可能推翻录制的触发方式（4.2、4.3：`checkpoint` 加页面跳转时自动补录）和重放以哪种做法为主（6.4）。推翻时改写对应的正文，原因记进决定记录。
+- 范围问题都已定（决定 25、26）。
+- 6.1 的可行性验证可能推翻录制的触发方式（4.2、4.3：`checkpoint` 加后台读页补录）和重放以哪种做法为主（6.4）。推翻时改写对应的正文，原因记进决定记录。
