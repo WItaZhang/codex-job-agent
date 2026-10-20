@@ -108,11 +108,14 @@ def _region_city(part: str) -> str | None:
     if len(pieces) != 2 or any("," in p for p in pieces):  # "San Francisco, CA - New York, NY" is not read
         return None
     region, city = (p.casefold() for p in pieces)
-    country = _COUNTRIES.get(region) or next((c for c in _REGIONS if _is_region(c, region)), None)
-    if country is None:
-        return None
-    if _is_region(country, city) or _COUNTRIES.get(city) == country:  # "USA - California": the country only
-        return f"location.{country}"
+    country = _COUNTRIES.get(region)
+    if country:
+        if _is_region(country, city) or _COUNTRIES.get(city) == country:  # "USA - California": the country only
+            return f"location.{country}"
+    else:  # after a state or province comes the city, even one named like a state ("New York - New York")
+        country = next((c for c in _REGIONS if _is_region(c, region)), None)
+        if country is None:
+            return None
     return _ref(country, pieces[1])
 
 

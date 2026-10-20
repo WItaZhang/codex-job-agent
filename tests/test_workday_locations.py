@@ -68,6 +68,21 @@ def test_more_formats(location, tags, confident):
 
 
 @pytest.mark.parametrize(
+    ("location", "tags"),
+    [
+        ("New York - New York", {"location.us.new_york"}),
+        ("District of Columbia - Washington", {"location.us.washington"}),
+        ("Quebec - Quebec", {"location.canada.quebec"}),
+        ("USA - California", {"location.us"}),  # a country first: its state names no city
+        ("Canada - Ontario", {"location.canada"}),
+    ],
+)
+def test_after_a_state_the_city_is_read_even_when_a_state_has_its_name(location, tags):
+    assert read(location) == (tags, {"location"})
+    assert read_locations(f"{location}; California - San Francisco", VOCAB) == [*tags, "location.us.san_francisco"]
+
+
+@pytest.mark.parametrize(
     ("location", "tags", "confident"),
     [
         ("San Francisco, CA", {"location.us.san_francisco"}, {"location"}),

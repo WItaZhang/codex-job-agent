@@ -82,3 +82,11 @@
 | A8 | USA.VA.Reston | 认不出 |
 | A9 | Massachusetts - Cambridge; Digital | 认不出（Digital 不是地点，整个 location 没把握） |
 | A10 | San Francisco, CA - New York, NY | 认不出 |
+
+## 决定 5（2026-10-20）：州 - 城市，城市和州同名时也读成城市
+
+- 合并前审查（进度会话，4 个视角分头找、每条 3 个 agent 试着反驳，3 票成立）发现："New York - New York" 读成 `location.us`，"District of Columbia - Washington" 也只读出 `location.us`，还算有把握。意图有 `require location.us.new_york` 时，这种岗位在打标签前就被放到一边；刷新地点时，子 agent 原来打的 `us.new_york` 也会被换成 `us`。
+- 原因：后一段是州名就只读国家，这条不管前一段是国家还是州都生效了。
+- 改成：只有前一段是国家时（"USA - California"）才只读国家；前一段是州或省时，后一段总是城市。这是第 31 条"地区 - 城市"本来的意思，审查没有给别的选项。
+
+**规则写在** `spec.md` §10 第 31 条。

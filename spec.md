@@ -516,7 +516,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - **地点的写法**（2026-10-18 用户选择，起因是 Workday 各公司的写法不同，见第 19 条）：一条地点里可以有几个地方，用 `;`、`|`、`/`、`or` 隔开（" - " 不算隔开）。每个地方去掉 Remote、Hybrid 这类词和括号后，认下面几种写法：
       - 城市在前："San Francisco, CA"、"Seattle, WA, United States"、"London, UK"；
       - 国家在前："US, CA, Santa Clara"、"India, Bengaluru"、"United States of America, McLean, Virginia"。三段的只认美国和加拿大：州或省占一段，另一段是城市；
-      - 地区 - 城市："California - Palo Alto"、"Israel - Tel Aviv"，地区是国家、美国的州或加拿大的省；
+      - 地区 - 城市："California - Palo Alto"、"Israel - Tel Aviv"，地区是国家、美国的州或加拿大的省。地区是州或省时，后一段总是城市，和州同名的也一样（"New York - New York" 读成 `us.new_york`）；只有地区是国家、后一段是它的州或省时（"USA - California"），才读成国家；
       - 只写国家，或者国家加州、省（"US, CA"、"Remote - US"），读成国家。
       - 认不出的地方（只写城市的 "San Jose"、地址代码 "US FL JAX 347"、"USA.VA.Reston"、不是地点的词）让整个 location 维度算没把握，交给子 agent。几个地方用 " - " 连在一起的（"San Francisco, CA - New York, NY"）也算认不出，不能只读出其中一个。国家名单写在代码里，比原来多收一些常见国家。
       - 从地点读 work_mode 时，一条地点里有几个地方的，只有每个地方都写了同一种（例如都写 Remote）才读出；只有一部分写了 Remote、Hybrid 这类词时，work_mode 算没把握，交给子 agent（2026-10-18 用户确认）。`workplace_type`、`is_remote` 字段照旧优先。
