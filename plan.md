@@ -1076,9 +1076,9 @@ vendor 文件只改 import，修正放在适配层（`applypilot_bridge.py`）�
 ```
 你：/fetch-jobs
 agent：（discover_jobs 跑完）新岗位 40 个；换了地点 120 个，其中 15 个读不全、退回重打；……
-       Salesforce JR214107 的地点从 "2 Locations" 换成 "California - Palo Alto; California - San Francisco"，
-       location 标签换成 us.palo_alto、us.san_francisco（它停在提交前，所以实际上不动——这里只是举例）
 ```
+
+例如一个待投的 Workday 岗位，地点从 "2 Locations" 换成 "US, CA, Santa Clara; US, WA, Seattle"，location 标签换成 us.santa_clara、us.seattle，其他标签不动。像 Salesforce JR214107 这样停在提交前的不动。
 
 ## 3. 样例
 
