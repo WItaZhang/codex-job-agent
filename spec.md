@@ -513,12 +513,12 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - **标题里的 Manager 表示 senior**（用户 2026-10-13 在 /today 里指出 "Manager, Data Science and Machine Learning (Risk and Fraud)" 没被识别为 senior，原话"除了 pm 之外的场景出现 manager，indicate seniority"，当天选定下面的范围）。标题写了明确级别（Senior / Sr / Staff / Principal、Junior / Jr、New Grad / Entry level / Early Career）时以明确级别为准，例如 "Area Manager - New Grad" → `seniority.new_grad`。没有明确级别时，标题里出现整词 Manager 就打 `seniority.senior`，算有把握。
     - PM 类标题除外，这类标题里的 Manager 是岗位名，不代表级别：Product Manager（含 Technical / Engineering Product Manager 等）、Program Manager（含 Technical Program Manager）、Project Manager、Product Marketing Manager。只认这几个连写的词组，所以 "Manager, Product Management"（管理 PM 的岗位）仍算 senior；"Senior Product Manager" 因为有 Senior 也算 senior。
     - 子 agent 打完整标签时用同一条规则（第 35 条）。规则加入之前已经打好标签的岗位不自动改：只读列出受影响的岗位，由用户逐个决定是否用 `correct_tags` 修正。
-    - **地点的写法**（2026-10-18 用户选择，起因是 Workday 各公司的写法不同，见第 19 条）：一条地点里可以有几个地方，用 `;`、`|`、`/`、`or` 隔开（" - " 不算隔开）。每个地方去掉 Remote、Hybrid 这类词和括号后，认下面几种写法：
+    - **地点的写法**（2026-10-18 用户选择，起因是 Workday 各公司的写法不同，见第 19 条）：一条地点里可以有几个地方，用 `;`、`|`、`/`、`or` 隔开（" - " 不算隔开）。每个地方去掉括号和表示 work_mode 的词（Remote、Hybrid、Work From Home、WFH、On-site、In Office 等，和读 work_mode 用的是同一组词，只按整词去掉）后，认下面几种写法：
       - 城市在前："San Francisco, CA"、"Seattle, WA, United States"、"London, UK"；
       - 国家在前："US, CA, Santa Clara"、"India, Bengaluru"、"United States of America, McLean, Virginia"。三段的只认美国和加拿大：州或省占一段，另一段是城市。两段都能当州或省时，一段是缩写、另一段是全名的，缩写是州或省，全名是城市（"US, NY, New York"、"USA, New York, NY" 都读成 `us.new_york`）；两段都是全名或都是缩写的算认不出（"United States of America, Washington, District of Columbia"）；
       - 地区 - 城市："California - Palo Alto"、"Israel - Tel Aviv"，地区是国家、美国的州或加拿大的省。地区是州或省时，后一段总是城市，和州同名的也一样（"New York - New York" 读成 `us.new_york`）；只有地区是国家、后一段是它的州或省时（"USA - California"），才读成国家；
       - 只写国家，或者国家加州、省（"US, CA"、"Remote - US"），读成国家。
-      - 认不出的地方（只写城市的 "San Jose"、地址代码 "US FL JAX 347"、"USA.VA.Reston"、不是地点的词）让整个 location 维度算没把握，交给子 agent。几个地方用 " - " 连在一起的（"San Francisco, CA - New York, NY"）也算认不出，不能只读出其中一个。国家名单写在代码里，比原来多收一些常见国家。
+      - 认不出的地方（只写城市的 "San Jose"、地址代码 "US FL JAX 347"、"USA.VA.Reston"、不是地点的词，包括站在城市位置上的 "Virtual"、"Nationwide"、"Multiple Locations" 这类词，名单写在代码里）让整个 location 维度算没把握，交给子 agent。几个地方用 " - " 连在一起的（"San Francisco, CA - New York, NY"）也算认不出，不能只读出其中一个。国家名单写在代码里，比原来多收一些常见国家。
       - 从地点读 work_mode 时，一条地点里有几个地方的，只有每个地方都写了同一种（例如都写 Remote）才读出；只有一部分写了 Remote、Hybrid 这类词时，work_mode 算没把握，交给子 agent（2026-10-18 用户确认）。`workplace_type`、`is_remote` 字段照旧优先。
 32. **硬约束预筛**只看有把握的维度：命中 exclude，或某个有 require 的维度在有把握读出的标签里一个都不满足，就先放一边。没把握的维度一律放行。预筛不写库，每次按当前意图重新计算，所以意图改了，被放一边的岗位会回来。
 33. **粗排**用和每日推荐同一个打分函数，对预标签打分，决定打标签的先后；分数相同时沿用原来的顺序（原文完整的优先，见第 23 条）。

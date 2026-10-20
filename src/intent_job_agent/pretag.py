@@ -57,7 +57,15 @@ _COUNTRIES = {
 }  # fmt: skip
 _REMOTE = ("remote", "work from home", "wfh", "anywhere")
 _ONSITE = ("on-site", "onsite", "on site", "in office", "in-office")
-_MODE_WORDS = ("remote", "hybrid", "on-site", "onsite", "on site", "anywhere")
+# Every word a work mode is read from is no place, so it is taken out before the place is read (spec §10 item 31).
+_MODE_WORDS = re.compile(r"\b(?:" + "|".join(map(re.escape, ("hybrid", *_REMOTE, *_ONSITE))) + r")\b", re.I)
+# Words that stand where a city would but name no place: the location is left to the tagger.
+_NOT_PLACES = {
+    "virtual", "nationwide", "national", "distributed", "flexible", "telecommute", "telework", "home", "home based",
+    "home-based", "home office", "field", "field based", "field-based", "travel", "global", "worldwide",
+    "international", "various", "various locations", "multiple", "multiple locations", "all locations", "any",
+    "any location", "other", "tbd", "headquarters", "hq", "corporate",
+}  # fmt: skip
 # Between places; " - " is not one (spec §10 item 31): it joins a region and a city.
 _SEPARATOR = re.compile(r";|\||\bor\b|/")
 _PARENTHESES = re.compile(r"\([^)]*\)")
@@ -92,9 +100,10 @@ def _slug(text: str) -> str:
 
 
 def _ref(country: str, city: str) -> str | None:
-    """A city-level ref; None for what is no city name (empty, an address code with digits, a country)."""
-    slug = _slug(city)
-    if not slug or any(c.isdigit() for c in city) or city.casefold() in _COUNTRIES:
+    """A city-level ref; None for what is no city name (empty, an address code with digits, a country, a word
+    such as "Nationwide")."""
+    slug, low = _slug(city), " ".join(city.casefold().split())
+    if not slug or any(c.isdigit() for c in city) or low in _COUNTRIES or low in _NOT_PLACES:
         return None
     return f"location.{country}.{slug}"
 
@@ -173,8 +182,7 @@ def _locations(text: str) -> tuple[list[str], str | None, bool]:
     for part in parts:
         modes.add(_mode(part))
         cleaned = _PARENTHESES.sub(" ", part)
-        for word in _MODE_WORDS:
-            cleaned = re.sub(word, " ", cleaned, flags=re.I)
+        cleaned = _MODE_WORDS.sub(" ", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,-")
         if not cleaned:  # only a work mode, such as "Remote"
             continue

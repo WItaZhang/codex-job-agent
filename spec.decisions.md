@@ -101,3 +101,13 @@
   - 没选的：两段都能当州时一律算没把握。代价：决定 3 里用户核对过的样例 A2 有 "US, NY, New York" 这一段，A2 的 location 会变成没把握；NVIDIA 这种"国家, 州缩写, 城市"的写法里，纽约、华盛顿这类城市都要交给子 agent。
 
 **规则写在** `spec.md` §10 第 31 条。
+
+## 决定 7（2026-10-20）：work_mode 的词全部从地点里去掉；Virtual、Nationwide 这类词算认不出
+
+- 合并前审查发现（3 票成立）："US - Work From Home" 读成 `us.work_from_home`，"India, Work From Home" 读成 `india.work_from_home`，"United States - In Office" 读成 `us.in_office`，"US - Virtual"、"USA - Nationwide" 也读成城市，都算有把握。原来的代码这几条都算没把握。
+- 原因：Work From Home、WFH、In Office 这些词只用来读 work_mode，没有像 Remote 一样从地点里去掉；"地区 - 城市"和"国家在前"两种新写法会把剩下的词当成城市。
+- 定下的（按用户 2026-10-19 授权全部按推荐项，即审查的推荐）：
+  - 读 work_mode 的词全部从地点里去掉，和 Remote 一样；只按整词去掉，不会把 "Kingston Site" 里的 "on Site" 当成 On-site。"US - Work From Home" 读成 `us`，work_mode 读成 remote。
+  - 站在城市位置上、不是地名的词（Virtual、Nationwide、Multiple Locations、Field Based 这类），让整个 location 算没把握。名单写在代码里，新见到的这类词照例交给子 agent，以后在开发流程里补名单。
+
+**规则写在** `spec.md` §10 第 31 条。

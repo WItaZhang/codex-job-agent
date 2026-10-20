@@ -100,6 +100,24 @@ def test_country_first_with_two_parts_that_could_be_the_state(location, tags):
 @pytest.mark.parametrize(
     ("location", "tags", "confident"),
     [
+        ("US - Work From Home", {"location.us", "work_mode.remote"}, BOTH),
+        ("India, Work From Home", {"location.india", "work_mode.remote"}, BOTH),
+        ("US - WFH", {"location.us", "work_mode.remote"}, BOTH),
+        ("United States - In Office", {"location.us", "work_mode.onsite"}, BOTH),
+        ("Austin, TX (In-Office)", {"location.us.austin", "work_mode.onsite"}, BOTH),
+        ("US - Virtual", set(), set()),
+        ("USA - Nationwide", set(), set()),
+        ("Nationwide, US", set(), set()),
+        ("Canada, Multiple Locations", set(), set()),
+    ],
+)
+def test_work_mode_words_are_no_place_and_other_words_that_are_no_place_are_not_read(location, tags, confident):
+    assert read(location) == (tags, confident)
+
+
+@pytest.mark.parametrize(
+    ("location", "tags", "confident"),
+    [
         ("San Francisco, CA", {"location.us.san_francisco"}, {"location"}),
         ("New York, NY (Hybrid)", {"location.us.new_york", "work_mode.hybrid"}, {"location", "work_mode"}),
         ("Seattle, WA, United States", {"location.us.seattle"}, {"location"}),
