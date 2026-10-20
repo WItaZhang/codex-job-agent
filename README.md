@@ -78,6 +78,7 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 ## 投递
 
 借用 [ApplyPilot](https://github.com/Pickle-Pixel/ApplyPilot) 的投递流程：每个岗位由一个 Claude Code 在 Chrome 里填表、上传简历和求职信。
+抽查的岗位和"停在提交前"名单里的公司由填表模块（[specs/form-fill.md](specs/form-fill.md)）来填：填到提交前，代码读回每一栏、对照标准答案核对，每个岗位一份报告。
 
 1. 准备投递资料（都在 `data/local/applicant/`，git 不管）：
    - `applicant.yaml`：参照 [示例](docs/examples/applicant/applicant.example.yaml)。写明简历（PDF 和文本）、"停在提交前"的公司名单；
@@ -88,11 +89,16 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
      以及搬家类筛选题的英文回答。不写时照 ApplyPilot：只接受 `profile.json` 里那一个城市，搬家题答不能搬家。不从意图推导，地点变了要自己改。
    - `profile.json`：ApplyPilot 的格式，参照 [示例](docs/examples/applicant/profile.example.json)。联系方式、工作许可、薪资、招聘网站密码由你自己填写；
      不要写 SSN 和银行卡。
+   - `answers.yaml`、`checklist.yaml`：标准答案和要求清单，参照 [示例](docs/examples/applicant/)。两步都照它们答题，自动提交的也一样；
+     工作许可、期望薪资和 EEO 要和 `profile.json` 一致，不一致就不开始投递。
 2. 本机需要：Chrome、Node.js（`npx`）、Claude Code 命令行。可选：Gmail MCP 授权（读验证码）、`data/local/.env` 里的 `CAPSOLVER_API_KEY`。
 3. 输入 `/apply`：
    - 先给这一批写求职信（子 agent 写，代码校验，打印成一页 PDF）。
-   - 第一步：前 5 个填好后全部停在提交前，每个开在投递用 Chrome 的单独标签页里，你检查后自己提交，然后说"1-4 已投"。
-   - 第二步：你说"继续"并再批准一次，其余的自动提交；"停在提交前"名单里的公司仍然停。
+   - 第一步：前 5 个由填表模块填好、逐栏核对后全部停在提交前，每个开在投递用 Chrome 的单独标签页里。你按报告检查后自己提交，然后说"1-4 已投"。
+     遇到验证码、邮件验证码、单点登录就停在那一页，你处理完说"重跑 3"。
+   - 第二步：你说"继续"并再批准一次，其余的自动提交；"停在提交前"名单里的公司仍由填表模块填好、停下。
+   - 页面写明筛选题要本人作答、不许用 AI 时，agent 不答，停下这个岗位，把原文告诉你。
+   - 问"这周达标了吗"：`apply_stats` 按每次尝试给出本周和上周的提交数、成功率和各类失败。
    - 每一步都有弹窗；仲裁协议、SSN、银行卡或申请费，agent 会停下并告诉你。结束时给一张检查单：每个岗位打开过的其他网站、发出的邮件。
 4. 风险：自动提交撤不回；招聘网站可能封号；用 CapSolver 破解验证码违反多数网站的条款；投递用的 Chrome 带着你日常的登录状态
    （已删掉保存的密码、银行卡和自动填充，屏蔽了邮箱、网银等网站，但屏蔽名单不是严格的安全边界）。

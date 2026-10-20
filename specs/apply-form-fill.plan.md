@@ -170,7 +170,7 @@ src/intent_job_agent/apply_fill.py   /apply 和填表模块之间的转换（纯
 - `tools.py`：
   - `prepare_apply_batch(only=...)`，以及不合格链接的 `problems`；
   - `start_applying` 按岗位分路、写清单、一致性检查、个人标签页提醒、可能已提交时停下；
-  - `apply_status` 的新字段，以及服务重启后按备注里的运行编号找报告；
+  - `apply_status` 的新字段。服务重启后 `apply_status` 没有这一步的记录，备注里的运行编号指向报告所在的目录，不另做工具；
   - `get_apply_setup` 显示标准答案、要求清单和一致性检查的结果；
   - 每个结果和 `mark_applications` 都写一条尝试记录；新的读级工具 `apply_stats`。
   - 不新增提交级工具，所以 `.claude/settings.json` 和 `.codex/config.toml` 的"每次询问"不用改。`apply_stats` 是读级，按项目现有的做法登记。
@@ -228,7 +228,7 @@ src/intent_job_agent/apply_fill.py   /apply 和填表模块之间的转换（纯
   - S6 `only`：全是 review；不是待投、没有求职信、同一个岗位的几条都整批拒绝；
   - 清单不合格时整步不开始，不写决定日志；
   - 一致性检查不通过时两步都不开始；
-  - `apply_status` 的新字段，以及服务重启后凭备注找到报告；
+  - `apply_status` 的新字段；备注以结果码开头，带着填表运行编号；
   - 个人标签页的提醒；
   - S11：两种模式的指令里都有"筛选题不许用 AI 写"那一条；读出这个结果码后记 failed，原因是它；
   - 每个结果都写一条尝试记录，`mark_applications` 也写一条；对 `apply_attempts` 的 UPDATE 和 DELETE 被拒绝；
