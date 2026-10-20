@@ -41,6 +41,7 @@ description: 每日模块①：抓取今天能抓到的岗位，代码预打标�
 再调用一次 `get_fetch_status()`，用两三行告诉用户：
 
 - 新抓到多少（看 `discovery_status` 和 `boards_status` 的结果）、预筛排除多少、今天打了多少标签（剩余预算）、还有多少在排队。
+- 已存的岗位换了地点的有多少（`discovery_status` 结果里的 `synced.relocated`），退回重新打标签的有多少（`synced.retagged`）；都是 0 就不提。
 - 子 agent 报告的新 key（如果有）。
 - 现在有多少打好标签、还没给用户看过的岗位可以进今天的 7+3。
 

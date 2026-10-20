@@ -1,0 +1,46 @@
+# SYNTHETIC samples A1-A10: how pre-tagging reads a stored location (spec section 10 item 31; spec.decisions.md
+# decisions 3 and 4). Written in the formats Workday employers use; no real posting is copied. `tags` are the
+# location and work_mode pre-tags; `confident` the dimensions read with confidence. A2 and A10 are the two
+# samples decision 3 recorded; the others were redrafted on 2026-10-20 from the formats item 31 lists.
+synthetic: true
+samples:
+  A1:  # country first, state then city
+    location: "US, CA, Santa Clara"
+    tags: [location.us.santa_clara]
+    confident: [location]
+  A2:  # several places, only one of them says Remote: work_mode is left to the tagger
+    location: "US, CA, Santa Clara; US, CA, Remote; US, NY, New York; US, WA, Seattle"
+    tags: [location.us.santa_clara, location.us, location.us.new_york, location.us.seattle]
+    confident: [location]
+  A3:  # region - city, a US state as the region; a primary and an additional location
+    location: "California - Palo Alto; California - San Francisco"
+    tags: [location.us.palo_alto, location.us.san_francisco]
+    confident: [location]
+  A4:  # country first, then the city
+    location: "India, Bengaluru"
+    tags: [location.india.bengaluru]
+    confident: [location]
+  A5:  # country first, city then state
+    location: "United States of America, McLean, Virginia"
+    tags: [location.us.mclean]
+    confident: [location]
+  A6:  # region - city, a country as the region
+    location: "Israel - Tel Aviv"
+    tags: [location.israel.tel_aviv]
+    confident: [location]
+  A7:  # a country and a state only: read as the country
+    location: "US, CA"
+    tags: [location.us]
+    confident: [location]
+  A8:  # an address code
+    location: "USA.VA.Reston"
+    tags: []
+    confident: []
+  A9:  # one place is not a place (a department name): the whole location is left to the tagger
+    location: "Massachusetts - Cambridge; Digital"
+    tags: []
+    confident: []
+  A10:  # two places joined with " - ": not read, and never read as only one of them
+    location: "San Francisco, CA - New York, NY"
+    tags: []
+    confident: []
