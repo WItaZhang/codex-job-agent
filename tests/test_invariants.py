@@ -1,4 +1,4 @@
-"""Guarantees the code must enforce regardless of what the model says (spec §6, §9)."""
+"""Guarantees the code must enforce regardless of what the model says (spec §6, §6.1)."""
 
 import random
 
@@ -71,7 +71,7 @@ def test_every_version_after_the_first_has_a_user_decision(world):
 
 
 # ---------------------------------------------------------------------------
-# Independent recomputation of replay (spec §9.4). Deliberately written without
+# Independent recomputation of replay (spec §6.1 item 4). Deliberately written without
 # importing the scoring module.
 
 POINTS = {"strong_avoid": -2, "avoid": -1, "prefer": 1, "strong_prefer": 2}
@@ -166,7 +166,7 @@ def test_replay_matches_independent_recomputation(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Multi-day simulation from initialization (spec §9).
+# Multi-day simulation from initialization (spec §6.1).
 
 
 def test_multi_day_simulation_keeps_all_guarantees(tmp_path):
@@ -215,20 +215,20 @@ def test_multi_day_simulation_keeps_all_guarantees(tmp_path):
 
     versions = world.store.versions()
     decisions = {d["id"]: d for d in world.store.decisions()}
-    # §9.1 every change has a recorded user choice
+    # §6.1 item 1: every change has a recorded user choice
     assert all(decisions[v["decision_id"]]["kind"] == "accept" for v in versions[1:])
     accepted = [d for d in decisions.values() if d["kind"] == "accept"]
     assert len(accepted) == len(versions) - 1
-    # §9.2 one entry per dimension.key at every version (also holds structurally after re-validation)
+    # §6.1 item 2: one entry per dimension.key at every version (also holds structurally after re-validation)
     for version in versions:
         intent = IntentModel.model_validate_json(version["data"])
         refs = [ref for ref, _ in intent.iter_entries()]
         assert len(refs) == len(set(refs))
-    # §9.3 exceptions only exist if the user chose a proposal adding one
+    # §6.1 item 3: exceptions only exist if the user chose a proposal adding one
     final = world.store.current_intent()
     exceptions = sum(len(entry.exceptions) for _, entry in final.iter_entries())
     assert exceptions <= chosen_exceptions
-    # §9.4 replay equals independent recomputation on the final intent
+    # §6.1 item 4: replay equals independent recomputation on the final intent
     spec = {
         d: {k: e.model_dump(mode="json", include={"level", "exceptions"}) for k, e in keys.items()}
         for d, keys in final.entries.items()
