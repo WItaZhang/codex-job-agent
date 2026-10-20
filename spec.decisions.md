@@ -90,3 +90,14 @@
 - 改成：只有前一段是国家时（"USA - California"）才只读国家；前一段是州或省时，后一段总是城市。这是第 31 条"地区 - 城市"本来的意思，审查没有给别的选项。
 
 **规则写在** `spec.md` §10 第 31 条。
+
+## 决定 6（2026-10-20）：国家在前的三段写法，两段都能当州时只认"缩写加全名"
+
+- 合并前审查发现（3 票成立）："United States of America, Washington, District of Columbia" 读成 `us.district_of_columbia`，"USA, New York, NY" 读成 `us.ny`，"US, Washington, DC" 读成 `us.dc`，都算有把握。原因：代码只看第二段是不是州，是就把第三段当城市。
+- 审查建议：两段都能当州时一律算没把握，交给子 agent。
+- 定下的（按用户 2026-10-19 授权全部按推荐项，由本会话起草推荐项）：
+  - **两段一个是缩写、一个是全名：缩写是州或省，全名是城市（推荐项）**。缩写只可能是州，不会是城市名，所以没有歧义。"US, NY, New York"、"USA, New York, NY" 读成 `us.new_york`，"US, Washington, DC" 读成 `us.washington`。
+  - 两段都是全名或都是缩写：算认不出，交给子 agent（这一半照审查建议）。
+  - 没选的：两段都能当州时一律算没把握。代价：决定 3 里用户核对过的样例 A2 有 "US, NY, New York" 这一段，A2 的 location 会变成没把握；NVIDIA 这种"国家, 州缩写, 城市"的写法里，纽约、华盛顿这类城市都要交给子 agent。
+
+**规则写在** `spec.md` §10 第 31 条。

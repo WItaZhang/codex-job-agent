@@ -32,6 +32,7 @@ _REGIONS = {
     "us": set(_US_STATES) | _STATE_NAMES,
     "canada": set(_CA_PROVINCES) | set(_CA_PROVINCES.values()),
 }
+_REGION_CODES = {"us": set(_US_STATES), "canada": set(_CA_PROVINCES)}
 _COUNTRIES = {
     "us": "us", "usa": "us", "u.s.": "us", "u.s.a.": "us", "united states": "us",
     "united states of america": "us", "america": "us",
@@ -143,9 +144,14 @@ def _place(part: str) -> str | None:
         if tail:  # "Seattle, WA, United States"
             return _ref(tail, tokens[0]) if tail != "us" or _is_region("us", low[1]) else None
         if head in _REGIONS:  # "US, CA, Santa Clara"; "United States of America, McLean, Virginia"
-            if _is_region(head, low[1]):
+            regions = [_is_region(head, t) for t in low[1:]]
+            if all(regions):  # either could be the state: only a code beside a full name tells ("US, NY, New York")
+                regions = [t in _REGION_CODES[head] for t in low[1:]]
+                if all(regions) or not any(regions):
+                    return None
+            if regions[0]:
                 return _ref(head, tokens[2])
-            if _is_region(head, low[2]):
+            if regions[1]:
                 return _ref(head, tokens[1])
     return None
 

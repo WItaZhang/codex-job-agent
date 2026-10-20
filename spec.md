@@ -515,7 +515,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - 子 agent 打完整标签时用同一条规则（第 35 条）。规则加入之前已经打好标签的岗位不自动改：只读列出受影响的岗位，由用户逐个决定是否用 `correct_tags` 修正。
     - **地点的写法**（2026-10-18 用户选择，起因是 Workday 各公司的写法不同，见第 19 条）：一条地点里可以有几个地方，用 `;`、`|`、`/`、`or` 隔开（" - " 不算隔开）。每个地方去掉 Remote、Hybrid 这类词和括号后，认下面几种写法：
       - 城市在前："San Francisco, CA"、"Seattle, WA, United States"、"London, UK"；
-      - 国家在前："US, CA, Santa Clara"、"India, Bengaluru"、"United States of America, McLean, Virginia"。三段的只认美国和加拿大：州或省占一段，另一段是城市；
+      - 国家在前："US, CA, Santa Clara"、"India, Bengaluru"、"United States of America, McLean, Virginia"。三段的只认美国和加拿大：州或省占一段，另一段是城市。两段都能当州或省时，一段是缩写、另一段是全名的，缩写是州或省，全名是城市（"US, NY, New York"、"USA, New York, NY" 都读成 `us.new_york`）；两段都是全名或都是缩写的算认不出（"United States of America, Washington, District of Columbia"）；
       - 地区 - 城市："California - Palo Alto"、"Israel - Tel Aviv"，地区是国家、美国的州或加拿大的省。地区是州或省时，后一段总是城市，和州同名的也一样（"New York - New York" 读成 `us.new_york`）；只有地区是国家、后一段是它的州或省时（"USA - California"），才读成国家；
       - 只写国家，或者国家加州、省（"US, CA"、"Remote - US"），读成国家。
       - 认不出的地方（只写城市的 "San Jose"、地址代码 "US FL JAX 347"、"USA.VA.Reston"、不是地点的词）让整个 location 维度算没把握，交给子 agent。几个地方用 " - " 连在一起的（"San Francisco, CA - New York, NY"）也算认不出，不能只读出其中一个。国家名单写在代码里，比原来多收一些常见国家。
