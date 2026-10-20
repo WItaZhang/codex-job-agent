@@ -28,6 +28,8 @@ _CA_PROVINCES = {
 }  # fmt: skip
 # The states or provinces a place may name besides its city (spec §10 item 31: only the US and Canada): code -> name.
 _REGION_CODES = {"us": _US_STATES, "canada": _CA_PROVINCES}
+# A state named like a country: that state only where the place also names the US.
+_REGIONS_NAMED_LIKE_A_COUNTRY = {"georgia"}
 # Well-known cities named like a state or province: read as the city only beside that state or province.
 _NAMED_LIKE_REGION = {
     ("us", "new york", "new york"),
@@ -127,6 +129,8 @@ def _city(country: str, text: str, region: str | None = None) -> str | None:
         return None
     if set(re.split(r"[\s-]+", low)) & _NOT_PLACE_WORDS:
         return None
+    if any(w.isupper() and any(w.casefold() in codes for codes in _REGION_CODES.values()) for w in text.split()):
+        return None  # "Washington DC", "Austin TX": a state's code inside the city position
     if (
         any(_region(c, low) for c in _REGION_CODES)
         and (country, _region(country, region or ""), low) not in _NAMED_LIKE_REGION
@@ -152,6 +156,9 @@ def _region_city(part: str) -> str | None:
 
 def _place(part: str) -> str | None:
     """One place (spec §10 item 31) -> a location ref; None when unsure."""
+    pieces = [p.strip().casefold() for p in re.split(r",| - ", part)]
+    if set(pieces) & _REGIONS_NAMED_LIKE_A_COUNTRY and "us" not in {_COUNTRIES.get(p) for p in pieces}:
+        return None  # "Tbilisi, Georgia": Georgia may be the country
     if " - " in part:
         return _region_city(part)
     tokens = [t.strip() for t in part.split(",") if t.strip()]

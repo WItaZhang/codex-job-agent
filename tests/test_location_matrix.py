@@ -138,8 +138,41 @@ def matrix(rows, city_of, expected) -> list[tuple[str, tuple]]:
     return cases
 
 
+# A state named like a country is that state only where the place names the US too (or writes its code).
+NAMED_LIKE_A_COUNTRY = {"Georgia"}
+
+
 def test_a_city_of_the_state_is_read_in_every_format():
-    cases = matrix(STATE_CITIES, lambda r: r[3], lambda r, *_: city(r[0], r[3].casefold().replace(" ", "_")))
+    def expected(row, fmt, form):
+        if row[1] in NAMED_LIKE_A_COUNTRY and form == 0 and "country" not in fmt:
+            return UNSURE  # "Georgia - Atlanta", "Atlanta, Georgia": Georgia may be the country
+        return city(row[0], row[3].casefold().replace(" ", "_"))
+
+    assert not wrong(matrix(STATE_CITIES, lambda r: r[3], expected))
+
+
+def test_a_state_named_like_a_country_needs_the_us_beside_it():
+    cases = [
+        ("Georgia - Tbilisi", UNSURE),
+        ("Tbilisi, Georgia", UNSURE),
+        ("Georgia", UNSURE),
+        ("Atlanta, Georgia, United States", city("us", "atlanta")),
+        ("US, Georgia, Atlanta", city("us", "atlanta")),
+        ("Atlanta, GA", city("us", "atlanta")),
+        ("Georgia, US", ({"location.us"}, LOCATION)),
+    ]
+    assert not wrong(cases)
+
+
+def test_a_state_code_inside_the_city_position_is_no_city():
+    cases = [
+        ("Washington D.C., US", UNSURE),
+        ("Washington DC, United States", UNSURE),
+        ("Austin TX, USA", UNSURE),
+        ("US - Austin TX", UNSURE),
+        ("La Jolla, CA", city("us", "la_jolla")),  # "La" is a word of the name, not Louisiana
+        ("De Pere, WI", city("us", "de_pere")),
+    ]
     assert not wrong(cases)
 
 

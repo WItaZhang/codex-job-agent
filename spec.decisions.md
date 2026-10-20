@@ -160,3 +160,14 @@
   - 名单里有 international，所以 "International Falls, MN" 这类真地名会算没把握，交给子 agent（宁可没把握）。
 
 **规则写在** `spec.md` §10 第 31 条。
+
+## 决定 12（2026-10-20）：和国家同名的州要有美国在旁边；城市位置里夹着州缩写的不当城市
+
+- 本会话按复核的方法自己试相近写法时又找到两处有把握地读错：
+  - "Georgia - Tbilisi"、"Tbilisi, Georgia" 读成 `us.tbilisi`：Georgia 既是美国的州，也是国家。
+  - "Washington D.C., US" 读成 `us.washington_dc`，"Austin TX, USA" 读成 `us.austin_tx`：州缩写夹在城市那一段里，读出的 key 和 "Washington, DC" 的 `us.washington` 对不上，意图里的 require 也就对不上。
+- 定下的（按用户 2026-10-19 授权全部按推荐项，照"宁可没把握，不能有把握地读错"）：
+  - Georgia 这样和国家同名的州，只在同一个地方也写了美国时才当州；写成缩写 GA 的不受影响。否则整个地方算认不出。代价："Atlanta, Georgia"、"Georgia - Atlanta" 也交给子 agent。
+  - 城市位置上有写成大写、又是州或省缩写的词，就不当城市。只看大写的，"La Jolla"、"De Pere" 里的 La、De 不受影响。
+
+**规则写在** `spec.md` §10 第 31 条。
