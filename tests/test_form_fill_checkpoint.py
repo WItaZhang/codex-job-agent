@@ -12,10 +12,10 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
-from intent_job_agent.form_fill.checkpoint import Config, Session, Worker
-from intent_job_agent.form_fill.recording import Capture, read_run
 
 from intent_job_agent.form_fill import checkpoint
+from intent_job_agent.form_fill.checkpoint import Config, Session, Worker
+from intent_job_agent.form_fill.recording import Capture, read_run
 from intent_job_agent.form_fill.redact import Redactor
 
 from .test_form_fill_recording import PROFILE, leaks
@@ -99,7 +99,7 @@ class FakeBrowser:
         self.captures += 1
         return Capture(html="<p>synthetic</p>", screenshot=b"\x89PNG", why="", mhtml=None)
 
-    def drain_network(self) -> list[dict]:
+    def drain_network(self, bodies=frozenset()) -> list[dict]:
         out, self.events = self.events, []
         return out
 
@@ -306,7 +306,7 @@ def test_the_service_offers_only_the_checkpoint_tool(tmp_path):
     server = checkpoint.build_server(Stub())
     tools = asyncio.run(server.list_tools())
     assert [tool.name for tool in tools] == ["checkpoint"]
-    schema = tools[0].inputSchema
+    schema = tools[0].input_schema
     assert set(schema["properties"]) == {"stage", "url"}
     assert schema["properties"]["stage"].get("enum") == ["blank", "filled"] or "anyOf" in schema["properties"]["stage"]
 
@@ -419,4 +419,4 @@ def test_the_service_records_a_three_step_form_in_a_real_browser(tmp_path, site)
     network = (rec / "form" / "network.partial.jsonl").read_text()
     assert "/app.js" in network and "sid=synthetic" not in network
     assert (rec / "form" / "p1.png").is_file() and (rec / "form" / "p1.html").is_file()
-    assert leaks(tmp_path) == []
+    assert leaks(rec) == []  # the browser's own profile folder is not the recording's

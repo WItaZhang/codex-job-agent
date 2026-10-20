@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from .compare import EMPTY_BLOCK, EXTRA, NAV_NOTE, OLD_PAGE, REQUIRED_EMPTY, check_page, is_empty
-from .models import JobReport
+from .models import CheckResult, JobReport, PageInfo
 from .runner import GATE_REASONS
 
 CONCLUSIONS = {
@@ -58,6 +58,13 @@ UNREADABLE = ("tab_lost", "readback_failed", "system_error")
 # RUN_RULES' result, and the one ApplyPilot's own prompt offers for a work-authorization bar (decision 23)
 NOT_ELIGIBLE = ("not_eligible", "not_eligible_work_auth")
 SEVERITIES = {"fact": "错的事实", "guess": "无依据的猜测", "missing": "缺漏", "format": "格式与写法"}
+UNRECORDED = '未录到：这一页既没有 checkpoint("filled") 时的读回，也没有补录'
+READ_FROM = {
+    "filled": 'checkpoint("filled") 时',
+    "auto": "补录",
+    "final": "填表 agent 退出后重读",
+    "unrecorded": "未录到",
+}
 
 
 def conclude(meta: dict, results) -> tuple[str, str | None]:
@@ -76,7 +83,7 @@ def conclude(meta: dict, results) -> tuple[str, str | None]:
         return "unreadable", None
     if agent not in (None, "dry_run"):
         return "not_filled", agent
-    if not any(r.field_id for r in results):
+    if not any(r.field_id and r.result != "unreadable" for r in results):
         return "unreadable", None
     if any(r.severity in ("fact", "guess") for r in results):
         return "do_not_submit", None
@@ -218,11 +225,47 @@ def todo_items(meta: dict, conclusion: str, reason: str | None, results) -> tupl
     return tuple(items)
 
 
-def job_report(meta: dict, fields, answers, contacts: bool = True) -> JobReport:
-    """One job's report from its meta.json and the fields read back from its last page. `contacts=False` for a page
+def check_pages(pages, answers, contacts: bool = True, company: str = "") -> tuple[CheckResult, ...]:
+    """Every page of a recorded run checked on its own (segments are matched page by page), each result carrying
+    its page, where the values come from, when they were read and the field's source. A page never read back has
+    every field unreadable."""
+    results: list[CheckResult] = []
+    for page in pages:
+        where = {"page": page.page, "read_from": page.read_from, "read_at": page.read_at}
+        if page.read_from == "unrecorded":
+            results += [
+                CheckResult(field_id=f.id, question=f.question, key=None, result="unreadable", note=UNRECORDED, **where)
+                for f in page.fields
+            ]
+            continue
+        for r in check_page(page.fields, answers, contacts=contacts, company=company) if page.fields else ():
+            results.append(r.model_copy(update={**where, "source": page.sources.get(r.field_id)}))
+    return tuple(results)
+
+
+def _page_items(pages) -> list[str]:
+    items = []
+    for page in pages:
+        if page.read_from == "unrecorded" and page.fields:
+            title = f"（{page.title}）" if page.title else ""
+            items.append(
+                f"第 {page.page} 页{title}没录到读回值：这一页的 {len(page.fields)} 栏读不出（{UNRECORDED}），"
+                "请你在标签页里看这一页。"
+            )
+    return items
+
+
+def job_report(meta: dict, fields, answers, contacts: bool = True, pages=None) -> JobReport:
+    """One job's report from its meta.json and the fields read back from its last page, or, for a run recorded page
+    by page (slice 2a), from every page of its recording (`pages`, recording.read_run). `contacts=False` for a page
     saved before redact.VERSION (see compare.check_page)."""
-    results = check_page(fields, answers, contacts=contacts, company=meta.get("company", "")) if fields else ()
+    company = meta.get("company", "")
+    if pages is None:
+        results = check_page(fields, answers, contacts=contacts, company=company) if fields else ()
+    else:
+        results = check_pages(pages, answers, contacts=contacts, company=company)
     conclusion, reason = conclude(meta, results)
+    infos = tuple(PageInfo(page=p.page, title=p.title, read_from=p.read_from, read_at=p.read_at) for p in pages or ())
     return JobReport(
         job_id=meta.get("job_id", ""),
         company=meta.get("company", ""),
@@ -232,9 +275,11 @@ def job_report(meta: dict, fields, answers, contacts: bool = True) -> JobReport:
         conclusion=conclusion,
         not_filled_reason=reason,
         fields=results,
-        todo=todo_items(meta, conclusion, reason, results),
+        todo=todo_items(meta, conclusion, reason, results) + tuple(_page_items(pages or ())),
         page_dir=meta.get("page_dir"),
         notes=tuple(meta.get("notes") or ()),
+        recording_id=meta.get("recording"),
+        pages=infos,
     )
 
 
@@ -256,15 +301,16 @@ def _problems(report: JobReport) -> set[str]:
     return keys | {key for r in report.fields if r.result == "ambiguous" for key in r.candidates}
 
 
-def summary_md(run_id: str, reports) -> str:
+def summary_md(run_id: str, reports, skipped=()) -> str:
+    """The run's summary. `skipped`: jobs not visited because they were recorded before (spec 4.1)."""
     reports = list(reports)
     counts = {c: sum(r.conclusion == c for r in reports) for c in CONCLUSIONS}
     lines = [
         f"# 填表报告 {run_id}",
         "",
         f"- 岗位 {len(reports)} 个：" + "、".join(f"{CONCLUSIONS[c]} {n}" for c, n in counts.items() if n),
-        "- 在存下的页上核对，没有访问网站。每个岗位的逐栏结果在同一目录的 <岗位>.json 里。",
-        "- 本模块从不提交；切片 1 没有独立评审，所以结论最好也只到“检查后可提交”。",
+        "- 核对在存下的页上做，不访问网站。每个岗位的逐栏结果在同一目录的 <岗位>.json 里。",
+        "- 本模块从不提交；还没有独立评审（切片 2c），所以结论最好也只到“检查后可提交”。",
         "",
     ]
     for report in reports:
@@ -279,6 +325,18 @@ def summary_md(run_id: str, reports) -> str:
             report.todo[0] if report.todo else "",
             "",
             f"- {_tally(report)}",
+            *(
+                [
+                    "- 读回："
+                    + "；".join(
+                        f"第 {p.page} 页{f' {p.title}' if p.title else ''}：{READ_FROM[p.read_from]}"
+                        for p in report.pages
+                    )
+                ]
+                if report.pages
+                else []
+            ),
+            *([f"- 录制：{report.recording_id}"] if report.recording_id else []),
             *([f"- 页面目录：{report.page_dir}"] if report.page_dir else []),
             *(f"- 填表 agent 的备注：{note}" for note in report.notes),
             "",
@@ -291,12 +349,21 @@ def summary_md(run_id: str, reports) -> str:
     for report in (r for r in reports if r.conclusion != "not_eligible"):  # nothing was filled there on purpose
         for key in sorted(_problems(report)):
             seen[key].append(report.job_id)
+    if skipped:
+        lines += ["## 这次没有访问的岗位", ""]
+        for item in skipped:
+            last = CONCLUSIONS.get(item.get("last_conclusion") or "", item.get("last_conclusion") or "没有结论")
+            lines.append(
+                f"- {item['job_id']}：已录制，请用重放重测（录制 {item['recording_id']}，"
+                f"上次运行 {item.get('last_run')} 的结论：{last}）。要再真实访问，在清单里写 revisit: true。"
+            )
+        lines.append("")
     repeated = [f"- {key}：{'、'.join(jobs)}" for key, jobs in seen.items() if len(jobs) >= 2]
     lines += ["## 在两个以上岗位出现的问题", "", *(repeated or ["（没有）"]), ""]
     return "\n".join(lines)
 
 
-def write_reports(run_dir: Path, reports, redactor) -> Path:
+def write_reports(run_dir: Path, reports, redactor, skipped=()) -> Path:
     """<job>.json for each report and summary.md, all masked, in the run folder. Returns summary.md's path."""
     run_dir = Path(run_dir)
     reports = list(reports)
@@ -305,5 +372,5 @@ def write_reports(run_dir: Path, reports, redactor) -> Path:
         text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
         (run_dir / f"{report.job_id}.json").write_text(text, encoding="utf-8")
     summary = run_dir / "summary.md"
-    summary.write_text(redactor.mask(summary_md(run_dir.name, reports)), encoding="utf-8")
+    summary.write_text(redactor.mask(summary_md(run_dir.name, reports, skipped)), encoding="utf-8")
     return summary

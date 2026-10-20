@@ -9,7 +9,6 @@ import tomllib
 
 import pytest
 import yaml
-from intent_job_agent.form_fill.recording import RecordingStore, recording_id
 
 from intent_job_agent import apply_bridge
 from intent_job_agent.domain import InvariantError
@@ -17,6 +16,7 @@ from intent_job_agent.form_fill import readback, recording, runner
 from intent_job_agent.form_fill.inputs import load_answers, load_checklist, profile_field_paths
 from intent_job_agent.form_fill.models import JobReport, PageState, ReadField
 from intent_job_agent.form_fill.readback import ReadbackError
+from intent_job_agent.form_fill.recording import RecordingStore, recording_id
 from intent_job_agent.form_fill.redact import Redactor, total_hits
 from intent_job_agent.store import Store
 from intent_job_agent.tools import COMMIT_TOOLS, SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
@@ -348,6 +348,13 @@ def test_a_run_fills_reads_back_and_writes_the_feasibility_table(ff):
             "redaction_hits": 0,
             "not_submitted": True,
             "other_tabs_unchanged": True,
+            # the fake agent never calls checkpoint: the recording holds only the final read
+            "browser_errors": 0,
+            "checkpoints": 0,
+            "checkpoint_tab_matches": False,
+            "checkpoint_in_time": False,
+            "pages_saved": False,
+            "recording_hits": 0,
         }
         assert not any(secret in note for note in job["notes"] for secret in SECRETS)
 
@@ -385,7 +392,20 @@ def test_a_run_fills_reads_back_and_writes_the_feasibility_table(ff):
     assert "| p1.4 | Phone | [phone] | 确认页文字 |" in report
     for check in ("找得到标签页", "打码", "没有提交", "别的标签页没动"):
         assert check in report
-    assert "不通过" not in report
+    for check in (
+        "打码（运行目录）",
+        "6.1-6 打码",
+        "找得到标签页",
+        "6.1-1 不干扰 Playwright MCP",
+        "没有提交",
+        "别的标签页没动",
+    ):
+        assert (
+            f"| {check}" in report
+            and next(line for line in report.splitlines() if line.startswith(f"| {check}")).split("|")[2].strip()
+            == "通过"
+        ), check
+    assert "| 6.1-2 认得出标签页 | 不通过（请你检查） | 填表 agent 一次都没调用 checkpoint |" in report
     assert report.count("## ") >= 3  # both jobs and the whole-run line
 
     redactor = Redactor.from_profile(PROFILE)
@@ -451,7 +471,7 @@ def test_submit_like_actions_on_a_page_still_before_submit_are_warnings(ff):
     first = box.form_fill_status()["jobs"][0]
     assert first["checks"]["not_submitted"] is True
     report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
-    row = next(line for line in report.splitlines() if line.startswith("| 4 没有提交 | 通过"))
+    row = next(line for line in report.splitlines() if line.startswith("| 没有提交 | 通过"))
     assert "Submit application" in row and "警告" in row and "2 条" in row and "meta.json" in row
     meta = json.loads((run_dir(box, result) / "acme-ml-01" / "meta.json").read_text(encoding="utf-8"))
     assert meta["page"] == {"actions": ["Submit application"], "received": ""}
@@ -467,7 +487,7 @@ def test_a_page_that_says_the_application_was_received_fails_check_4(ff):
     first = box.form_fill_status()["jobs"][0]
     assert first["checks"]["not_submitted"] is False
     report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
-    assert "| 4 没有提交 | 不通过" in report and "Thank you for applying!" in report
+    assert "| 没有提交 | 不通过" in report and "Thank you for applying!" in report
 
 
 @pytest.mark.parametrize(

@@ -100,9 +100,14 @@ class FormFill(_Section):
     """The form-fill module (specs/form-fill.md); its model and timeout are apply.*'s."""
 
     dir: str  # under storage.data_dir: runs/<run>/<job>/ and the run's feasibility.md
+    recordings_dir: str  # under dir: recordings/<recording id>/ (spec 6.2)
     answers_file: str  # under apply.applicant_dir
     checklist_file: str  # under apply.applicant_dir
     disallowed_tools: list[str]  # refused on top of apply.disallowed_tools
+    checkpoint_timeout_seconds: float  # a checkpoint call answers within this (spec 6.1 item 3)
+    watch_interval_seconds: float  # the background read of the job's tabs (spec 4.2)
+    stuck_after: int  # filled checkpoints in a row on one page before it says stop (spec 4.2)
+    network_max_mb: int  # the first page's network record stops growing here (spec 6.2)
 
 
 class LLM(_Section):

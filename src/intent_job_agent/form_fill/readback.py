@@ -8,6 +8,7 @@ import re
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -684,10 +685,12 @@ def page_state(raw: dict) -> PageState:
 
 @dataclass(frozen=True)
 class FinalPage:
-    """The final page as read back: its fields and where the form stands."""
+    """The final page as read back: its fields, where the form stands, and the same read as a snapshot for the
+    recorder (slice 2a)."""
 
     fields: tuple[ReadField, ...]
     state: PageState
+    snapshot: Snapshot | None = None
 
 
 # --- tabs -------------------------------------------------------------------------------------------------------
@@ -870,6 +873,7 @@ def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor) 
     with ThreadPoolExecutor(max_workers=1) as pool:
         raw, html, shot, why = pool.submit(_read_live, int(port), target, redactor).result()
     fields, state = normalize(raw), page_state(raw)
+    snap = snapshot(raw, tab=str(target.get("id", "")), read_at=datetime.now().isoformat(timespec="seconds"))
     (out / "page.html").write_text(redactor.mask(simplify_html(html)), encoding="utf-8")
     if shot is None:
         (out / SCREENSHOT_NOTE).write_text(redactor.mask(f"截图未存：打码失败（{why}）\n"), encoding="utf-8")
@@ -878,7 +882,7 @@ def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor) 
     dumped = [f.model_dump(mode="json") for f in fields]
     (out / "readback.json").write_text(_dump(redactor.mask_json(dumped)), encoding="utf-8")
     (out / "raw.json").write_text(_dump(redactor.mask_json(raw)), encoding="utf-8")
-    return FinalPage(fields, state)
+    return FinalPage(fields, state, snap)
 
 
 def _dump(obj) -> str:
