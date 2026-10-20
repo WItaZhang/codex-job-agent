@@ -289,15 +289,16 @@ def test_saving_a_letter_checks_it_first(box):
 # --- batches, approval and the run ---------------------------------------------------------------------
 
 
-def test_batch_reviews_the_first_ten_and_stops_for_careful_companies(box):
+def test_batch_reviews_the_first_five_and_stops_for_careful_companies(box):
     write_applicant(box.data_dir)
     jobs = add_jobs(box, COMPANIES)
     batch = box.prepare_apply_batch(DAY)
     modes = {item["job_id"]: item["mode"] for item in batch["jobs"]}
-    assert [modes[j] for j in jobs[:10]] == ["review"] * 10
+    assert [modes[j] for j in jobs[:5]] == ["review"] * 5
+    assert [modes[j] for j in jobs[5:10]] == ["submit"] * 5
     assert modes["j10"] == "careful" and modes["j11"] == modes["j12"] == "submit"
     assert all(item["letter"] == "missing" for item in batch["jobs"])
-    assert "10" in batch["summary"] and "Co0" in batch["summary"]
+    assert "先投 5 个" in batch["summary"] and "Co0" in batch["summary"] and "Co5" not in batch["summary"]
     smaller = box.prepare_apply_batch(DAY, exclude=["j00"])  # e.g. a letter that never passed
     assert "j00" not in {item["job_id"] for item in smaller["jobs"]}
 
@@ -322,7 +323,7 @@ def test_review_phase_then_the_rest(box):
     box.apply_runner = FakeRunner({"j03": ("failed", "arbitration", note), "j12": ("failed", "captcha", [])})
     batch = box.prepare_apply_batch(DAY)
     box.start_applying(batch["batch_id"], batch["summary"])
-    assert [spec.job_id for spec in box.apply_runner.calls] == jobs[:10]
+    assert [spec.job_id for spec in box.apply_runner.calls] == jobs[:5]
     assert {spec.mode for spec in box.apply_runner.calls} == {"stop"}  # nothing is submitted while reviewing
 
     status = box.apply_status()
@@ -338,8 +339,9 @@ def test_review_phase_then_the_rest(box):
     with pytest.raises(InvariantError):  # the first summary cannot start the second phase
         box.start_applying(batch["batch_id"], batch["summary"])
     box.start_applying(batch["batch_id"], rest_summary)
-    rest = box.apply_runner.calls[10:]
-    assert {spec.job_id: spec.mode for spec in rest} == {"j10": "stop", "j11": "submit", "j12": "submit"}
+    rest = box.apply_runner.calls[5:]
+    expected = {job: "submit" for job in jobs[5:10]} | {"j10": "stop", "j11": "submit", "j12": "submit"}
+    assert {spec.job_id: spec.mode for spec in rest} == expected
     applications = box.store.applications()
     assert applications["j11"]["status"] == "applied"
     assert applications["j10"]["status"] == "waiting" and applications["j12"]["status"] == "failed"
@@ -764,21 +766,21 @@ def test_a_review_step_without_any_success_voids_the_batch(box):
     write_applicant(box.data_dir)
     jobs = add_jobs(box, COMPANIES)
     write_letters(box, jobs)
-    errors = {job: ("pending", "system_error", ["Error: cannot start"]) for job in jobs[:5]}
-    sites = {job: ("failed", "captcha", []) for job in jobs[5:10]}
+    errors = {job: ("pending", "system_error", ["Error: cannot start"]) for job in jobs[:3]}
+    sites = {job: ("failed", "captcha", []) for job in jobs[3:5]}
     box.apply_runner = FakeRunner({**errors, **sites})
     batch = box.prepare_apply_batch(DAY)
     box.start_applying(batch["batch_id"], batch["summary"])
     status = box.apply_status()
     assert status["next"] is None and status["void"] is True
     applications = box.store.applications()
-    assert {applications[j]["status"] for j in jobs[:5]} == {"pending"}  # nothing happened on those sites
-    assert {applications[j]["status"] for j in jobs[5:10]} == {"failed"}
+    assert {applications[j]["status"] for j in jobs[:3]} == {"pending"}  # nothing happened on those sites
+    assert {applications[j]["status"] for j in jobs[3:5]} == {"failed"}
     rest = box._phase_summary(batch["batch_id"], box.store.apply_batch(batch["batch_id"]), "rest")
     with pytest.raises(InvariantError):
         box.start_applying(batch["batch_id"], rest)
     fresh = box.prepare_apply_batch(DAY)  # the jobs that never started come back in a new batch
-    assert set(jobs[:5]) <= {item["job_id"] for item in fresh["jobs"]}
+    assert set(jobs[:3]) <= {item["job_id"] for item in fresh["jobs"]}
 
 
 def test_a_crashed_review_step_voids_the_batch_too(box):
