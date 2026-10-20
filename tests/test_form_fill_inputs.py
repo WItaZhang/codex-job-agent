@@ -364,6 +364,13 @@ def test_list_loads(tmp_path):
     assert jobs[1].cover_letter == "none" and jobs[1].revisit is True
 
 
+def test_list_takes_the_feasibility_option_for_check_8(tmp_path):
+    folder = list_dir(tmp_path)
+    path = write(folder / "list.yaml", {"jobs": [job(ignore_filled_on_page=2), job(id="b")]})
+    jobs = load_list(path, {"main"}).jobs
+    assert (jobs[0].ignore_filled_on_page, jobs[1].ignore_filled_on_page) == (2, None)
+
+
 def test_list_absolute_letter(tmp_path):
     folder = list_dir(tmp_path)
     path = write(tmp_path / "elsewhere/list.yaml", {"jobs": [job(cover_letter=str(folder / "letters/acme.txt"))]})
@@ -382,6 +389,8 @@ def test_list_absolute_letter(tmp_path):
         ([job(company=None)], "company"),
         ([job(colour="red")], "colour"),
         ([job(revisit="sometimes")], "revisit"),
+        ([job(ignore_filled_on_page=0)], "ignore_filled_on_page"),
+        ([job(ignore_filled_on_page="2")], "ignore_filled_on_page"),
         ([], "jobs"),
     ],
 )

@@ -22,6 +22,7 @@ OTHERS = (PLACEHOLDER["other_email"], PLACEHOLDER["other_phone"])
 MARK = re.compile(r"\[[^\[\]]+\]")
 ADDRESS_MARKS = {FIELD_PLACEHOLDER["address"], FIELD_PLACEHOLDER["city"], FIELD_PLACEHOLDER["postal_code"]}
 HIDDEN = "[其他值，已隐去]"  # a contact field's value that is not the applicant's own and that masking missed
+PART_EMPTY = "?"  # an empty part of a date entered in parts (readback: "?/2024", the month left empty)
 MONTHS = {
     name: n
     for n, names in enumerate(
@@ -529,7 +530,13 @@ def _shown(value: str, entry: AnswerEntry | None, ambiguous) -> str:
     contact = (entry is not None and entry.category == "contact" and entry.answer is None) or any(
         key.startswith("contact.") for key in ambiguous
     )
-    if not contact or is_empty(value):
+    return contact_shown(value) if contact else value
+
+
+def contact_shown(value: str) -> str:
+    """A contact field's value with only its placeholders and place names (states, countries) kept: any other text is
+    a contact value masking missed, shown as HIDDEN (spec 5.6, masking by column)."""
+    if is_empty(value):
         return value
     pieces = re.split(r"(\[[^\[\]]+\])", value)
     kept = [
@@ -599,6 +606,8 @@ def check_page(
                 if is_empty(f.value)
                 else Verdict("not_reviewed", note=OLD_PAGE)
             )
+        elif f.control == "date" and PART_EMPTY in f.value.split("/") and (entry is not None or f.required):
+            verdict = _missing(None, f"日期没填全（{f.value}：? 是空着的一格）")
         elif entry is not None and m.segment is not None:
             verdict = compare_part(entry, m.part or "other", f.value, options=f.options)
             if verdict == Verdict("no_answer") and f.required:

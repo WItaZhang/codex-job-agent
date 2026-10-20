@@ -12,10 +12,11 @@ import yaml
 
 from intent_job_agent import apply_bridge
 from intent_job_agent.domain import InvariantError
-from intent_job_agent.form_fill import readback, runner
+from intent_job_agent.form_fill import readback, recording, runner
 from intent_job_agent.form_fill.inputs import load_answers, load_checklist, profile_field_paths
 from intent_job_agent.form_fill.models import JobReport, PageState, ReadField
 from intent_job_agent.form_fill.readback import ReadbackError
+from intent_job_agent.form_fill.recording import RecordingStore, recording_id
 from intent_job_agent.form_fill.redact import Redactor, total_hits
 from intent_job_agent.store import Store
 from intent_job_agent.tools import COMMIT_TOOLS, SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
@@ -173,7 +174,7 @@ class FakeBrowser:
         )
         return apply_bridge.ApplyOutcome(status, reason, notes, [], [], str(log))
 
-    def read(self, target, out_dir, redactor):
+    def read(self, target, out_dir, redactor, sheet=None):
         self.reads.append(target)
         if self.fail.get(target["id"].removeprefix("N-")) == "read":
             raise ReadbackError("job tab not found in the browser")
@@ -347,6 +348,13 @@ def test_a_run_fills_reads_back_and_writes_the_feasibility_table(ff):
             "redaction_hits": 0,
             "not_submitted": True,
             "other_tabs_unchanged": True,
+            # the fake agent never calls checkpoint: the recording holds only the final read
+            "browser_errors": 0,
+            "checkpoints": 0,
+            "checkpoint_tab_matches": False,
+            "checkpoint_in_time": False,
+            "pages_saved": False,
+            "recording_hits": 0,
         }
         assert not any(secret in note for note in job["notes"] for secret in SECRETS)
 
@@ -384,7 +392,20 @@ def test_a_run_fills_reads_back_and_writes_the_feasibility_table(ff):
     assert "| p1.4 | Phone | [phone] | 确认页文字 |" in report
     for check in ("找得到标签页", "打码", "没有提交", "别的标签页没动"):
         assert check in report
-    assert "不通过" not in report
+    for check in (
+        "打码（运行目录）",
+        "6.1-6 打码",
+        "找得到标签页",
+        "6.1-1 不干扰 Playwright MCP",
+        "没有提交",
+        "别的标签页没动",
+    ):
+        assert (
+            f"| {check}" in report
+            and next(line for line in report.splitlines() if line.startswith(f"| {check}")).split("|")[2].strip()
+            == "通过"
+        ), check
+    assert "| 6.1-2 认得出标签页 | 不通过（请你检查） | 填表 agent 一次都没调用 checkpoint |" in report
     assert report.count("## ") >= 3  # both jobs and the whole-run line
 
     redactor = Redactor.from_profile(PROFILE)
@@ -450,7 +471,7 @@ def test_submit_like_actions_on_a_page_still_before_submit_are_warnings(ff):
     first = box.form_fill_status()["jobs"][0]
     assert first["checks"]["not_submitted"] is True
     report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
-    row = next(line for line in report.splitlines() if line.startswith("| 4 没有提交 | 通过"))
+    row = next(line for line in report.splitlines() if line.startswith("| 没有提交 | 通过"))
     assert "Submit application" in row and "警告" in row and "2 条" in row and "meta.json" in row
     meta = json.loads((run_dir(box, result) / "acme-ml-01" / "meta.json").read_text(encoding="utf-8"))
     assert meta["page"] == {"actions": ["Submit application"], "received": ""}
@@ -466,7 +487,7 @@ def test_a_page_that_says_the_application_was_received_fails_check_4(ff):
     first = box.form_fill_status()["jobs"][0]
     assert first["checks"]["not_submitted"] is False
     report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
-    assert "| 4 没有提交 | 不通过" in report and "Thank you for applying!" in report
+    assert "| 没有提交 | 不通过" in report and "Thank you for applying!" in report
 
 
 @pytest.mark.parametrize(
@@ -623,7 +644,7 @@ def test_form_filling_waits_for_an_apply_step(ff):
 class NoScreenshotBrowser(FakeBrowser):
     """Reads the page but, like readback.read_final_page when the blackout fails, leaves the screenshot out."""
 
-    def read(self, target, out_dir, redactor):
+    def read(self, target, out_dir, redactor, sheet=None):
         final = super().read(target, out_dir, redactor)
         (out_dir / readback.SCREENSHOT_NOTE).write_text("截图未存：打码失败（子框架里有联系方式）", encoding="utf-8")
         return final
@@ -740,3 +761,210 @@ def test_a_chrome_not_running_yet_is_not_started_for_the_tab_check(ff):
     assert result["personal_tabs"] == [] and "没能检查" in result["warning"]
     assert box.form_fill_status()["personal_tabs_checked"] is False and len(fake.calls) == 2
     assert "没能检查" in (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+
+
+# --- slice 2a: the checkpoint service, recordings and reports at the end of a run ------------------------------
+
+
+def recordings(box):
+    return box.data_dir / box.settings.form_fill.dir / box.settings.form_fill.recordings_dir
+
+
+def test_slice_2a_settings():
+    form_fill = settings().form_fill
+    assert form_fill.recordings_dir == "recordings"
+    assert (form_fill.checkpoint_timeout_seconds, form_fill.watch_interval_seconds, form_fill.stuck_after) == (5, 1, 3)
+    assert form_fill.network_max_mb == 30
+
+
+def test_the_filling_agent_gets_the_checkpoint_service(ff):
+    box, path = ff
+    result = box.start_form_fill(path)
+    (spec, options), _ = box.form_fill_runner.calls
+    servers = options["extra_servers"]
+    assert list(servers) == ["checkpoint"]
+    config_path = servers["checkpoint"]["args"][-1]
+    config = json.loads(open(config_path, encoding="utf-8").read())
+    assert config["before"] == ["T0", "T1", "W1"]  # every tab and worker open before the run
+    assert config["rec_id"] == recording_id(spec.url) and config["run_id"] == result["run_id"]
+    assert config["job_id"] == "acme-ml-01" and config["url"] == spec.url
+    assert config["timeout_seconds"] == 5 and config["interval_seconds"] == 1 and config["stuck_after"] == 3
+    assert config["recordings_dir"] == str(recordings(box))
+    assert config["ignore_filled_on_page"] is None
+    assert not any(secret in json.dumps(config) for secret in SECRETS)
+    assert options["extra_allowed"] == ("mcp__checkpoint__checkpoint",)
+    assert "== CHECKPOINTS ==" in options["extra_prompt"]
+    assert 'checkpoint with stage "blank"' in options["extra_prompt"]
+    assert "RESULT:FAILED:stuck" in options["extra_prompt"]
+
+
+def test_a_run_writes_the_reports_and_the_recordings_last_conclusion(ff):
+    box, path = ff
+    result = box.start_form_fill(path)
+    folder = run_dir(box, result)
+    assert (folder / "summary.md").is_file()
+    report = json.loads((folder / "acme-ml-01.json").read_text(encoding="utf-8"))
+    rec = recording_id("https://jobs.example.test/acme-ml-01")
+    assert report["recording_id"] == rec
+    assert [(page["page"], page["read_from"]) for page in report["pages"]] == [(1, "final")]
+    assert report["conclusion"] == "check_then_submit"
+    meta = json.loads((recordings(box) / rec / "meta.json").read_text(encoding="utf-8"))
+    assert meta["last"] == {"run": result["run_id"], "conclusion": "check_then_submit", "reason": None}
+    assert (recordings(box) / rec / "fills" / result["run_id"] / "final.json").is_file()
+    status = box.form_fill_status()
+    assert status["summary"] == str(folder / "summary.md")
+    assert status["jobs"][0]["recording_id"] == rec
+    redactor = Redactor.from_profile(PROFILE)
+    assert total_hits(redactor.scan([recordings(box)])) == 0
+
+
+def test_a_job_recorded_before_is_not_visited_again(ff):
+    box, path = ff
+    url = "https://jobs.example.test/acme-ml-01"
+    store = RecordingStore(recordings(box), recording_id(url), "20261019-000000-aaaa", Redactor.from_profile(PROFILE))
+    store.write_meta(url, "Acme Robotics", "ML Engineer")
+    recording.note_conclusion(store.rec_dir, "20261019-000000-aaaa", "check_then_submit", None)
+    result = box.start_form_fill(path)
+    assert [spec.job_id for spec, _ in box.form_fill_runner.calls] == ["beta-ds-02"]
+    assert result["skipped"] == [
+        {
+            "job_id": "acme-ml-01",
+            "recording_id": recording_id(url),
+            "last_run": "20261019-000000-aaaa",
+            "last_conclusion": "check_then_submit",
+        }
+    ]
+    first = box.form_fill_status()["jobs"][0]
+    assert first["state"] == "skipped" and first["status"] is None
+    summary = (run_dir(box, result) / "summary.md").read_text(encoding="utf-8")
+    assert "已录制，请用重放重测" in summary and "acme-ml-01" in summary
+
+
+def test_revisit_or_a_gate_last_time_visits_a_recorded_job_again(ff):
+    box, path = ff
+    jobs = yaml.safe_load(open(path, encoding="utf-8"))["jobs"]
+    jobs[0]["revisit"] = True
+    write_list(box.data_dir / "form-fill" / "lists", jobs)
+    for job, conclusion, reason in (
+        (jobs[0], "check_then_submit", None),
+        (jobs[1], "not_filled", "gate"),
+    ):
+        store = RecordingStore(recordings(box), recording_id(job["url"]), "old", Redactor.from_profile(PROFILE))
+        store.write_meta(job["url"], job["company"], job["title"])
+        recording.note_conclusion(store.rec_dir, "old", conclusion, reason)
+    result = box.start_form_fill(path)
+    assert [spec.job_id for spec, _ in box.form_fill_runner.calls] == ["acme-ml-01", "beta-ds-02"]
+    assert result["skipped"] == []
+
+
+def test_ignore_filled_on_page_goes_to_the_checkpoint_service(ff):
+    box, path = ff
+    jobs = yaml.safe_load(open(path, encoding="utf-8"))["jobs"]
+    jobs[0]["ignore_filled_on_page"] = 2
+    write_list(box.data_dir / "form-fill" / "lists", jobs)
+    box.start_form_fill(path)
+    (_, options), _ = box.form_fill_runner.calls
+    config = json.loads(open(options["extra_servers"]["checkpoint"]["args"][-1], encoding="utf-8").read())
+    assert config["ignore_filled_on_page"] == 2
+
+
+def test_the_final_read_goes_into_the_recording_after_the_checkpoints(ff):
+    """The checkpoint service wrote page 1 while the agent ran; the final read lands on page 2 and numbers on."""
+    box, path = ff
+
+    class RecordingFake(FakeBrowser):
+        def fill(self, spec, **options):
+            outcome = super().fill(spec, **options)
+            config = json.loads(open(options["extra_servers"]["checkpoint"]["args"][-1], encoding="utf-8").read())
+            from intent_job_agent.form_fill.recorder import Recorder, Snapshot
+
+            store = RecordingStore(recordings(box), config["rec_id"], config["run_id"], Redactor.from_profile(PROFILE))
+            rec = Recorder()
+            info = Snapshot(
+                tab=f"N-{spec.job_id}",
+                url=spec.url,
+                marker=("My Information",),
+                fields=(ReadField(id="p1.0", question="Middle Name", origin="control", control="text", value=""),),
+                read_at="2026-10-20T10:00:00",
+            )
+            store.save(rec.observe(info, "blank"), "blank", None)
+            store.save(rec.observe(info, "filled"), "filled", None)
+            store.save_state(rec)
+            return outcome
+
+    box.form_fill_runner = RecordingFake()
+    result = box.start_form_fill(path)
+    report = json.loads((run_dir(box, result) / "acme-ml-01.json").read_text(encoding="utf-8"))
+    assert [(page["page"], page["read_from"]) for page in report["pages"]] == [(1, "filled"), (2, "final")]
+    assert {row["field_id"] for row in report["fields"]} >= {"p1.1", "p2.1", "p2.4"}
+
+
+# --- the merge review of 2026-10-20 (decision 32) ----------------------------------------------------------------
+
+
+def test_two_entries_of_one_posting_are_refused(ff):
+    """Review #32: one posting, one recording, one real visit (spec 6.5)."""
+    box, path = ff
+    jobs = yaml.safe_load(open(path, encoding="utf-8"))["jobs"]
+    jobs[1]["url"] = jobs[0]["url"] + "?utm_source=linkedin"
+    write_list(box.data_dir / "form-fill" / "lists", jobs)
+    with pytest.raises(InvariantError, match="same posting"):
+        box.start_form_fill(path)
+    assert box.form_fill_runner.calls == []
+
+
+def test_the_service_gets_the_sheet_phrases_but_no_answer(ff):
+    box, path = ff
+    box.start_form_fill(path)
+    (_, options), _ = box.form_fill_runner.calls
+    config = json.loads(open(options["extra_servers"]["checkpoint"]["args"][-1], encoding="utf-8").read())
+    assert config["sheet"]["contact.email"]["from_profile"] == "personal.email"
+    assert "work_auth.authorized_us" in config["sheet"] and "answer" not in config["sheet"]["work_auth.authorized_us"]
+    assert "Yes" not in json.dumps(config["sheet"])
+
+
+def test_a_received_page_seen_while_recording_fails_the_submit_check(ff):
+    """Review #10: the final page may have moved on; a page recorded on the way said it was received."""
+    box, path = ff
+
+    class SentFake(FakeBrowser):
+        def fill(self, spec, **options):
+            outcome = super().fill(spec, **options)
+            config = json.loads(open(options["extra_servers"]["checkpoint"]["args"][-1], encoding="utf-8").read())
+            store = RecordingStore(recordings(box), config["rec_id"], config["run_id"], Redactor.from_profile(PROFILE))
+            store.note_received("Your application was sent", spec.url)
+            return outcome
+
+    box.form_fill_runner = SentFake()
+    result = box.start_form_fill(path)
+    report = json.loads((run_dir(box, result) / "acme-ml-01.json").read_text(encoding="utf-8"))
+    assert report["conclusion"] == "maybe_submitted"
+    assert box.form_fill_status()["jobs"][0]["checks"]["not_submitted"] is False
+
+
+def test_the_feasibility_table_names_a_missing_mhtml_and_network_record(ff):
+    """Review #31: 6.1-5 checks the MHTML (or why it is not there) and a single-page form's network.json."""
+    box, path = ff
+    result = box.start_form_fill(path)
+    report = (run_dir(box, result) / "feasibility.md").read_text(encoding="utf-8")
+    row = next(line for line in report.splitlines() if line.startswith("| 6.1-5 存得下"))
+    assert "不通过" in row and "network.json" in row
+
+
+def test_the_final_read_is_masked_by_column(ff):
+    """Review #17: a contact field's text that profile.json does not hold never reaches final.json."""
+    box, path = ff
+
+    class OddPhone(FakeBrowser):
+        def read(self, target, out_dir, redactor, sheet=None):
+            final = super().read(target, out_dir, redactor, sheet)
+            odd = ReadField(
+                id="p1.5", question="Mobile number", origin="control", control="text", value="call me later"
+            )
+            return readback.FinalPage((*final.fields, odd), final.state)
+
+    box.form_fill_runner = OddPhone()
+    result = box.start_form_fill(path)
+    final = recordings(box) / recording_id("https://jobs.example.test/acme-ml-01") / "fills" / result["run_id"]
+    text = (final / "final.json").read_text(encoding="utf-8")
+    assert "call me later" not in text and "[其他值，已隐去]" in text

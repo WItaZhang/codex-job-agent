@@ -22,7 +22,7 @@ from pydantic import ValidationError
 from .. import applicant as applicant_files
 from ..config import Settings
 from ..domain import InvariantError
-from . import runner
+from . import recording, runner
 from .compare import MARK, placeholder
 from .inputs import load_answers, profile_field_paths
 from .models import AnswerEntry, ReadField
@@ -31,6 +31,7 @@ from .redact import VERSION, Redactor
 from .report import job_report, write_reports
 
 META_FILE, READBACK_FILE = runner.META_FILE, "readback.json"
+SKIPPED_FILE = "skipped.json"  # the jobs a run did not visit because they were recorded before (spec 4.1)
 
 
 def plain_contacts(answers: dict[str, AnswerEntry], profile: dict, redactor: Redactor) -> dict[str, AnswerEntry]:
@@ -147,22 +148,34 @@ def _job(job_dir: Path) -> tuple[dict, tuple[ReadField, ...]]:
 
 
 def run_report(run_id: str, data_dir: Path, settings: Settings) -> Path:
-    """Check every job saved under the run again and write the reports. Returns summary.md's path."""
+    """Check every job saved under the run again and write the reports. A job recorded page by page (slice 2a: its
+    meta.json names its recording) is checked on every page of the recording, and the recording's meta.json gets
+    the conclusion (spec 4.1). Returns summary.md's path."""
     if not runner.SAFE_ID.match(run_id):
         raise InvariantError(f"not a run id: {run_id!r}")
-    run_dir = Path(data_dir) / settings.form_fill.dir / "runs" / run_id
+    form_fill = Path(data_dir) / settings.form_fill.dir
+    run_dir = form_fill / "runs" / run_id
     if not run_dir.is_dir():
         raise InvariantError(f"no run {run_id} under {run_dir.parent}")
     jobs = [_job(job_dir) for job_dir in sorted(run_dir.iterdir()) if job_dir.is_dir()]
-    if not jobs:
+    skipped = recording._read_json(run_dir / SKIPPED_FILE, []) or []
+    if not jobs and not skipped:
         raise InvariantError(f"run {run_id} has no job folders")
     jobs.sort(key=lambda job: str(job[0].get("started", "")))
     sheet = load_sheet(data_dir, settings)
+    recordings = form_fill / settings.form_fill.recordings_dir
     reports = []
     for meta, fields in jobs:
         answers, contacts = sheet.for_page(meta)
-        reports.append(job_report(meta, fields, answers, contacts=contacts))
-    return write_reports(run_dir, reports, sheet.redactor)
+        rec = meta.get("recording")
+        if isinstance(rec, str) and runner.SAFE_ID.match(rec):
+            pages = recording.read_run(recordings / rec, run_id)
+            report = job_report(meta, (), answers, contacts=contacts, pages=pages)
+            recording.note_conclusion(recordings / rec, run_id, report.conclusion, report.not_filled_reason)
+        else:
+            report = job_report(meta, fields, answers, contacts=contacts)
+        reports.append(report)
+    return write_reports(run_dir, reports, sheet.redactor, skipped)
 
 
 def main(argv=None) -> int:

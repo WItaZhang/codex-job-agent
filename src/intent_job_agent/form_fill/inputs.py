@@ -28,6 +28,7 @@ EXPERIENCE_FIELDS = ("company", "title")
 KEY = re.compile(r"^([a-z_]+)\.([a-z0-9_]+)$")
 NUMBER = re.compile(r"\d")
 MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+NOT_TEXT = ("revisit", "ignore_filled_on_page")  # list fields kept as YAML wrote them (a bool, a page number)
 # Scalars that YAML would turn into numbers, booleans or dates stay text as written ("3.60", "Yes", "2027-05").
 _TEXT_TAGS = {"tag:yaml.org,2002:" + name for name in ("bool", "int", "float", "timestamp")}
 
@@ -127,7 +128,7 @@ def load_list(path: Path, resume_ids: set[str]) -> JobList:
         if not isinstance(raw, dict):
             problems.append(f"{where}: must be a mapping")
             continue
-        raw = {key: (_text(value) if key != "revisit" else value) for key, value in raw.items()}
+        raw = {key: (value if key in NOT_TEXT else _text(value)) for key, value in raw.items()}
         if isinstance(raw.get("id"), str):
             where = f"jobs[{index}] ({raw['id']})"
         entry = _validate(ListEntry, raw, f"{where}: ", problems)

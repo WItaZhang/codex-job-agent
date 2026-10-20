@@ -655,14 +655,16 @@ def test_read_final_page_over_cdp_leaves_the_page_open(chromium, tmp_path):
 
     final = readback.read_final_page(port, target, tmp_path, StandInRedactor())
 
-    assert final.fields == EXPECTED_BROWSER
+    masked = StandInRedactor()  # the fields come back masked, as they are saved
+    assert final.fields == tuple(f.model_copy(update={"value": masked.mask(f.value)}) for f in EXPECTED_BROWSER)
     assert final.state == PageState(actions=("Submit application",))
     assert not pg.is_closed() and pg.url == before_url
     assert pg.input_value("#fn") == "Sam"  # nothing was cleared or retyped
-    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "screenshot.png", "readback.json", "raw.json"}
+    # no raw.json since slice 2a: raw nodes are masked by value only (decision 32)
+    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "screenshot.png", "readback.json"}
     html = (tmp_path / "page.html").read_text(encoding="utf-8")
     assert "<script" not in html and "<style" not in html and "Synthetic form" in html
-    for name in ("page.html", "readback.json", "raw.json"):
+    for name in ("page.html", "readback.json"):
         text = (tmp_path / name).read_text(encoding="utf-8")
         assert EMAIL not in text and "synthetic-password-1" not in text, name
     saved = json.loads((tmp_path / "readback.json").read_text(encoding="utf-8"))
@@ -821,7 +823,7 @@ def test_a_screenshot_that_cannot_be_blacked_out_is_not_saved(chromium, tmp_path
     assert not (tmp_path / "screenshot.png").exists()
     note = (tmp_path / readback.SCREENSHOT_NOTE).read_text(encoding="utf-8")
     assert note.startswith("截图未存：打码失败") and EMAIL not in note
-    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "readback.json", "raw.json", readback.SCREENSHOT_NOTE}
+    assert {p.name for p in tmp_path.iterdir()} == {"page.html", "readback.json", readback.SCREENSHOT_NOTE}
 
 
 def test_the_reader_never_drives_the_page():
@@ -913,3 +915,252 @@ def test_step_bars_and_empty_widget_text_are_not_fields():
 )
 def test_page_chrome_rule(question, value, required, chrome):
     assert readback.is_page_chrome(question, value, required) is chrome
+
+
+# --- slice 2a: one read as a snapshot for the recorder (specs/form-fill.md 4.3) ----------------------------------
+
+
+def test_a_snapshot_carries_the_step_marker_sections_and_occurrences():
+    node = {"tag": "input", "type": "text", "role": "", "options": [], "required": False}
+    frame = {
+        "url": "https://synthetic.example.test/apply",
+        "step": "",
+        "headings": ["Apply to Synthetic", "Education 1", "Education 2"],
+        "controls": [
+            {**node, "order": 1, "labels": {"label_for": "School"}, "value": "A", "section": "Education 1"},
+            {**node, "order": 2, "labels": {"label_for": "Month"}, "value": "09", "section": "Education 1"},
+            {**node, "order": 3, "labels": {"label_for": "Month"}, "value": "05", "section": "Education 1"},
+            {**node, "order": 4, "labels": {"label_for": "School"}, "value": "B", "section": "Education 2"},
+            {**node, "order": 5, "type": "password", "labels": {"aria_label": "Password"}, "value": "[已填]"},
+        ],
+        "pairs": [],
+    }
+    snap = readback.snapshot({"url": frame["url"], "frames": [frame]}, tab="T9", read_at="2026-10-20T10:00:00")
+    assert (snap.tab, snap.url, snap.read_at) == ("T9", frame["url"], "2026-10-20T10:00:00")
+    assert snap.marker == ("Apply to Synthetic", "Education 1", "Education 2")
+    assert [(f.question, f.section, f.occurrence) for f in snap.fields] == [
+        ("School", "Education 1", 1),
+        ("Month", "Education 1", 1),
+        ("Month", "Education 1", 2),
+        ("School", "Education 2", 1),
+        ("Password", "", 1),
+    ]
+    assert snap.password is True
+
+
+def test_the_current_step_is_the_marker_when_the_page_shows_one():
+    frame = {"url": "u", "step": "My Experience", "headings": ["Synthetic Engineer", "My Experience"], "controls": []}
+    assert readback.snapshot({"url": "u", "frames": [frame]}, tab="T", read_at="").marker == ("My Experience",)
+
+
+def test_normalize_alone_keeps_the_slice_1_fields():
+    node = {"tag": "input", "type": "text", "role": "", "options": [], "required": False, "section": "Education 1"}
+    frame = {"controls": [{**node, "order": 1, "labels": {"label_for": "School"}, "value": "A"}], "pairs": []}
+    assert normalize({"frames": [frame]})[0].section == ""
+
+
+STEPS_HTML = """<!doctype html><html><body>
+<ol><li aria-current="step">My Experience</li><li>Voluntary Disclosures</li></ol>
+<h2>Synthetic Engineer</h2>
+<h3>Education 1</h3>
+<label for="s1">School</label><input id="s1" value="Synthetic State University">
+<label for="d1">Degree</label><button id="d1" type="button" aria-haspopup="listbox">Master of Science</button>
+<h3>Education 2</h3>
+<label for="s2">School</label><input id="s2" value="Example College">
+<label for="d2">Degree</label><button id="d2" type="button" aria-haspopup="listbox">Select One</button>
+<dl><dt>Graduation</dt><dd>12/2026</dd></dl>
+</body></html>"""
+
+
+def test_the_page_script_reads_the_step_headings_sections_and_listbox_buttons(chromium):
+    _, pg, _ = chromium
+    pg.set_content(STEPS_HTML)
+    frame = pg.evaluate(readback.EXTRACT_JS)
+    assert frame["step"] == "My Experience"
+    assert frame["headings"][:3] == ["Synthetic Engineer", "Education 1", "Education 2"]
+    snap = readback.snapshot({"url": "u", "frames": [frame]}, tab="T", read_at="")
+    assert [(f.question, f.control, f.value, f.section, f.occurrence) for f in snap.fields] == [
+        ("School", "text", "Synthetic State University", "Education 1", 1),
+        ("Degree", "select", "Master of Science", "Education 1", 1),
+        ("School", "text", "Example College", "Education 2", 1),
+        ("Degree", "select", "Select One", "Education 2", 1),
+        ("Graduation", "review", "12/2026", "Education 2", 1),
+    ]
+
+
+# --- slice 2a: the Workday read-back of decision 23 (items 1 and 11), as generic ARIA patterns ---------------------
+# SYNTHETIC pages in the shapes of the two saved Workday pages of 2026-10-17 (a fill page and a review page): page
+# chrome menus, a listbox button, pickers whose search box is not the value, Month/Year spin buttons in a dated
+# fieldset, a check box repeated per segment, review rows whose question sits in nested blocks with a required mark,
+# and a heading over a list of picked items.
+
+WORKDAY_FILL_HTML = """<!doctype html><html><body>
+<header><button aria-haspopup="listbox" id="lang"><span>English</span></button>
+  <button aria-haspopup="listbox" id="settings"><span>Settings</span></button></header>
+<h2>Synthetic Engineer</h2><h3>My Experience</h3>
+<div role="group" aria-labelledby="wh"><h4 id="wh">Work History (Optional)</h4>
+ <div role="group"><h5>Work History (Optional) 1</h5>
+  <label for="t1">Job Title</label><input id="t1" value="Engineer Intern">
+  <label for="c1">I currently work here</label><input id="c1" type="checkbox" name="currentlyWorkHere">
+  <fieldset><legend><label><span>From<abbr aria-hidden="true">*</abbr></span></label></legend>
+   <div role="group"><input role="spinbutton" aria-label="Month" value="6"><div>/</div>
+     <input role="spinbutton" aria-label="Year" value="2026"></div></fieldset>
+  <fieldset><legend><label><span>To<abbr aria-hidden="true">*</abbr></span></label></legend>
+   <div role="group"><input role="spinbutton" aria-label="Month" value="9"><div>/</div>
+     <input role="spinbutton" aria-label="Year" value="2026"></div></fieldset>
+ </div>
+ <div role="group"><h5>Work History (Optional) 2</h5>
+  <label for="t2">Job Title</label><input id="t2" value="Analyst Intern">
+  <label for="c2">I currently work here</label><input id="c2" type="checkbox" name="currentlyWorkHere" checked>
+ </div>
+</div>
+<div role="group"><h4>Education (Optional)</h4>
+ <div><label for="dg"><span>Degree<abbr aria-hidden="true">*</abbr></span></label>
+  <button aria-haspopup="listbox" type="button" id="dg" aria-label="Degree MS Required">MS</button></div>
+ <div><label for="fs">Field of Study</label>
+  <div><div><input enterkeyhint="search" placeholder="Search" id="fs" value=""></div>
+   <ul role="listbox" aria-label="items selected"><li role="presentation"><div role="option"
+     aria-label="Data Science, press delete to clear value."><span aria-hidden="true">x</span><p>Data Science</p></div>
+   </li></ul></div></div>
+ <div><label for="fs2">Field of Study</label>
+  <div><div><input enterkeyhint="search" placeholder="Search" id="fs2" value="Informat"></div><div></div></div></div>
+ <fieldset><legend><label><span>From</span></label></legend>
+   <div role="group"><input role="spinbutton" aria-label="Year" value="2025"></div></fieldset>
+</div>
+<button type="button">Save and Continue</button>
+</body></html>"""
+
+
+def test_workday_like_fill_page_controls_in_a_real_browser(chromium):
+    _, pg, _ = chromium
+    pg.set_content(WORKDAY_FILL_HTML)
+    snap = readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+    assert [(f.question, f.control, f.value, f.required) for f in snap.fields] == [
+        ("Job Title", "text", "Engineer Intern", False),
+        ("I currently work here", "checkbox", "", False),
+        ("From", "date", "6/2026", True),
+        ("To", "date", "9/2026", True),
+        ("Job Title", "text", "Analyst Intern", False),
+        ("I currently work here", "checkbox", "Yes", False),
+        ("Degree", "select", "MS", True),
+        ("Field of Study", "text", "Data Science", False),
+        ("Field of Study", "text", "", False),  # typed into the search box, nothing picked
+        ("From", "date", "2025", False),
+    ]
+    assert [f.section for f in snap.fields][:2] == ["Work History (Optional) 1"] * 2
+
+
+WORKDAY_REVIEW_HTML = """<!doctype html><html><body>
+<header><button aria-haspopup="listbox" id="lang"><span>English</span></button></header>
+<h2>Synthetic Engineer</h2><h3>Review</h3>
+<div aria-labelledby="em"><h4 id="em">Email Address</h4><div><div><span>sam@example.test</span></div></div></div>
+<h3>Application Questions 1 of 2</h3>
+<div role="group"><div>
+ <div class="row"><div><div><p><b>Are you currently or have you in the past been debarred by any agency?</b><abbr
+   title="required">*</abbr></p></div></div><div><span>No</span></div></div>
+ <div class="row"><div><div><p><b>Please input your anticipated graduation date</b><abbr title="required">*</abbr></p>
+   </div></div><div><span>12/12/2026</span></div></div>
+ <div class="row"><div><div><p><b>Current School Location (Please spell out the city and abbreviate the state.)</b>
+   <abbr title="required">*</abbr></p></div></div><div><span>Riverton, TX</span></div></div>
+</div></div>
+<div role="group"><h4>Skills and Strengths (Optional)</h4>
+ <ul><li><span>Python</span></li><li><span>PyTorch</span></li></ul><button type="button">MORE (2)</button></div>
+<button type="button">Submit</button>
+</body></html>"""
+
+
+def test_workday_like_review_page_rows_in_a_real_browser(chromium):
+    _, pg, _ = chromium
+    pg.set_content(WORKDAY_REVIEW_HTML)
+    snap = readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+    assert [(f.question, f.value) for f in snap.fields] == [
+        ("Email Address", "sam@example.test"),
+        ("Are you currently or have you in the past been debarred by any agency?", "No"),
+        ("Please input your anticipated graduation date", "12/12/2026"),
+        ("Current School Location (Please spell out the city and abbreviate the state.)", "Riverton, TX"),
+        ("Skills and Strengths (Optional)", "Python; PyTorch"),
+    ]
+    assert all(f.control == "review" for f in snap.fields)
+
+
+# --- the merge review of 2026-10-20 (decision 32) ----------------------------------------------------------------
+
+POSTING_HTML = """<!doctype html><html><body>
+<div><h2>Synthetic Engineer</h2><div>Austin, TX / Platform / Full-time</div></div>
+<div><div><p>Synthetic Labs builds synthetic tools.</p></div>
+  <div><h3>What you'll do</h3><ul><li>Build synthetic pipelines</li><li>Write synthetic tests</li></ul></div>
+  <div><h3>What we look for</h3><ul><li>Two years of synthetic experience</li></ul></div></div>
+<a href="#apply">Apply for this job</a></body></html>"""
+
+PARTS_HTML = """<!doctype html><html><body><h3>My Experience</h3>
+<div role="group"><h5>Work History 1</h5><label for="co">Company</label><input id="co" value="Synthetic Labs">
+ <fieldset><legend><label><span>From</span></label></legend><div role="group">
+   <input role="spinbutton" aria-label="Month" value=""><input role="spinbutton" aria-label="Year" value="2024"></div>
+ </fieldset>
+ <fieldset><legend><label><span>To</span></label></legend><div role="group">
+   <input role="spinbutton" aria-label="Month" value="8"><input role="spinbutton" aria-label="Year" value=""></div>
+ </fieldset></div><button type="button">Save and Continue</button></body></html>"""
+
+ODD_CONTROLS_HTML = """<!doctype html><html><body><h1>Apply: Synthetic Engineer</h1><form>
+ <fieldset><legend>Are you a protected veteran?<span aria-hidden="true">*</span></legend>
+  <label><input type="radio" name="vet" value="y"> Yes</label>
+  <label><input type="radio" name="vet" value="n"> No</label>
+ </fieldset>
+ <label id="loc-label" for="loc">Location (City)</label>
+ <div><input id="loc" role="combobox" aria-labelledby="loc-label" aria-controls="loc-list" value="Austin, TX">
+  <button id="loc-btn" type="button" aria-haspopup="listbox" aria-labelledby="loc-label loc-btn"><svg width="9"
+   height="9"></svg></button></div>
+ <ul id="loc-list" role="listbox" hidden></ul>
+ <div><label for="sk">Skills</label><div><input id="sk" enterkeyhint="search" value="">
+  <ul role="listbox" aria-label="Suggestions" style="display:none"><li role="option">Python</li>
+   <li role="option">SQL</li></ul></div></div>
+ <fieldset><label for="q1"></label><div><p>Do you consent to Synthetic storing your data?</p></div>
+  <div><input type="checkbox" id="c0" name="I agree" checked><label for="c0">I agree</label></div></fieldset>
+ <fieldset><label for="q2"></label><div><p>May Synthetic contact you about future roles?</p></div>
+  <div><input type="checkbox" id="c1" name="I agree"><label for="c1">I agree</label></div></fieldset>
+ <button type="submit">Submit application</button></form></body></html>"""
+
+
+def _snap_of(pg, html):
+    pg.set_content(html)
+    return readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+
+
+def test_a_job_description_with_headings_over_lists_has_no_field(chromium):
+    """Review #13: a posting page stays unnumbered (spec 4.3)."""
+    _, pg, _ = chromium
+    assert _snap_of(pg, POSTING_HTML).fields == ()
+
+
+def test_a_date_with_an_empty_part_shows_which_part_is_empty(chromium):
+    """Review #14."""
+    _, pg, _ = chromium
+    snap = _snap_of(pg, PARTS_HTML)
+    assert [(f.question, f.value) for f in snap.fields if f.control == "date"] == [("From", "?/2024"), ("To", "8/?")]
+
+
+def test_radio_stars_toggles_hidden_suggestions_and_consents(chromium):
+    """Review #22 (hidden suggestions are not picked), #23 (a combobox's toggle is not a field), #24 (a hidden star
+    in a legend is required), #25 (each consent keeps its own question)."""
+    _, pg, _ = chromium
+    pg.set_content(ODD_CONTROLS_HTML)
+    pg.check("#c0")
+    snap = readback.snapshot({"url": "u", "frames": [pg.evaluate(readback.EXTRACT_JS)]}, tab="T", read_at="")
+    assert [(f.question, f.control, f.value, f.required) for f in snap.fields] == [
+        ("Are you a protected veteran?", "radio", "", True),
+        ("Location (City)", "combobox", "Austin, TX", False),
+        ("Skills", "text", "", False),
+        ("Do you consent to Synthetic storing your data?", "checkbox", "Yes", False),
+        ("May Synthetic contact you about future roles?", "checkbox", "", False),
+    ]
+
+
+def test_the_saved_page_hides_contact_fields_by_path(chromium):
+    """Review #17: the simplified HTML never writes the value or text of a field matched to a contact entry."""
+    _, pg, _ = chromium
+    pg.set_content(
+        '<html><body><label for="a">Address</label><input id="a" value="34 Oak Avenue">'
+        '<p id="r">34 Oak Avenue</p><label for="s">School</label><input id="s" value="Old U"></body></html>'
+    )
+    html = readback.serialize(pg, [(0, "body > :nth-child(2)"), (0, "body > :nth-child(3)")])
+    assert "34 Oak Avenue" not in html and "Old U" in html and "[其他值，已隐去]" in html

@@ -205,6 +205,11 @@ class Redactor:
     def mask(self, text: str) -> str:
         return self._apply(text)[0]
 
+    def hits(self, text: str) -> Counter:
+        """How many times each kind would be masked in `text` (never what matched). The applicant's own kinds are
+        KINDS without other_email and other_phone."""
+        return self._apply(text)[1]
+
     def mask_json(self, obj):
         """Masks every string in a JSON-like value, dict keys included; other values are kept."""
         if isinstance(obj, str):

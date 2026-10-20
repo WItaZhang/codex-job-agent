@@ -2,8 +2,9 @@
 
 ApplyPilot's code keeps its own working database (`data/local/applypilot/applypilot.db`, its original
 schema). `sync` copies new postings from there into this project's store and refreshes the text of
-jobs that are not tagged or shown yet, or that are not shown and had no text (spec section 10, slice 2c
-items 18-19). Everything ApplyPilot collects is untrusted job content.
+jobs that are not tagged or shown yet, or that are not shown and had no text, and the location of jobs nobody
+has seen or acted on yet (spec section 10, slice 2c items 18-19). Everything ApplyPilot collects is untrusted
+job content.
 """
 
 import hashlib
@@ -18,6 +19,7 @@ import yaml
 
 from .config import Settings
 from .domain import InvariantError, Job, Salary
+from .pretag import read_locations
 from .store import Store
 
 SOURCES = ("jobspy", "workday", "smartextract")
@@ -98,7 +100,14 @@ def configure(data_dir: Path, settings: Settings) -> Path:
     (config.CONFIG_DIR / "employers.yaml").write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
     _keep_jobspy_company(jobspy)
+    _keep_workday_locations(workday)
     database.init_db()
+    db = sqlite3.connect(config.DB_PATH)
+    try:
+        with db:
+            db.execute("CREATE TABLE IF NOT EXISTS intent_agent_location (url TEXT PRIMARY KEY, location TEXT)")
+    finally:
+        db.close()
     return stage
 
 
@@ -129,6 +138,40 @@ def _keep_jobspy_company(jobspy) -> None:
 
     jobspy.store_jobspy_results = store_with_company
     jobspy._intent_agent_keeps_company = True
+
+
+def _keep_workday_locations(workday) -> None:
+    """ApplyPilot reads every Workday posting's detail but stores the search page's location text ("2 Locations",
+    or nothing for some employers); record the detail's places beside the row instead (spec 2c item 19)."""
+    if getattr(workday.workday_detail, "_intent_agent_keeps_locations", False):
+        return
+    original = workday.workday_detail
+
+    def detail_keeping_locations(employer, external_path):
+        detail = original(employer, external_path)
+        info = detail.get("jobPostingInfo", {})
+        location = workday_location(info)
+        # The link ApplyPilot stores the posting under: the detail's link, or the one its store_results builds.
+        url = info.get("externalUrl", "") or f"{employer['base_url']}/{employer['site_id']}{external_path}"
+        if location:
+            try:
+                conn = workday.get_connection()
+                conn.execute(
+                    "INSERT OR REPLACE INTO intent_agent_location (url, location) VALUES (?, ?)", (url, location)
+                )
+                conn.commit()
+            except sqlite3.Error:  # never cost ApplyPilot the detail it read; the search page's text stays
+                pass
+        return detail
+
+    detail_keeping_locations._intent_agent_keeps_locations = True
+    workday.workday_detail = detail_keeping_locations
+
+
+def workday_location(info: dict) -> str:
+    """A Workday detail's places as written, the primary one first, each once, joined with "; "."""
+    places = [info.get("location"), *(info.get("additionalLocations") or [])]
+    return "; ".join(dict.fromkeys(p.strip() for p in places if isinstance(p, str) and _value(p)))
 
 
 def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
@@ -223,9 +266,10 @@ def parse_salary(text: str | None) -> Salary | None:
 
 
 def sync(store: Store, data_dir: Path, settings: Settings) -> dict:
-    """Import new postings from ApplyPilot's working DB; refresh text of jobs not yet tagged or shown."""
+    """Import new postings from ApplyPilot's working DB; refresh text of jobs not yet tagged or shown, and the
+    location of jobs not shown, corrected or acted on (Workday's detail lists every place)."""
     path = staging_dir(data_dir, settings) / "applypilot.db"
-    counts = {"new": 0, "updated": 0, "retagged": 0, "relinked": 0, "excluded_titles": 0}
+    counts = {"new": 0, "updated": 0, "relocated": 0, "retagged": 0, "relinked": 0, "excluded_titles": 0}
     if not path.is_file():
         return counts
     configure(data_dir, settings)  # the base URLs that links are resolved with
@@ -242,6 +286,9 @@ def sync(store: Store, data_dir: Path, settings: Settings) -> dict:
             if "intent_agent_company" in tables
             else {}
         )
+        locations = {
+            row["url"]: row["location"] for row in db.execute("SELECT url, location FROM intent_agent_location")
+        }
         rows = db.execute(
             "SELECT url, title, salary, description, location, site, strategy, full_description, application_url "
             "FROM jobs ORDER BY discovered_at"
@@ -251,9 +298,13 @@ def sync(store: Store, data_dir: Path, settings: Settings) -> dict:
 
     counts["relinked"] = _relink(store)
     shown = store.shown_job_ids()
+    # Jobs whose location stays as it is (item 18): shown, corrected, or past "pending" on the apply list.
+    kept = shown | set(store.tag_overrides())
+    kept |= {job_id for job_id, application in store.applications().items() if application["status"] != "pending"}
     for row in rows:
         url = detail.resolve_url(row["url"], row["site"] or "") or row["url"]
         text = _value(row["full_description"]) or _value(row["description"])
+        location = _value(locations.get(row["url"])) or _value(row["location"])
         seen = store.external_row(url)
         if seen is None:
             title = _value(row["title"])
@@ -276,7 +327,7 @@ def sync(store: Store, data_dir: Path, settings: Settings) -> dict:
                 title=title,
                 company=company or "",
                 url=url,
-                location=_value(row["location"]),
+                location=location,
                 description=text,
                 salary=parse_salary(_value(row["salary"])),
                 attributes={key: value for key, value in attributes.items() if value},
@@ -297,7 +348,25 @@ def sync(store: Store, data_dir: Path, settings: Settings) -> dict:
             if stored != job.description:
                 store.add_job(store.job(job.id).model_copy(update={"description": stored}))
                 counts["updated"] += 1
+            if location and location != job.location and job.id not in kept:
+                counts["retagged"] += _relocate(store, job.id, location)
+                counts["relocated"] += 1
     return counts
+
+
+def _relocate(store: Store, job_id: str, location: str) -> bool:
+    """Give a stored job the location just read (item 18). A tagged job swaps its location tags for the pre-tags
+    when every place is read, and otherwise goes back to tagging (returns True). Being tagged is kept as it was, so
+    the swap uses no tagging budget."""
+    job, requeued = store.job(job_id), False
+    if store.is_tagged(job_id):
+        places = read_locations(location, store.vocabulary())
+        if places is None:
+            job, requeued = store.untag(job_id), True
+        else:
+            job = job.model_copy(update={"tags": [t for t in job.tags if not t.startswith("location.")] + places})
+    store.add_job(job.model_copy(update={"location": location}))
+    return requeued
 
 
 def _relink(store: Store) -> int:
