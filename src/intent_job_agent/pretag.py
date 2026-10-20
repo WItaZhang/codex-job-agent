@@ -22,16 +22,44 @@ _US_STATES = {
     "wv": "west virginia", "wi": "wisconsin", "wy": "wyoming",
 }  # fmt: skip
 _STATE_NAMES = set(_US_STATES.values())
+_CA_PROVINCES = {
+    "ab": "alberta", "bc": "british columbia", "mb": "manitoba", "nb": "new brunswick",
+    "nl": "newfoundland and labrador", "ns": "nova scotia", "nt": "northwest territories", "nu": "nunavut",
+    "on": "ontario", "pe": "prince edward island", "qc": "quebec", "sk": "saskatchewan", "yt": "yukon",
+}  # fmt: skip
+# The states or provinces a place may name besides its city (spec §10 item 31: only the US and Canada).
+_REGIONS = {
+    "us": set(_US_STATES) | _STATE_NAMES,
+    "canada": set(_CA_PROVINCES) | set(_CA_PROVINCES.values()),
+}
 _COUNTRIES = {
     "us": "us", "usa": "us", "u.s.": "us", "u.s.a.": "us", "united states": "us",
     "united states of america": "us", "america": "us",
     "canada": "canada", "uk": "uk", "united kingdom": "uk", "england": "uk", "great britain": "uk",
+    "scotland": "uk", "wales": "uk", "northern ireland": "uk",
     "india": "india", "china": "china", "germany": "germany", "france": "france", "ireland": "ireland",
-    "netherlands": "netherlands", "spain": "spain", "poland": "poland", "singapore": "singapore",
-    "japan": "japan", "australia": "australia", "israel": "israel", "mexico": "mexico", "brazil": "brazil",
+    "netherlands": "netherlands", "the netherlands": "netherlands", "spain": "spain", "poland": "poland",
+    "singapore": "singapore", "japan": "japan", "australia": "australia", "israel": "israel", "mexico": "mexico",
+    "brazil": "brazil", "switzerland": "switzerland", "sweden": "sweden", "denmark": "denmark", "norway": "norway",
+    "finland": "finland", "belgium": "belgium", "austria": "austria", "italy": "italy", "portugal": "portugal",
+    "czech republic": "czechia", "czechia": "czechia", "romania": "romania", "hungary": "hungary",
+    "greece": "greece", "turkey": "turkey", "türkiye": "turkey", "ukraine": "ukraine", "bulgaria": "bulgaria",
+    "serbia": "serbia", "croatia": "croatia", "estonia": "estonia", "latvia": "latvia", "lithuania": "lithuania",
+    "slovakia": "slovakia", "slovenia": "slovenia", "luxembourg": "luxembourg",
+    "united arab emirates": "uae", "uae": "uae", "saudi arabia": "saudi_arabia", "egypt": "egypt",
+    "south africa": "south_africa", "nigeria": "nigeria", "kenya": "kenya", "pakistan": "pakistan",
+    "south korea": "south_korea", "korea": "south_korea", "republic of korea": "south_korea",
+    "taiwan": "taiwan", "hong kong": "hong_kong", "vietnam": "vietnam", "viet nam": "vietnam",
+    "thailand": "thailand", "malaysia": "malaysia", "indonesia": "indonesia", "philippines": "philippines",
+    "new zealand": "new_zealand", "argentina": "argentina", "chile": "chile", "colombia": "colombia",
+    "peru": "peru", "costa rica": "costa_rica",
 }  # fmt: skip
 _REMOTE = ("remote", "work from home", "wfh", "anywhere")
 _ONSITE = ("on-site", "onsite", "on site", "in office", "in-office")
+_MODE_WORDS = ("remote", "hybrid", "on-site", "onsite", "on site", "anywhere")
+# Between places; " - " is not one (spec §10 item 31): it joins a region and a city.
+_SEPARATOR = re.compile(r";|\||\bor\b|/")
+_PARENTHESES = re.compile(r"\([^)]*\)")
 _WORK_MODE_FIELD = {
     "remote": "remote", "hybrid": "hybrid", "onsite": "onsite", "on-site": "onsite", "on site": "onsite",
 }  # fmt: skip
@@ -62,48 +90,105 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.casefold()).strip("_")
 
 
-def _place(part: str) -> str | None:
-    """One location like "San Francisco, CA" or "London, UK" -> a location ref; None when unsure."""
-    tokens = [t.strip() for t in part.split(",") if t.strip()]
-    if not tokens:
+def _ref(country: str, city: str) -> str | None:
+    """A city-level ref; None for what is no city name (empty, an address code with digits, a country)."""
+    slug = _slug(city)
+    if not slug or any(c.isdigit() for c in city) or city.casefold() in _COUNTRIES:
         return None
-    first, last = tokens[0].casefold(), tokens[-1].casefold()
-    if len(tokens) == 1:
-        country = _COUNTRIES.get(first)
-        return f"location.{country}" if country else None
-    if last in _US_STATES or last in _STATE_NAMES:  # "New York, NY": the first part is the city
-        return f"location.us.{_slug(tokens[0])}"
-    country = _COUNTRIES.get(last)
+    return f"location.{country}.{slug}"
+
+
+def _is_region(country: str | None, text: str) -> bool:
+    return text in _REGIONS.get(country or "", ())
+
+
+def _region_city(part: str) -> str | None:
+    """ "California - Palo Alto", "Israel - Tel Aviv": a country, US state or Canadian province, then the city."""
+    pieces = [p.strip(" ,") for p in part.split(" - ") if p.strip(" ,")]
+    if len(pieces) != 2 or any("," in p for p in pieces):  # "San Francisco, CA - New York, NY" is not read
+        return None
+    region, city = (p.casefold() for p in pieces)
+    country = _COUNTRIES.get(region) or next((c for c in _REGIONS if _is_region(c, region)), None)
     if country is None:
         return None
-    if len(tokens) >= 3:  # "Seattle, WA, United States"
-        middle = tokens[-2].casefold()
-        if country == "us" and middle not in _US_STATES and middle not in _STATE_NAMES:
-            return None
-        return f"location.{country}.{_slug(tokens[0])}"
-    if first in _COUNTRIES or (country == "us" and (first in _US_STATES or first in _STATE_NAMES)):
-        return f"location.{country}"  # "Texas, United States": a region, not a city
-    return f"location.{country}.{_slug(tokens[0])}"
+    if _is_region(country, city) or _COUNTRIES.get(city) == country:  # "USA - California": the country only
+        return f"location.{country}"
+    return _ref(country, pieces[1])
 
 
-def _locations(text: str) -> tuple[set[str], str | None, bool]:
-    """Location refs, a work mode stated in the text, and whether every place was read."""
+def _place(part: str) -> str | None:
+    """One place (spec §10 item 31) -> a location ref; None when unsure."""
+    if " - " in part:
+        return _region_city(part)
+    tokens = [t.strip() for t in part.split(",") if t.strip()]
+    low = [t.casefold() for t in tokens]
+    if len(low) == 1:
+        country = _COUNTRIES.get(low[0])
+        return f"location.{country}" if country else None
+    head, tail = _COUNTRIES.get(low[0]), _COUNTRIES.get(low[-1])
+    if head and tail and head != tail:  # two countries in one place
+        return None
+    if len(low) == 2:
+        if head and (_is_region(head, low[1]) or tail == head):  # "US, CA": the country only
+            return f"location.{head}"
+        if _is_region("us", low[1]):  # "New York, NY": the first part is the city
+            return _ref("us", tokens[0])
+        if tail:  # "London, UK"; "Texas, United States" names a region, not a city
+            return f"location.{tail}" if _is_region(tail, low[0]) else _ref(tail, tokens[0])
+        return _ref(head, tokens[1]) if head else None  # "India, Bengaluru"
+    if len(low) == 3:
+        if tail:  # "Seattle, WA, United States"
+            return _ref(tail, tokens[0]) if tail != "us" or _is_region("us", low[1]) else None
+        if head in _REGIONS:  # "US, CA, Santa Clara"; "United States of America, McLean, Virginia"
+            if _is_region(head, low[1]):
+                return _ref(head, tokens[2])
+            if _is_region(head, low[2]):
+                return _ref(head, tokens[1])
+    return None
+
+
+def _mode(text: str) -> str | None:
     low = text.casefold()
-    mode = "hybrid" if "hybrid" in low else "onsite" if any(w in low for w in _ONSITE) else None
-    if mode is None and any(w in low for w in _REMOTE):
-        mode = "remote"
-    cleaned = re.sub(r"\([^)]*\)", " ", text)
-    for word in ("remote", "hybrid", "on-site", "onsite", "on site", "anywhere"):
-        cleaned = re.sub(word, " ", cleaned, flags=re.I)
-    parts = [p for p in re.split(r";|\||\bor\b|/| - ", cleaned) if p.strip(" ,-")]
-    refs, unsure = set(), False
+    if "hybrid" in low:
+        return "hybrid"
+    if any(w in low for w in _ONSITE):
+        return "onsite"
+    return "remote" if any(w in low for w in _REMOTE) else None
+
+
+def _locations(text: str) -> tuple[list[str], str | None, bool]:
+    """Location refs, the work mode every place states, and whether every place was read (spec §10 item 31)."""
+    text = _PARENTHESES.sub(lambda m: _SEPARATOR.sub(" ", m.group()), text)  # "(Remote/Hybrid)" is one place
+    parts = [p for p in _SEPARATOR.split(text) if p.strip(" ,-")]
+    refs, modes, unsure = [], set(), False
     for part in parts:
-        ref = _place(part.strip(" ,-"))
+        modes.add(_mode(part))
+        cleaned = _PARENTHESES.sub(" ", part)
+        for word in _MODE_WORDS:
+            cleaned = re.sub(word, " ", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,-")
+        if not cleaned:  # only a work mode, such as "Remote"
+            continue
+        ref = _place(cleaned)
         if ref is None:
             unsure = True
         else:
-            refs.add(ref)
-    return refs, mode, bool(refs) and not unsure
+            refs.append(ref)
+    mode = next(iter(modes)) if len(modes) == 1 else None  # a mode only some places state is not read
+    return list(dict.fromkeys(refs)), mode, bool(refs) and not unsure
+
+
+def _canonical_places(refs: list[str], vocab: Vocabulary) -> list[str] | None:
+    try:
+        return list(dict.fromkeys(vocab.canonical(ref) for ref in refs))
+    except InvariantError:
+        return None
+
+
+def read_locations(text: str, vocab: Vocabulary) -> list[str] | None:
+    """The canonical location tags of a location when every place in it is read; None otherwise."""
+    refs, _, read = _locations(text)
+    return _canonical_places(refs, vocab) if read else None
 
 
 def _title_suggestions(title: str, vocab: Vocabulary) -> set[str]:
@@ -121,9 +206,10 @@ def _title_suggestions(title: str, vocab: Vocabulary) -> set[str]:
 def pretag(job: Job, vocab: Vocabulary) -> Pretag:
     tags: set[str] = set()
     confident: set[str] = set()
-    places, mode, places_read = _locations(job.location) if job.location else (set(), None, False)
-    if places_read:
-        tags |= places
+    refs, mode, read = _locations(job.location)
+    places = _canonical_places(refs, vocab) if read else None
+    if places is not None:
+        tags |= set(places)
         confident.add("location")
 
     attributes = {k: v.casefold() for k, v in job.attributes.items()}
