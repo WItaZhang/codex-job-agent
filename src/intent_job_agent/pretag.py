@@ -55,10 +55,21 @@ _COUNTRIES = {
     "new zealand": "new_zealand", "argentina": "argentina", "chile": "chile", "colombia": "colombia",
     "peru": "peru", "costa rica": "costa_rica",
 }  # fmt: skip
-_REMOTE = ("remote", "work from home", "wfh", "anywhere")
-_ONSITE = ("on-site", "onsite", "on site", "in office", "in-office")
+# Work mode phrases; their words may be joined by spaces or hyphens ("Work-From-Home", "On-site").
+_REMOTE = ("remote", "remote first", "work from home", "wfh", "anywhere")
+_ONSITE = ("onsite", "on site", "in office")
 # Every word a work mode is read from is no place, so it is taken out before the place is read (spec §10 item 31).
-_MODE_WORDS = re.compile(r"\b(?:" + "|".join(map(re.escape, ("hybrid", *_REMOTE, *_ONSITE))) + r")\b", re.I)
+_MODE_WORDS = re.compile(
+    r"(?<!\w)(?:"
+    + "|".join(p.replace(" ", r"[\s-]+") for p in sorted(("hybrid", *_REMOTE, *_ONSITE), key=len, reverse=True))
+    + r")(?!\w)",
+    re.I,
+)
+# Made regular before anything is read: every dash is "-", "D.C." is "DC", any run of white space is one space.
+_DASHES = re.compile(r"[\u2010-\u2015\u2212\ufe58\ufe63\uff0d]")
+_DOTTED = re.compile(r"\b[A-Za-z](?:\.[A-Za-z])+\b\.?")
+# A dash with a space on either side parts a region from a city; one inside a word ("Winston-Salem") does not.
+_DASH = re.compile(r"\s*(?:(?<=\s)-|-(?=\s))\s*")
 # Words that stand where a city would but name no place: the location is left to the tagger.
 _NOT_PLACES = {
     "virtual", "nationwide", "national", "distributed", "flexible", "telecommute", "telework", "home", "home based",
@@ -165,8 +176,13 @@ def _place(part: str) -> str | None:
     return None
 
 
+def _normalize(text: str) -> str:
+    text = _DOTTED.sub(lambda m: m.group().replace(".", ""), _DASHES.sub("-", text))
+    return " ".join(text.split())
+
+
 def _mode(text: str) -> str | None:
-    words = {word.casefold() for word in _MODE_WORDS.findall(text)}
+    words = {re.sub(r"[\s-]+", " ", word.casefold()) for word in _MODE_WORDS.findall(text)}
     if "hybrid" in words:
         return "hybrid"
     if words & set(_ONSITE):
@@ -176,15 +192,15 @@ def _mode(text: str) -> str | None:
 
 def _locations(text: str) -> tuple[list[str], str | None, bool]:
     """Location refs, the work mode every place states, and whether every place was read (spec §10 item 31)."""
-    text = _PARENTHESES.sub(lambda m: _SEPARATOR.sub(" ", m.group()), text)  # "(Remote/Hybrid)" is one place
+    # "(Remote/Hybrid)" is one place: separators inside parentheses part nothing.
+    text = _PARENTHESES.sub(lambda m: _SEPARATOR.sub(" ", m.group()), _normalize(text))
     parts = [p for p in _SEPARATOR.split(text) if p.strip(" ,-")]
     refs, modes, unsure = [], set(), False
     for part in parts:
         modes.add(_mode(part))
-        cleaned = _PARENTHESES.sub(" ", part)
-        cleaned = _MODE_WORDS.sub(" ", cleaned)
-        cleaned = re.sub(r"\s+", " ", cleaned)
-        cleaned = re.sub(r" -(?: -)+ ", " - ", cleaned).strip(" ,-")  # a word taken out leaves no empty piece
+        cleaned = " ".join(_MODE_WORDS.sub(" ", _PARENTHESES.sub(" ", part)).split())
+        pieces = [p.strip(" ,-") for p in _DASH.split(cleaned)]
+        cleaned = " - ".join(p for p in pieces if p)  # a word taken out leaves no empty piece
         if not cleaned:  # only a work mode, such as "Remote"
             continue
         ref = _place(cleaned)

@@ -118,3 +118,17 @@
 - 定下的（按用户 2026-10-19 授权全部按推荐项）：空段去掉后再切。"United States - Remote - Texas" 按 "United States - Texas" 读，前一段是国家、后一段是它的州，读成 `us`（决定 5）；"US - Remote - CA - Santa Clara" 去掉空段后仍是三段，算认不出。审查给的另一个选项"算没把握"没选：这几条去掉 Remote 后就是第 31 条已经认的"国家加州"写法。
 
 **规则写在** `spec.md` §10 第 31 条。
+
+## 决定 9（2026-10-20）：读地点之前先规整空白、破折号和带点的缩写；work_mode 词的各种写法
+
+- 复核（进度会话，每条 1 个 agent 重跑证据再试几十种相近写法，新问题各由 3 个 agent 试着反驳）发现，决定 7、8 只修好了原来的证据：
+  - 空白没先规整：词中间有两个空格、不换行空格或制表符时，work_mode 词既读不出也去不掉（"US - Work  From Home" 读成 `us.work_from_home`）；"Work-From-Home"、"Remote-First" 也一样（剩下的 "First" 读成城市）。
+  - 破折号一侧没空格时去不掉空段："United States - Remote -Texas"、"USA - Remote-CA"、"US - WFH-NY" 读成 `us.texas`、`us.ca`、`us.ny`。
+  - 带点的缩写当成城市："US, Washington, D.C." 读成 `us.d_c`。
+- 定下的（按用户 2026-10-19 授权全部按推荐项，即复核的推荐修法 (a)(b)）：
+  - 解析前先规整：空白（含不换行空格、制表符）合成一个空格，各种破折号统一成 "-"，带点的缩写去掉点。
+  - work_mode 词的词和词之间是空格还是连字符都算（work-from-home、in-office），Remote-First 也算 remote。
+  - 两边至少一边有空格的 "-" 是分段的破折号；去掉词后留下的空段一律丢掉。决定 8 的规则照旧，只是不再要求破折号两边都有空格。
+  - 测试改成组合矩阵（`tests/test_location_matrix.py`）：每种写法乘上空白、破折号和 work_mode 词的变体。
+
+**规则写在** `spec.md` §10 第 31 条。
