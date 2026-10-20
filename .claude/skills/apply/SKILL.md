@@ -1,6 +1,6 @@
 ---
 name: apply
-description: 每日模块④：从投递清单取一批岗位，先写求职信，再借用 ApplyPilot 的投递流程逐个填表。每批先做前 10 个，全部停在提交前给用户检查；用户说继续后，其余的自动提交（公司名单里的仍停在提交前）。每一步都要用户批准。
+description: 每日模块④：从投递清单取一批岗位，先写求职信，再借用 ApplyPilot 的投递流程逐个填表。每批先抽查前 5 个，全部停在提交前给用户检查；用户说继续后，其余的自动提交（公司名单里的仍停在提交前）。每一步都要用户批准。
 ---
 
 # /apply：投递
@@ -28,8 +28,8 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 ```
 1 [先检查] ML Engineer — Acme（求职信：待写）
 …
-11 [停在提交前] Applied Scientist — Stripe
-12 [自动提交] Data Scientist — Beta
+6 [停在提交前] Applied Scientist — Stripe
+7 [自动提交] Data Scientist — Beta
 ```
 
 ## 3. 写求职信
@@ -38,7 +38,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
    在 Codex 中使用同名自定义 agent；如果宿主不支持按角色名派生，先读 `.codex/agents/cover-letter-writer.md`，把完整定义与该组编号一起交给独立子 agent。并发数还要受宿主剩余槽位限制。
 2. 子 agent 回报"not saved"的岗位不投：`prepare_apply_batch(exclude=[这些岗位])` 重新选一批，并把没通过的问题告诉用户。
 
-## 4. 第一步：先做前 10 个，全部停在提交前
+## 4. 第一步：先抽查前 5 个，全部停在提交前
 
 1. 展示批次和返回的 summary 原文，问用户："开始吗？"
 2. 用户说开始：`start_applying(batch_id, summary)`（弹窗）。
@@ -50,7 +50,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
    - pending 且 reason 是 system_error：投递程序没跑起来，网站上什么都没发生，岗位已自动退回待投。把 notes 里的错误原样给用户看。
    - void 为真：第一步一个都没成功，这一批已作废，不能"继续"。说明原因，等问题解决后重新 `prepare_apply_batch()`。
    - checklist：每个岗位打开过的其他网站和发出的邮件，原样列出。
-5. 用户说"1-8 已投，9 不投"之类：`mark_applications(job_ids, "applied")` / `mark_applications(job_ids, "skipped")`；想重试失败的用 "pending"。说不清楚就问。
+5. 用户说"1-4 已投，5 不投"之类：`mark_applications(job_ids, "applied")` / `mark_applications(job_ids, "skipped")`；想重试失败的用 "pending"。说不清楚就问。
 
 ## 5. 第二步：其余的
 
