@@ -87,12 +87,11 @@ def application_result(report: JobReport) -> Result:
     """A form-fill report as the apply-list status and the reason recorded first in its note (spec section 10
     item 89). The reason is the filling agent's own result code, written as ApplyPilot writes it; code's own
     findings use the form-fill module's names."""
-    agent = report.agent_result
+    agent, conclusion = report.agent_result, report.conclusion
+    if conclusion == "maybe_submitted":  # before anything else: a page said "received", so never pending again
+        return Result("applied", "maybe_submitted")
     if report.status == "system_error" or agent == "system_error":  # nothing reached the site (spec item 67)
         return Result("pending", "system_error")
-    conclusion = report.conclusion
-    if conclusion == "maybe_submitted":
-        return Result("applied", "maybe_submitted")
     if conclusion in ("check_then_submit", "do_not_submit"):
         return Result("waiting", conclusion)
     if conclusion == "unreadable":

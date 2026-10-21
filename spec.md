@@ -721,7 +721,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - 不符合申请资格 → failed。
     - 原因用填表 agent 自己的结果码（`captcha`、`login_issue`、`email_verification`、`expired`、`timeout` 等，和 ApplyPilot 的写法一样）；代码判定的用填表模块的写法（`check_then_submit`、`do_not_submit`、`maybe_submitted`、`unreadable`、`tab_lost`）。备注写成 `<原因>；<结论>；填表运行 <运行编号>`，后面接填表 agent 的备注。
     - 第 68 条"第一步全失败则整批作废"不变：有 waiting 或 applied 就算有成功的。
-90. **可能已提交时停下**：填表模块的结论是"可能已提交"时，这一步马上停下，没做的岗位仍是待投，这一批作废（不能开始第二步），`apply_status` 说明原因。填表模块承诺永远不提交，出现这个结论说明出了问题。
+90. **可能已提交时停下**：填表模块的结论是"可能已提交"时，这一步马上停下，没做的岗位仍是待投，这一批作废（不能开始第二步），`apply_status` 说明原因。填表模块承诺永远不提交，出现这个结论说明出了问题。这一条先于其他映射：填表 agent 中途出错（程序没跑完）时也一样，录制或读回只要见过"申请已收到"，就不退回待投。这个岗位的报告出不来时，按运行自己的检查判断：看到过"申请已收到"的照样停下；填表 agent 说填完了的记 waiting（`unreadable`），其余记 failed，备注写明报告没出来。
 91. **重跑**：`prepare_apply_batch(only=[...])` 生成只有这几个岗位的批次，不管几个都是"先检查"，走填表模块，永远不自动提交。这几个必须都是投递清单上的待投岗位，否则整批不生成。用户说"重跑 4"时，agent 先用 `mark_applications` 把它改回待投，再生成批次。重跑不复用原来的标签页，从头打开岗位地址。
 92. **一致性检查**（填表规格 2.3、4.1）：投递的每一步开始之前，代码比较 `profile.json` 和 answers.yaml 能一一对应的 6 个字段：
     - 工作许可：`work_authorization.legally_authorized_to_work` 和 `work_auth.authorized_us`；

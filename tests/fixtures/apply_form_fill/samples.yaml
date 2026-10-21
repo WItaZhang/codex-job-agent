@@ -10,6 +10,8 @@ mapping:
      expect: {status: waiting, reason: do_not_submit, worked: true}}
   - {id: c, report: {conclusion: maybe_submitted, status: filled, agent_result: dry_run},
      expect: {status: applied, reason: maybe_submitted, worked: true}}
+  - {id: c2, report: {conclusion: maybe_submitted, status: system_error, agent_result: null},  # broke after "received"
+     expect: {status: applied, reason: maybe_submitted, worked: true}}
   - {id: d, report: {conclusion: not_eligible, status: filled, agent_result: not_eligible},
      expect: {status: failed, reason: not_eligible, worked: false}}
   - {id: e, report: {conclusion: not_filled, status: gate, agent_result: captcha, not_filled_reason: gate},

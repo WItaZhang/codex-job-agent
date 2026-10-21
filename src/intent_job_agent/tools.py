@@ -1367,11 +1367,17 @@ class Toolbox:
             report = JobReport.model_validate_json(path.read_text(encoding="utf-8"))
         except Exception as error:  # noqa: BLE001 - no report: say so, and judge from the run's own outcome
             why = ctx.redactor.mask(f"报告没出来：{type(error).__name__}: {error}")[:300]
+            if outcome.checks.get("not_submitted") is False:  # a page said "received" (spec section 10 item 90)
+                conclusion = "maybe_submitted"
+            elif outcome.agent_result in (None, "dry_run"):  # filled up to submit, as far as the agent said
+                conclusion = "unreadable"
+            else:
+                conclusion = "not_filled"
             report = JobReport(
                 job_id=entry.id,
                 status=outcome.status,
                 agent_result=outcome.agent_result,
-                conclusion="unreadable",
+                conclusion=conclusion,
                 notes=(*outcome.notes, why),
             )
             path = None

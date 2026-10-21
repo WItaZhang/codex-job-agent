@@ -7,6 +7,8 @@ All data is SYNTHETIC; nothing here starts Chrome or Claude Code."""
 import datetime
 import json
 import sqlite3
+import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -15,12 +17,14 @@ from intent_job_agent import apply_bridge
 from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill import report as form_fill_report
 from intent_job_agent.form_fill.models import PageState
+from intent_job_agent.form_fill.recording import RecordingStore, recording_id
+from intent_job_agent.form_fill.redact import Redactor
 from intent_job_agent.store import Store
 from intent_job_agent.tools import SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
 
 from .apply_fakes import ANSWERS, FormFillFake
 from .conftest import BASE_INTENT, BASE_VOCAB, settings
-from .test_slice6 import DAY, SECRETS, FakeRunner, add_jobs, write_applicant, write_letters
+from .test_slice6 import DAY, PROFILE, SECRETS, FakeRunner, add_jobs, write_applicant, write_letters
 
 COMPANIES = ["Co0", "Co1", "Co2", "Co3", "Co4", "Stripe, Inc.", "Acme", "Beta"]  # S2
 RECEIVED = PageState(actions=(), received="Thank you, your application has been received")
@@ -215,6 +219,69 @@ def test_a_maybe_submitted_form_stops_the_step_and_voids_the_batch(box):  # S5
     assert status["void"] is True and status["next"] is None and "可能" in status["notice"]
     states = {item["job_id"]: item["state"] for item in status["jobs"]}
     assert states["j03"] == states["j04"] == "stopped"
+
+
+class ReceivedThenBroken(FormFillFake):
+    """The page said the application was received, then the filling agent's run raised (as apply_bridge does when
+    Claude Code does not exit in time): the job's own report is "maybe submitted" (review #1 path a)."""
+
+    def fill(self, spec, **options):
+        if spec.job_id != "j01":
+            return super().fill(spec, **options)
+        run_dir = Path(options["log_path"]).parent.parent
+        root = run_dir.parent.parent / self.box.settings.form_fill.recordings_dir
+        store = RecordingStore(root, recording_id(spec.url), run_dir.name, Redactor.from_profile(PROFILE))
+        store.note_received("Thank you, your application has been received", spec.url + "/done")
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=60)
+
+
+def test_a_run_that_broke_after_the_page_said_received_still_stops_and_voids(box):
+    jobs = ready(box, COMPANIES[:6])
+    box.form_fill_runner = ReceivedThenBroken(box)
+    run_step(box)
+    application = box.store.applications()["j01"]
+    assert application["status"] == "applied" and application["note"].startswith("maybe_submitted；")
+    status = box.apply_status()
+    assert status["void"] is True and status["next"] is None
+    assert [spec.job_id for spec, _ in box.form_fill_runner.fills] == jobs[:1]  # j01 raised; j02-j04 never ran
+    assert {item["state"] for item in status["jobs"][2:]} == {"stopped"}
+    assert "j01" not in [j["job_id"] for j in box.prepare_apply_batch(DAY)["jobs"]]  # never applied to again
+
+
+class SheetBrokenAfter(FormFillFake):
+    """answers.yaml is broken while the step runs, right after `job`'s form is filled, so its report fails."""
+
+    def __init__(self, box, job, **kwargs):
+        super().__init__(box, **kwargs)
+        self.job = job
+
+    def fill(self, spec, **options):
+        outcome = super().fill(spec, **options)
+        if spec.job_id == self.job:
+            (self.box.data_dir / "applicant" / "answers.yaml").write_text("version: 1\nentries: [oops\n", "utf-8")
+        return outcome
+
+
+def test_without_a_report_a_received_page_still_stops_the_step(box):  # review #1 path b
+    ready(box, COMPANIES)
+    batch, _ = run_step(box)
+    box.form_fill_runner = SheetBrokenAfter(box, "j05", states={"j05": RECEIVED})
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
+    applications = box.store.applications()
+    assert applications["j05"]["status"] == "applied" and applications["j05"]["note"].startswith("maybe_submitted；")
+    assert "报告没出来" in applications["j05"]["note"]
+    assert applications["j06"]["status"] == applications["j07"]["status"] == "pending"  # nothing auto-submitted
+    assert [s for s in box.apply_runner.calls if s.mode == "submit"] == [] and box.apply_status()["void"] is True
+
+
+def test_without_a_report_a_filled_form_waits_and_a_failure_fails(box):
+    ready(box, COMPANIES[:2])
+    box.apply_runner = FakeRunner({"j01": ("failed", "wrong_job_redirect", [])})
+    box.form_fill_runner = SheetBrokenAfter(box, "j00")
+    run_step(box)
+    applications = box.store.applications()
+    assert applications["j00"]["status"] == "waiting" and applications["j00"]["note"].startswith("unreadable；")
+    assert applications["j01"]["status"] == "failed" and applications["j01"]["note"].startswith("wrong_job_redirect；")
 
 
 # --- S6: rerun ---------------------------------------------------------------------------------------------------
