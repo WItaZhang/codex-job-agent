@@ -8,7 +8,7 @@
 - 切片 2a 已合并（`form-fill.slice2a.plan.md`）：逐页录制（`checkpoint`、后台补录、录制目录）和 Workday 读回。合并前经过一轮独立审查，查出的 32 条问题都修了（决定 32）。
 - 切片 2b（重放，6.4）、2c（独立评审 4.5、当场修正 4.6）冻结，没有开始。
 - 6.1 的真实岗位试填冻结，等投递需要填表模块时再做；录制的触发方式（4.2、4.3）和重放以哪种做法为主（6.4）因此还没经过真实网站的验证。验证结果推翻它们时，改写本规格。
-- 接入 /apply 不冻结：排在"写入投递完成标准"之后，由 apply 会话做（分支 `claude/awesome-cori-87f1f9`），只用切片 1 和 2a 做到的部分。
+- 接入 /apply 已做完（2026-10-20，分支 `claude/awesome-cori-87f1f9`，计划 `apply-form-fill.plan.md`，总规格决定 18–20），只用切片 1 和 2a 做到的部分。/apply 怎么调用本模块见第 9 节；接入对本模块的改动见决定 33。
 
 本规格写的是整个模块。按切片先做哪一部分、哪些暂时简化，见各切片的计划（决定 26）。
 
@@ -23,7 +23,7 @@
 使用场景：
 
 1. **现在（开发和验证）**：用户挑几个真实岗位，写成清单，运行本模块。然后读报告、补标准答案或要求清单，再在录制上重测。直到报告和用户亲手检查的结果一致为止。
-2. **以后（接入 /apply）**：/apply 把一批岗位转成清单，交给本模块。用户按报告检查标签页，然后自己提交。自动提交的事以后另定。
+2. **/apply（2026-10-20 起）**：/apply 把每一步的岗位转成清单，抽查的岗位和"停在提交前"名单上的公司交给本模块。用户按报告检查标签页，然后自己提交。其余岗位仍由 ApplyPilot 自动提交，本模块不管（第 9 节，`spec.md` §10 第 86–96 条）。
 
 每个真实岗位默认只真实访问一次。第一次访问时，本模块把表单录成本地的仿真表单，以后重测都用录制，不再访问网站。这样不会对同一个岗位反复填写，也减少了对网站的访问（用户 2026-10-15 的要求）。
 
@@ -79,7 +79,7 @@ jobs:
 - `applicant.yaml` 列出简历（PDF 和文本）、`apply_agent_read`、`onsite_ok`、`relocation`。
 - `profile.json` 放联系方式和招聘网站的密码。
   - 只有代码会读它，读的时机只有三个：
-    1. 准备时（4.1）：检查标准答案引用的字段是否存在，只看有没有。接入 /apply 以后，还要检查它和标准答案重复的部分是否一致（2.3）；
+    1. 准备时（4.1）：检查标准答案引用的字段是否存在，只看有没有。由 /apply 调用时，还要检查它和标准答案重复的部分是否一致（2.3）；
     2. 生成填表指令；
     3. 核对联系方式和打码（4.4、5.6）。
   - 任何 agent 都不能用读文件工具读它。
@@ -138,8 +138,12 @@ jobs:
     - 空着，或停在 "No Response"、"Select One" 这类占位上，算缺漏。
   - 学校可以写 `aliases`（全称、简称），按段对学校时也用（4.4）。
   - 逐段写的原因：表单常常要逐段填，也常常由网站或领英档案预填。
-- **和 `profile.json` 重复的事实**：工作许可、薪资、EEO 在 `profile.json` 里也有。本模块只认 `answers.yaml`。接入 /apply 以后，代码在准备时检查两边是否一致，不一致就不运行（4.1）。
-  - 只在两边能一一对应的字段上比较。对应表写在代码里，接入 /apply 时一起定。
+- **和 `profile.json` 重复的事实**：工作许可、薪资、EEO 在 `profile.json` 里也有。本模块只认 `answers.yaml`。由 /apply 调用时，代码在每一步开始前检查两边是否一致，不一致就不运行（4.1；`spec.md` §10 第 92 条）。
+  - 只在两边能一一对应的字段上比较。对应表写在代码里（`apply_fill.py`），共 6 个字段：
+    - `work_authorization.legally_authorized_to_work` 和 `work_auth.authorized_us`；
+    - `compensation.salary_expectation` 和 `compensation.expected`，比数字；
+    - `eeo_voluntary.gender`、`race_ethnicity`、`veteran_status`、`disability_status` 和 `eeo.gender`、`eeo.race`、`eeo.veteran`、`eeo.disability`。
+  - 比较时忽略大小写、空白和标点，`accept` 里的写法也算；有一边没写的不比较。报错只写字段名，不写值。
   - `profile.json` 分不出的区分不比较，以 `answers.yaml` 为准。例如 `profile.json` 的担保只有一项，不分现在和将来。
 - **起草**：最初的版本由 agent 起草联系方式以外的条目，然后逐条用选择题请用户确认。联系方式只写引用。
   - 起草的依据：打码后的简历（5.6）和用户说过的话。
@@ -190,7 +194,7 @@ entries:
       major: [Computer Science, Computer and Information Science]   # 下拉里没有原专业时选其中一个
     source: '简历："M.S. Data Science, Example State University, Aug 2025 – Expected May 2027"'
   compensation.expected:
-    answer: 95000
+    answer: 85000
     kind: number_min
     asks: ["salary expectation", "desired salary"]
   eeo.hispanic_latino:
@@ -285,6 +289,7 @@ items:
   - 已下架；
   - 跳到了别的岗位；
   - 只收邮件；
+  - 筛选题要本人作答：页面写明筛选题或开放题要申请人本人作答、不许用 AI 写（5.5）；
   - 已经申请过；
   - 页面出错；
   - 卡住；
@@ -318,6 +323,7 @@ job_id, run_id, recording_id
 replay_capability: fill | check_only                       （6.3）
 verdict: maybe_submitted | ok | review_then_submit | do_not_submit | not_filled
 not_filled_reason: gate | login_failed | needs_answer | expired | wrong_job | email_only
+                   | screening_requires_candidate_written_answers
                    | already_applied | page_error | stuck | tab_lost | system_error
 gate: {kind, page, todo, arbitration_first_sentence}
 child_tabs: [url]
@@ -367,7 +373,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 ### 4.1 准备（代码）
 
 - 校验第 2 节的四样输入。检查标准答案引用的 `profile.json` 字段是否存在：只看有没有，不把值交给任何模型。
-- 接入 /apply 以后，还要检查 `profile.json` 和标准答案重复的部分（工作许可、薪资、EEO）是否一致，不一致就不运行。只比较能一一对应的字段（2.3）。
+- 由 /apply 调用时，还要检查 `profile.json` 和标准答案重复的部分（工作许可、薪资、EEO）是否一致，不一致就不运行。只比较能一一对应的字段（2.3）。
 - **已有录制**：清单里每个岗位的录制编号由代码从地址算出（6.2）。
   - 不需要再真实访问的情况：这份录制最近一次的结论是以下之一，而清单里又没写 `revisit: true`。
     - 可以提交、检查后可提交、不能提交、可能已提交、不符合申请资格；
@@ -413,7 +419,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 离开前最后不到一个间隔里填的值可能没录到，所以 `checkpoint("filled")` 仍是主要的读回。
   - `checkpoint` 加自动补录这套做法，要经过 6.1 的可行性验证（第 3、8 项）。验证结果推翻它时，改写本规格。
 - 结束时输出一份 JSON（用无界面 Claude Code 的 `--json-schema`），代码按 schema 校验。内容如下：
-  - `status`：`filled` / `gate` / `login_failed` / `needs_answer` / `expired` / `wrong_job` / `email_only` / `already_applied` / `page_error` / `stuck`。
+  - `status`：`filled` / `gate` / `login_failed` / `needs_answer` / `expired` / `wrong_job` / `email_only` / `screening_requires_candidate_written_answers` / `already_applied` / `page_error` / `stuck`。
   - `gate`：门槛的种类、所在页面、用户要做什么、仲裁条款的第一句。
   - `fields`：每栏的编号、来源类型，以及标准答案的键或简历原句。
   - `notes`：几句说明。
@@ -702,6 +708,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 岗位已下架；
   - 跳到了别的岗位；
   - 只收邮件投递：本模块从不发邮件，报告里写出邮箱地址；
+  - 页面写明筛选题或开放题要申请人本人作答、不许用 AI 写：不作答，停在那一页，用 "NOTE:" 引用原文，结果是 `screening_requires_candidate_written_answers`，结论是"没填完：筛选题要本人作答"。写不写由用户决定；重跑也会停在同一页，所以报告不叫用户说"重跑"。规则写在 /apply 和本模块共用的附加规则里（`spec.md` §10 第 94 条）。
   - 页面显示已经申请过。
 - **重跑**：
   - 代码在运行记录里存下这个岗位标签页最后的地址和 CDP 标签页编号。
@@ -720,7 +727,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 - **填表 agent 的工具**：
   - 只有浏览器：Playwright MCP（固定 0.0.83）经 CDP 连投递用的 Chrome，再加本模块的 `checkpoint`。`checkpoint` 只触发代码录制，返回这一页的栏目编号（卡住时返回 stop），不能读写文件。
   - 没有 Gmail。邮件验证码按门槛处理（5.5），本模块也从不发邮件。
-  - 多了 `checkpoint`、没有 Gmail，这两点是本模块对 spec 4.10 第 6 条（"投递 agent 只有浏览器和 Gmail（读、搜、发信）"）的例外，只对本模块。CLAUDE.md 的投递条款已写明填表 agent 的放行更窄。/apply 不变。
+  - 多了 `checkpoint`、没有 Gmail，这两点是本模块对 spec 4.10 第 6 条（"投递 agent 只有浏览器和 Gmail（读、搜、发信）"）的例外，只对本模块。CLAUDE.md 的投递条款已写明填表 agent 的放行更窄。/apply 自动提交的岗位照旧有 Gmail；抽查的岗位和名单上的公司由本模块填，没有 Gmail。
   - 不能用 `browser_run_code_unsafe`。
 - **投递用 Chrome 里的个人标签页**：填表 agent 和用户共用这个 Chrome。"不碰原来开着的标签页"只是写给它的指令，拦不住它读。所以启动前，代码列出开着的这类网站的标签页，只写网站的地址，提醒用户关掉；只提醒，照样启动（用户 2026-10-17）：
   - `apply.blocked_origins` 里的网站和它们的子域名（邮箱、银行、支付、密码管理）；
@@ -1026,13 +1033,13 @@ data/local/form-fill/
     - 自己的 MCP 服务表：Playwright 加 checkpoint，不要 Gmail（5.6）；
     - 放行名单；
     - 禁止名单。
-  - /apply 的行为不变。
-- **以后 /apply 怎么调用**：
+  - 不传这些参数时，/apply 自动提交的命令不变。
+- **/apply 怎么调用**（`spec.md` §10 第 86–93 条）：
   1. `prepare_apply_batch` 选出一批岗位；
-  2. 写成清单：岗位编号作 id，加上申请地址、公司、职位、所选简历的 id、求职信路径；
-  3. 调用本模块；
-  4. 拿回每个岗位的 `{id, 结论, 需要你做的事, 报告, 录制编号}`；
-  5. 写成什么投递状态由 /apply 自己决定，怎么映射在接入时再定。
+  2. `start_applying` 把这一步的岗位写成清单：岗位编号作 id，加上申请地址、公司、职位、所选简历的 id、求职信路径和 `revisit: true`；用 `load_inputs` 校验；
+  3. 模式是"先检查"和"停在提交前"的岗位，逐个交给 `run_job`；每做完一个就调用 `run_report`，读出这个岗位的报告（`<岗位>.json`）；
+  4. 拿回每个岗位的结论、没填完的原因、填表 agent 的结果码、需要你做的事、报告路径和录制编号；
+  5. 写成什么投递状态由 /apply 决定（`spec.md` §10 第 89 条）。/apply 不经过 `start_form_fill`，也不按录制跳过岗位。
 - **配置**：`configs/default.yaml` 新增 `form_fill` 一节，包括：
   - 修正轮数（2）；
   - 填表模型和 `reviewer_model`；

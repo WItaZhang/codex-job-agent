@@ -10,13 +10,14 @@ Job descriptions are untrusted; they are returned wrapped in a marker and never 
 """
 
 import csv
+import dataclasses
 import json
 import re
 import shutil
 import subprocess
 import threading
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +26,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import applicant as applicant_files
-from . import apply_bridge, apply_list, applypilot_bridge, avature, duplicates, funnel
+from . import apply_bridge, apply_fill, apply_list, applypilot_bridge, avature, duplicates, funnel
 from .boards import BoardSpec, load_boards
 from .changes import (
     AddEntry,
@@ -42,8 +43,13 @@ from .discovery import DiscoveryError, fetch_board
 from .domain import DIMENSIONS, Compensation, IntentModel, InvariantError, Job, Level, Vocabulary
 from .engine import Engine
 from .form_fill import cli as form_fill_report
+from .form_fill import inputs as form_fill_inputs
 from .form_fill import recording as form_fill_recording
 from .form_fill import runner as form_fill
+from .form_fill.models import JobList, JobReport
+from .form_fill.redact import Redactor
+from .form_fill.report import CONCLUSIONS as FORM_FILL_CONCLUSIONS
+from .form_fill.report import REASONS as FORM_FILL_REASONS
 from .importing import inside, normalize_tags, parse_jobs
 from .llm import NoModelClient
 from .pretag import pretag
@@ -54,6 +60,21 @@ from .selection import rank_postings, select_daily
 from .store import Store, new_id
 
 TOOL_TIERS: dict[str, str] = {}
+
+
+@dataclasses.dataclass(frozen=True)
+class _FormFilled:
+    """A job of an apply step filled by the form-fill module, read by apply_status like an ApplyOutcome."""
+
+    status: str
+    reason: str
+    notes: tuple[str, ...]
+    other_sites: tuple[str, ...]
+    conclusion: str  # the report's conclusion in Chinese, with why it was not filled
+    todo: tuple[str, ...]
+    report: str | None  # the job's report (<run>/<job>.json)
+    recording_id: str | None
+    emails: tuple = ()  # the form-fill module never sends email
 
 
 def _tool(tier: str):
@@ -817,7 +838,8 @@ class Toolbox:
         """What the user did with jobs on the apply list: applied, skipped, or back to pending. The other listings
         of the same posting change with them (`same_posting`). Not a label and not a signal: it changes neither the
         intent nor any analysis."""
-        self.store.set_application_status(job_ids, status)  # checks the ids and the status before any change
+        # checks the ids and the status before any change; each job the user named is one attempt (spec item 95)
+        self.store.set_application_status(job_ids, status, by_user=True)
         same = self._same_posting(self.store.applications())
         others = [j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids]
         self.store.list_applications(others, _day(None))
@@ -851,9 +873,17 @@ class Toolbox:
         except InvariantError as error:
             return {"ready": False, "missing": [str(error)], "folder": str(folder), "programs": programs}
         missing = applicant.missing_files() + applicant_files.read_dir_problems(applicant, self.data_dir)
+        sheet_problems, conflicts = [], []
+        if not missing:
+            try:
+                conflicts = self._profile_conflicts(applicant, self._answer_sheet(applicant))
+            except InvariantError as error:
+                sheet_problems.append(str(error))
         return {
-            "ready": not missing,
+            "ready": not (missing or sheet_problems or conflicts),
             "missing": missing,
+            "answer_sheet_problems": sheet_problems,  # answers.yaml or checklist.yaml (form-fill spec 2.3, 2.4)
+            "profile_conflicts": conflicts,  # field names only (spec section 10 item 92)
             "folder": str(folder),
             "resumes": [{"id": r.id, "use_for": r.use_for} for r in applicant.resumes],
             "resume_selection": str(applicant.resume_selection) if applicant.resume_selection else None,
@@ -989,13 +1019,25 @@ class Toolbox:
             return "、".join(job["company"] or job["title"] for job in items) or "无"
 
         if phase == "review":
-            return f"批次 {batch_id}：先投 {len(jobs)} 个，全部填好后停在提交前，由你检查后自己提交：{names(jobs)}"
+            return (
+                f"批次 {batch_id}：先投 {len(jobs)} 个，全部由填表模块填好、逐栏核对后停在提交前，由你检查后自己提交："
+                f"{names(jobs)}"
+            )
         submit = [job for job in jobs if job["mode"] == "submit"]
         stop = [job for job in jobs if job["mode"] == "careful"]
         return (
             f"批次 {batch_id}：接着投 {len(jobs)} 个；自动提交 {len(submit)} 个：{names(submit)}；"
-            f"停在提交前 {len(stop)} 个：{names(stop)}"
+            f"停在提交前（填表模块逐栏核对）{len(stop)} 个：{names(stop)}"
         )
+
+    def _link_problems(self, jobs: list[dict]) -> list[dict]:
+        """Jobs the form-fill list would refuse (spec section 10 item 87): their link is not https."""
+        problems = []
+        for job in jobs:
+            url = self.store.job(job["job_id"]).url or ""
+            if not url.startswith("https://"):
+                problems.append({"job_id": job["job_id"], "problem": "链接不是 https，填表清单不收；用 exclude 去掉它"})
+        return problems
 
     def _batch_view(self, batch_id: str) -> dict:
         data = self.store.apply_batch(batch_id)
@@ -1006,26 +1048,53 @@ class Toolbox:
             "day": data["day"],
             "jobs": jobs,
             "missing_letters": [job["job_id"] for job in jobs if job["letter"] == "missing"],
+            "problems": self._link_problems(jobs),
             "phase": phase,
             "summary": self._phase_summary(batch_id, data, phase) if phase else None,
         }
 
+    def _rerun_items(self, listed: list[dict], only: list[str]) -> list[dict]:
+        """The apply-list rows of the jobs named for a rerun batch (spec section 10 item 91), in the order named."""
+        wanted = list(dict.fromkeys(only))
+        if not wanted:
+            raise InvariantError("Name at least one job to run again")
+        if len(wanted) > self.settings.apply.batch_size:
+            raise InvariantError(f"A batch holds at most {self.settings.apply.batch_size} jobs")
+        applications = self.store.applications()
+        moved = [j for j in wanted if applications.get(j, {}).get("status", "pending") != "pending"]
+        if moved:
+            raise InvariantError(f"Jobs {moved} are not pending; mark them pending first (mark_applications)")
+        rows = {item["job_id"]: item for item in listed}
+        absent = [j for j in wanted if j not in rows]
+        if absent:
+            raise InvariantError(f"Jobs {absent} are not on the apply list")
+        return [rows[j] for j in wanted]
+
     @_tool("prepare")
     def prepare_apply_batch(
-        self, day: str | None = None, size: int | None = None, exclude: list[str] | None = None
+        self,
+        day: str | None = None,
+        size: int | None = None,
+        exclude: list[str] | None = None,
+        only: list[str] | None = None,
     ) -> dict:
         """The next batch from the apply list's pending jobs, in list order: the first ones (config) stop before
         submit for the user to check, jobs at companies on the careful list always stop, the rest are submitted.
-        Lists missing cover letters and the summary of the first step for start_applying. `exclude`: jobs to
-        leave out, e.g. a letter that never passed its checks."""
+        Lists missing cover letters, jobs the form-fill list would refuse (`problems`: leave them out with
+        `exclude`) and the summary of the first step for start_applying. `exclude`: jobs to leave out, e.g. a
+        letter that never passed its checks. `only`: a rerun - exactly these pending jobs, all of them reviewed by
+        the form-fill module and stopped before submit, never submitted."""
         applicant = self._ready_applicant()
         day = _day(day)
         listed = self.build_apply_list(day, limit=10**9)["jobs"]
-        skip = set(exclude or [])
-        items = [item for item in listed if item["job_id"] not in skip][: size or self.settings.apply.batch_size]
+        if only is not None:
+            items = self._rerun_items(listed, only)
+        else:
+            skip = set(exclude or [])
+            items = [item for item in listed if item["job_id"] not in skip][: size or self.settings.apply.batch_size]
         if not items:
             raise InvariantError("No pending jobs on the apply list")
-        review_first = self.settings.apply.review_first
+        review_first = len(items) if only is not None else self.settings.apply.review_first
         jobs = []
         for n, item in enumerate(items, start=1):
             if n <= review_first:
@@ -1067,11 +1136,64 @@ class Toolbox:
             relocation=applicant.relocation,
         )
 
+    def _step_list(self, batch_id: str, phase: str, jobs: list[dict]) -> Path:
+        """The step's jobs written as a form-fill list (spec section 10 item 87): every job of the step, so the
+        form-fill module's checks cover the auto-submitted ones too. Only the reviewed and careful ones are filled
+        by it."""
+        entries = []
+        for job in jobs:
+            stored = self.store.job(job["job_id"])
+            letter = self.store.cover_letter(job["job_id"]) or {}
+            txt, _ = self._letter_files(job["job_id"])
+            entries.append(
+                apply_fill.list_entry(
+                    job["job_id"],
+                    stored.url or "",
+                    job["company"] or stored.company or "",
+                    job["title"] or stored.title or "",
+                    letter.get("resume_id", ""),
+                    txt.resolve(),
+                )
+            )
+        folder = self.data_dir / self.settings.form_fill.dir / self.settings.form_fill.lists_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{batch_id}-{phase}.yaml"
+        head = f"# Written by /apply: {batch_id}, step {phase}. The form-fill module fills review and careful jobs.\n"
+        body = yaml.safe_dump({"jobs": entries}, allow_unicode=True, sort_keys=False)
+        path.write_text(head + body, encoding="utf-8")
+        return path
+
+    def _answer_sheet(self, applicant) -> dict:
+        """answers.yaml resolved as for a run (form-fill spec 2.3), with checklist.yaml checked too. Errors are
+        masked: a contact value written into answers.yaml by mistake is never echoed."""
+        try:
+            fields = form_fill_inputs.profile_field_paths(applicant.profile)
+            profile = json.loads(applicant.profile.read_text(encoding="utf-8"))
+        except (InvariantError, ValueError) as error:
+            raise InvariantError(f"profile.json: {type(error).__name__}") from None
+        values = form_fill.applicant_values(applicant)
+        folder = applicant.folder
+        try:
+            sheet = form_fill_inputs.load_answers(folder / self.settings.form_fill.answers_file, fields, set(values))
+            form_fill_inputs.load_checklist(folder / self.settings.form_fill.checklist_file)
+            return form_fill.resolve(sheet, profile, values)
+        except InvariantError as error:
+            raise InvariantError(Redactor.from_profile(profile).mask(str(error))) from None
+
+    def _profile_conflicts(self, applicant, answers) -> list[str]:
+        """profile.json (read by code only, never returned) against answers.yaml on the one-to-one facts."""
+        profile = json.loads(applicant.profile.read_text(encoding="utf-8"))
+        return apply_fill.profile_conflicts(profile, answers)
+
     @_tool("commit")
     def start_applying(self, batch_id: str, summary: str) -> dict:
         """Start the next step of an apply batch, as the user approved it: first the jobs to review (all stop
         before submit), then, after the user checked those, the rest. `summary` must be that step's summary
-        exactly as shown to the user."""
+        exactly as shown to the user. The reviewed jobs and the careful companies are filled by the form-fill
+        module (stop before submit, one report each); the rest are submitted by ApplyPilot with the answer sheet
+        and the checklist. Nothing starts when the step's form-fill list, answers.yaml, checklist.yaml or
+        profile.json do not pass their checks, or when profile.json and answers.yaml disagree. When mail, bank,
+        payment, password-manager or school tabs are open in the applying Chrome, `warning` names them: show it."""
         if _running(self._form_fill_run):
             raise InvariantError("A form-fill run is using the applying Chrome; wait for it (form_fill_status)")
         if _running(self._apply_run):
@@ -1106,20 +1228,79 @@ class Toolbox:
         if no_letter:
             raise InvariantError(f"Jobs {no_letter} have no cover letter yet")
         applicant = self._ready_applicant()
-        specs = [self._apply_spec(job["job_id"], "submit" if job["mode"] == "submit" else "stop") for job in jobs]
+        list_path = self._step_list(batch_id, phase, jobs)
+        inputs = form_fill.load_inputs(list_path, applicant, self.settings)  # nothing starts if anything is wrong
+        conflicts = self._profile_conflicts(applicant, inputs.answers)
+        if conflicts:
+            raise InvariantError(
+                "profile.json and answers.yaml disagree on: " + "; ".join(conflicts) + ". Make them agree first."
+            )
+        sheet = form_fill.instructions(inputs.answers, inputs.checklist)
+        filled = {job["job_id"] for job in jobs if job["mode"] in apply_fill.FORM_FILL_MODES}
+        specs = [
+            self._apply_spec(job["job_id"], "stop")
+            if job["job_id"] in filled
+            else dataclasses.replace(self._apply_spec(job["job_id"], "submit"), sheet=sheet)
+            for job in jobs
+        ]
+        entries = {entry.id: entry for entry in inputs.jobs.jobs}
+        ctx, personal, checked = None, [], True
+        if filled:
+            run_id = form_fill.new_run_id()
+            ctx = form_fill.RunContext(
+                run_id=run_id,
+                run_dir=self.data_dir / self.settings.form_fill.dir / "runs" / run_id,
+                settings=self.settings,
+                applicant=applicant,
+                answers=inputs.answers,
+                checklist=inputs.checklist,
+                redactor=inputs.redactor,
+                runner=self.form_fill_runner
+                or form_fill.FormFillRunner(
+                    self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
+                ),
+            )
+            try:  # only a reminder (form-fill decision 23); it never starts Chrome
+                tabs = ctx.runner.open_tabs()
+            except Exception:  # noqa: BLE001 - the run itself will say what is wrong with the browser
+                tabs = None
+            checked = tabs is not None
+            found = form_fill.personal_tabs(
+                tabs or [], self.settings.apply.blocked_origins, [entries[j].url for j in filled]
+            )
+            personal = [inputs.redactor.mask(origin) for origin in found]
+            ff_jobs = JobList(jobs=[entries[j] for j in step if j in filled])
+            form_fill.begin_feasibility(ctx, list_path, ff_jobs, personal, checked=checked)
         data["phases"][phase] = "running"
         self.store.save_apply_batch(batch_id, data.pop("day"), data)
         self.store.record_decision(
             None,
             "apply",
-            {"batch_id": batch_id, "phase": phase, "job_ids": [s.job_id for s in specs], "approved_via": APPROVED_VIA},
+            {
+                "batch_id": batch_id,
+                "phase": phase,
+                "job_ids": [s.job_id for s in specs],
+                "form_fill": [j for j in step if j in filled],
+                "approved_via": APPROVED_VIA,
+            },
         )
         run = {
             "batch_id": batch_id,
             "phase": phase,
             "status": "running",
             "error": None,
-            "jobs": [{**job, "state": "queued", "outcome": None} for job in jobs],
+            "run_id": ctx.run_id if ctx else None,
+            "summary": None,
+            "stopped": None,
+            "jobs": [
+                {
+                    **job,
+                    "via": "form_fill" if job["job_id"] in filled else "applypilot",
+                    "state": "queued",
+                    "outcome": None,
+                }
+                for job in jobs
+            ],
         }
         self._apply_run = run
         runner = self.apply_runner or apply_bridge.ChromeRunner(
@@ -1132,14 +1313,31 @@ class Toolbox:
             writer = Store(self.store.path, self.settings)
             try:
                 for item, spec in zip(run["jobs"], specs, strict=True):
+                    if run["stopped"]:  # a form may have been submitted: nothing more in this step (item 90)
+                        item["state"] = "stopped"
+                        continue
                     item["state"] = "running"
-                    outcome = runner(spec)
-                    note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
-                    writer.record_application_result(item["job_id"], outcome.status, note)
+                    attempt = {"batch_id": batch_id, "phase": phase, "mode": item["mode"], "via": item["via"]}
+                    if item["via"] == "form_fill":
+                        outcome = self._fill_one(entries[item["job_id"]], ctx)
+                        note = apply_fill.note(outcome.reason, outcome.conclusion, ctx.run_id, outcome.notes)
+                        attempt["run_id"] = ctx.run_id
+                        if outcome.reason == "maybe_submitted":
+                            run["stopped"] = item["job_id"]
+                    else:
+                        outcome = self._masked(runner(spec), inputs.redactor)
+                        note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
+                    writer.record_application_result(
+                        item["job_id"], outcome.status, note, attempt={**attempt, "reason": outcome.reason}
+                    )
                     item["outcome"], item["state"] = outcome, "done"
+                if ctx is not None:
+                    form_fill.finish_feasibility(ctx)
+                    run["summary"] = str(form_fill_report.run_report(ctx.run_id, self.data_dir, self.settings))
                 run["status"] = "done"
-            except Exception as error:  # the runner reports per-job failures itself; this is a broken run
-                run["error"] = f"{type(error).__name__}: {error}"
+            except Exception as error:  # the runners report per-job failures themselves; this is a broken run
+                message = f"{type(error).__name__}: {error}"
+                run["error"] = (ctx.redactor.mask(message) if ctx else message)[:300]
                 run["status"] = "failed"
             finally:
                 writer.db.close()
@@ -1149,7 +1347,66 @@ class Toolbox:
         else:
             work()
             self._sync_apply_results()
-        return {"batch_id": batch_id, "phase": phase, "status": run["status"], "jobs": len(specs)}
+        result = {"batch_id": batch_id, "phase": phase, "status": run["status"], "jobs": len(specs)}
+        if filled:
+            result.update({"form_fill_run": ctx.run_id, "personal_tabs": personal})
+            if personal:
+                result["warning"] = form_fill.PERSONAL_TABS_WARNING.format(tabs="、".join(personal))
+            elif not checked:
+                result["warning"] = form_fill.PERSONAL_TABS_UNCHECKED
+        return result
+
+    @staticmethod
+    def _masked(outcome: apply_bridge.ApplyOutcome, redactor: Redactor) -> apply_bridge.ApplyOutcome:
+        """ApplyPilot's result as the apply list and the attempt log keep it: a short result code, and any free text
+        the agent wrote after RESULT:FAILED: masked into the notes, like the notes themselves (review #5)."""
+        code = apply_fill.short_code(outcome.reason)
+        said = [outcome.reason] if code != outcome.reason else []
+        notes = [redactor.mask(text) for text in [*said, *outcome.notes]]
+        return dataclasses.replace(outcome, reason=code, notes=notes)
+
+    def _fill_one(self, entry, ctx) -> "_FormFilled":
+        """One job through the form-fill module, then its report, as the apply list's status (spec section 10
+        item 89). The run's reports and summary.md are written again after every job."""
+        outcome = form_fill.run_job(entry, ctx)
+        sites = tuple(outcome.other_sites)
+        try:
+            form_fill_report.run_report(ctx.run_id, self.data_dir, self.settings)
+            path = ctx.run_dir / f"{entry.id}.json"
+            report = JobReport.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception as error:  # noqa: BLE001 - no report: say so, and judge from the run's own outcome
+            why = ctx.redactor.mask(f"报告没出来：{type(error).__name__}: {error}")[:300]
+            if outcome.checks.get("not_submitted") is False:  # a page said "received" (spec section 10 item 90)
+                conclusion = "maybe_submitted"
+            elif outcome.agent_result in (None, "dry_run"):  # filled up to submit, as far as the agent said
+                conclusion = "unreadable"
+            else:
+                conclusion = "not_filled"
+            report = JobReport(
+                job_id=entry.id,
+                status=outcome.status,
+                agent_result=outcome.agent_result,
+                conclusion=conclusion,
+                notes=(*outcome.notes, why),
+            )
+            path = None
+        result = apply_fill.application_result(report)
+        code = apply_fill.short_code(result.reason)  # the agent's free text (already masked) moves to the notes
+        said = (result.reason,) if code != result.reason else ()
+        conclusion = FORM_FILL_CONCLUSIONS[report.conclusion]
+        if report.not_filled_reason:
+            reason = FORM_FILL_REASONS.get(report.not_filled_reason, report.not_filled_reason)
+            conclusion = f"{conclusion}：{reason}"
+        return _FormFilled(
+            status=result.status,
+            reason=code,
+            notes=(*said, *report.notes),
+            other_sites=sites,
+            conclusion=conclusion,
+            todo=tuple(report.todo),
+            report=str(path) if path else None,
+            recording_id=outcome.recording_id or report.recording_id,  # the report's copy went through the mask
+        )
 
     def _sync_apply_results(self) -> None:
         """Close the batch step once its run has ended (results are already recorded by the run)."""
@@ -1159,20 +1416,27 @@ class Toolbox:
         if run["status"] in ("done", "failed") and not run.get("closed"):
             data = self.store.apply_batch(run["batch_id"])
             data["phases"][run["phase"]] = "done"
-            worked = any(item["outcome"] and item["outcome"].status in ("waiting", "applied") for item in run["jobs"])
-            if run["phase"] == "review" and (run["status"] == "failed" or not worked):
-                # Nothing in the reviewed step worked: the rest of this batch must not start (spec item 68).
+            worked = any(item["outcome"] and apply_fill.worked(item["outcome"].status) for item in run["jobs"])
+            stopped = run.get("stopped")
+            if stopped or (run["phase"] == "review" and (run["status"] == "failed" or not worked)):
+                # Nothing in the reviewed step worked (spec item 68), or a form may have been submitted (item 90):
+                # the rest of this batch must not start.
                 if data["phases"]["rest"] == "proposed":
                     data["phases"]["rest"] = "void"
                 data["void"] = True
+                if stopped:
+                    data["void_reason"] = {"why": "maybe_submitted", "job_id": stopped}
             self.store.save_apply_batch(run["batch_id"], data.pop("day"), data)
             run["closed"] = True
 
     @_tool("prepare")
     def apply_status(self) -> dict:
         """Progress of the current apply step. Finished results go to the apply list (waiting: filled and stopped
-        before submit, for the user to check and submit in the open tab). Includes a checklist of other sites
-        opened and emails sent, and, once the step is done, the next step's summary for start_applying."""
+        before submit, for the user to check and submit in the open tab). A job filled by the form-fill module
+        (`via: form_fill`) has its conclusion, the numbered list of what the user has to do (`todo`, the first item
+        is the one-line verdict) and its report; the step has the form-fill run's summary.md. Includes a checklist
+        of other sites opened and emails sent, and, once the step is done, the next step's summary for
+        start_applying."""
         run = self._apply_run
         if run is None:
             return {"status": "idle"}
@@ -1180,48 +1444,79 @@ class Toolbox:
         jobs, checklist = [], []
         for item in run["jobs"]:
             outcome = item["outcome"]
-            jobs.append(
-                {
-                    "n": item["n"],
-                    "job_id": item["job_id"],
-                    "title": item["title"],
-                    "company": item["company"],
-                    "mode": item["mode"],
-                    "state": item["state"],
-                    "result": outcome.status if outcome else None,
-                    "reason": outcome.reason if outcome else None,
-                    "notes": list(outcome.notes) if outcome else [],
-                }
-            )
+            row = {
+                "n": item["n"],
+                "job_id": item["job_id"],
+                "title": item["title"],
+                "company": item["company"],
+                "mode": item["mode"],
+                "via": item["via"],
+                "state": item["state"],
+                "result": outcome.status if outcome else None,
+                "reason": outcome.reason if outcome else None,
+                "notes": list(outcome.notes) if outcome else [],
+            }
+            if item["via"] == "form_fill":
+                row.update(
+                    {
+                        "conclusion": outcome.conclusion if outcome else None,
+                        "todo": list(outcome.todo) if outcome else [],
+                        "report": outcome.report if outcome else None,
+                        "run_id": run["run_id"],
+                        "recording_id": outcome.recording_id if outcome else None,
+                    }
+                )
+            jobs.append(row)
             if outcome and (outcome.other_sites or outcome.emails):
                 checklist.append(
                     {"job_id": item["job_id"], "other_sites": list(outcome.other_sites), "emails": list(outcome.emails)}
                 )
         upcoming = None
+        data = self.store.apply_batch(run["batch_id"])
         if run["status"] != "running":
-            data = self.store.apply_batch(run["batch_id"])
             phase = self._next_phase(data)
             if phase:
                 upcoming = {"phase": phase, "summary": self._phase_summary(run["batch_id"], data, phase)}
-        void = bool(self.store.apply_batch(run["batch_id"]).get("void"))
-        return {
+        void = bool(data.get("void"))
+        status = {
             "batch_id": run["batch_id"],
             "phase": run["phase"],
             "status": run["status"],
             "error": run["error"],
+            "run_id": run["run_id"],
+            "summary": run["summary"],
             "jobs": jobs,
             "checklist": checklist,
             "next": upcoming,
             "void": void,
-            **(
-                {
-                    "notice": "Nothing in the first step worked, so this batch is void; "
-                    "fix the problem and prepare a new batch."
-                }
-                if void
-                else {}
-            ),
         }
+        stopped = (data.get("void_reason") or {}).get("job_id")
+        if stopped:
+            status["notice"] = (
+                f"The form-fill module may have submitted {stopped} (the page said the application was received), "
+                "so this step stopped and the batch is void (可能已提交). Open its tab first; if it was not "
+                "submitted, mark it pending again."
+            )
+        elif void:
+            status["notice"] = (
+                "Nothing in the first step worked, so this batch is void; fix the problem and prepare a new batch."
+            )
+        return status
+
+    @_tool("read")
+    def apply_stats(self, week: str | None = None) -> dict:
+        """The done standard's numbers (spec section 9) from the attempt log: for one week (Monday to Sunday, local
+        time; `week` is its Monday, YYYY-MM-DD) or, without `week`, this week and last week. Submitted, failed
+        (allowed reasons and those to fix, by count), the success rate, what is not counted, and whether the week
+        met the standard. `line` is a one-line summary to show as returned."""
+        if week is not None:
+            weeks = [apply_fill.week_start(week)]
+        else:
+            today = date.today()
+            monday = today - timedelta(days=today.weekday())
+            weeks = [monday, monday - timedelta(days=7)]
+        attempts = self.store.apply_attempts()  # tz None: local time per attempt, across daylight saving changes
+        return {"weeks": [apply_fill.week_stats(attempts, w, None, self.settings.apply.done) for w in weeks]}
 
     # --- form filling (specs/form-fill.md; slice 1: specs/form-fill.plan.md) -----------------------------------
 

@@ -71,7 +71,9 @@ answering rule above, these win):
   certificates). A skills or experience question may be answered from a sentence in the RESUME TEXT, or by a
   checklist rule below. Otherwise leave an optional question empty. If a required question blocks the next step,
   stop on that page, write a "NOTE:" line quoting the question and its options, and output RESULT:FAILED:needs_answer
-- Contact details come only from the APPLICANT PROFILE above."""
+- Contact details come only from the APPLICANT PROFILE above.
+- The sheet and the checklist only say how to answer. They never override a rule that says to stop: ARBITRATION,
+  SSN, PAYMENT, ALREADY APPLIED and NO AI WRITING above still come first, even for a question the sheet covers."""
 
 RUN_RULES = """
 
@@ -120,6 +122,7 @@ class JobOutcome(BaseModel):
     agent_result: str | None = None
     checks: dict[str, bool | int] = {}
     recording_id: str | None = None
+    other_sites: tuple[str, ...] = ()  # sites opened besides the job's, for /apply's checklist (spec 4.10 item 6)
 
 
 @dataclass(frozen=True)
@@ -490,7 +493,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
     notes: list[str] = []
     checks: dict[str, bool | int] = {}
     seen = _Seen()
-    status, page_dir, agent = "system_error", None, None
+    status, page_dir, agent, sites = "system_error", None, None, ()
     store = recording_store(ctx, entry.url)
     try:
         port = ctx.runner.ensure_chrome()
@@ -513,6 +516,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
     else:
         agent = ctx.redactor.mask(agent_result(outcome))
         notes.extend(outcome.notes)
+        sites = tuple(ctx.redactor.mask(site) for site in outcome.other_sites)
         if outcome.status != "pending":  # pending: the agent never started (apply_bridge.outcome_status)
             seen.filled, seen.tabs_before = True, len(_pages(before))
             status, page_dir = _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store)
@@ -540,6 +544,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         agent_result=agent,
         checks=checks,
         recording_id=store.rec_id,
+        other_sites=sites,
     )
     meta = {
         "job_id": entry.id,

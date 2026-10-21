@@ -622,12 +622,7 @@ def test_form_filling_waits_for_an_apply_step(ff):
     write_letters(box, jobs)
     batch = box.prepare_apply_batch(DAY)
     release = threading.Event()
-
-    def blocking(spec):
-        assert release.wait(5)
-        return apply_bridge.ApplyOutcome("waiting", None, [], [], [], None)
-
-    box.apply_runner = blocking
+    box.form_fill_runner = FakeBrowser(release=release)  # the apply step's reviewed job is filled by it, and waits
     box.apply_in_background = True
     box.start_applying(batch["batch_id"], batch["summary"])
     try:
@@ -636,7 +631,7 @@ def test_form_filling_waits_for_an_apply_step(ff):
     finally:
         release.set()
     wait_until(lambda: box.apply_status()["status"] != "running")
-    assert box.form_fill_runner.calls == []
+    assert [spec.job_id for spec, _ in box.form_fill_runner.calls] == jobs
     box.start_form_fill(path)  # free again
     assert box.form_fill_status()["status"] == "done"
 

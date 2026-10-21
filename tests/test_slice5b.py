@@ -12,6 +12,7 @@ import yaml
 from intent_job_agent.domain import InvariantError, Job
 from intent_job_agent.duplicates import apply_key, group, same_posting
 
+from .apply_fakes import FormFillFake
 from .conftest import ROOT, settings
 from .test_slice5 import label, make_box
 from .test_slice6 import FakeRunner, letter, write_applicant
@@ -132,6 +133,7 @@ def test_thresholds_are_in_the_config():
 def box(tmp_path):
     box = make_box(tmp_path)
     box.apply_runner = FakeRunner()
+    box.form_fill_runner = FormFillFake(box)  # the reviewed jobs go through the form-fill module
     box.letter_renderer = lambda text, pdf_path, name, day: pdf_path.write_bytes(b"%PDF-1.4 letter")
     box.apply_in_background = False
     return box

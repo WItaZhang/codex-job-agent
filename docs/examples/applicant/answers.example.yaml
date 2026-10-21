@@ -90,8 +90,8 @@ entries:
     answer: 2027-06-01
     kind: date
     asks: ["earliest start date", "available to start"]
-  compensation.expected:
-    answer: 95000
+  compensation.expected:                     # 要和 profile.json 的 salary_expectation 一样，否则 /apply 不开始
+    answer: 85000
     kind: number_min                         # 不低于这个数就算对；区间包含它或下限不低于它也算对
     asks: ["salary expectation", "desired salary"]
   location.relocation:
