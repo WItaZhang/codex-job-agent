@@ -3,7 +3,9 @@ specs/gate-handoff.samples.md): a login, single sign-on, CAPTCHA or missing e-ma
 tab kept, the user is notified, and after the user handled it and approved, the job is resumed.
 All data is SYNTHETIC (tests/fixtures/gate_handoff/samples.yaml); nothing here starts Chrome or Claude Code."""
 
+import dataclasses
 import datetime
+import json
 import subprocess
 from pathlib import Path
 
@@ -12,10 +14,14 @@ import yaml
 
 from intent_job_agent import apply_bridge, apply_fill, notify
 from intent_job_agent.domain import InvariantError
+from intent_job_agent.form_fill import runner as form_fill_runner
 from intent_job_agent.form_fill.models import JobReport
 from intent_job_agent.store import Store
+from intent_job_agent.tools import Toolbox
 
-from .conftest import settings
+from .apply_fakes import FormFillFake
+from .conftest import BASE_INTENT, BASE_VOCAB, settings
+from .test_slice6 import FakeRunner, add_jobs, fake_claude, write_applicant, write_letters
 
 SAMPLES = yaml.safe_load(
     (Path(__file__).parent / "fixtures" / "gate_handoff" / "samples.yaml").read_text(encoding="utf-8")
@@ -207,3 +213,232 @@ def test_a_job_that_was_not_held_is_marked_as_before(store):
     store.set_application_status(["g_eta"], "skipped", by_user=True)
     user = store.apply_attempts()[-1]
     assert (user["status"], user["reason"], user["batch_id"]) == ("skipped", None, None)
+
+
+# --- G3, G4, G5: the instructions and the run ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def box(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    s = settings()
+    box = Toolbox(s, Store(tmp_path / "agent.sqlite", s), data_dir=data)
+    (data / "intent.yaml").write_text(
+        yaml.safe_dump({"intent": {**BASE_INTENT, "location": {"us": {"level": "require"}}}, "vocabulary": BASE_VOCAB}),
+        encoding="utf-8",
+    )
+    box.initialize_intent(str(data / "intent.yaml"))
+    box.apply_runner = FakeRunner()
+    box.form_fill_runner = FormFillFake(box)
+    box.letter_renderer = lambda text, pdf_path, name, day: pdf_path.write_bytes(b"%PDF-1.4 letter")
+    box.apply_in_background = False
+    box.notifier = lambda title, body: box.notices.append((title, body))
+    box.notices = []
+    write_applicant(box.data_dir)
+    return box
+
+
+def prompt(box, mode, **resume):
+    """The whole prompt with its whitespace collapsed: rules wrap across lines, phrases are checked as read."""
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    spec = dataclasses.replace(box._apply_spec(job, mode), **resume)
+    return flat(apply_bridge.build_prompt(spec, box.data_dir, box.settings, box._applicant().profile))
+
+
+def flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def vendor_prompt(box) -> str:
+    """ApplyPilot's own prompt for one job, before this project's replacements."""
+    from intent_job_agent.vendor.applypilot.apply import prompt as vendor
+
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    spec = box._apply_spec(job, "submit")
+    apply_bridge.configure(box.data_dir, box.settings, box._applicant().profile)
+    posting = {
+        "url": spec.url,
+        "application_url": spec.url,
+        "title": spec.title,
+        "site": spec.company,
+        "tailored_resume_path": str(spec.resume_pdf),
+        "cover_letter_path": str(spec.letter_txt),
+    }
+    return vendor.build_prompt(job=posting, tailored_resume=spec.resume_text.read_text(encoding="utf-8"))
+
+
+SOLVING = ("CapSolver", "capsolver", "CAP-SYNTHETIC-123", "MANUAL FALLBACK", "Solve them yourself", "createTask")
+SOLVING += ("If found, solve", "solve it before continuing", "solve it then retry", "Audio challenge")
+
+
+@pytest.mark.parametrize("mode", ["stop", "submit"])
+def test_no_prompt_solves_a_captcha_even_with_a_key_set(box, mode, monkeypatch):  # G4
+    monkeypatch.setenv("CAPSOLVER_API_KEY", "CAP-SYNTHETIC-123")
+    text = prompt(box, mode)
+    assert not [phrase for phrase in SOLVING if phrase in text]
+    gates = text[text.index("- GATES:") :]
+    for code in ("RESULT:CAPTCHA", "sso_required", "login_issue", "email_verification"):
+        assert code in gates
+    assert "leave its tab open" in gates and "never an email address or a password" in gates.lower()
+    assert "RESULT:CAPTCHA -- blocked by unsolvable captcha" not in text
+
+
+@pytest.mark.parametrize("index", range(len(apply_bridge.NO_SOLVING)))
+def test_a_reworded_captcha_passage_stops_the_run(box, index):  # G4: never silently keep ApplyPilot's solving
+    text = vendor_prompt(box)
+    pattern, _ = apply_bridge.NO_SOLVING[index]
+    assert len(pattern.findall(text)) == 1
+    with pytest.raises(InvariantError, match="ApplyPilot"):
+        apply_bridge.no_solving(pattern.sub("== REWORDED ==", text))
+
+
+def test_a_vendor_prompt_with_a_reworded_captcha_section_starts_nothing(box, monkeypatch):
+    from intent_job_agent.vendor.applypilot.apply import prompt as vendor
+
+    monkeypatch.setattr(vendor, "_build_captcha_section", lambda: "== CAPTCHA ==\nSomething else.")
+    with pytest.raises(InvariantError, match="ApplyPilot"):
+        prompt(box, "submit")
+
+
+def test_the_solving_services_are_blocked_in_the_applying_browser():
+    origins = settings().apply.blocked_origins
+    assert "https://api.capsolver.com" in origins and "https://2captcha.com" in origins
+
+
+@pytest.mark.parametrize("mode", ["stop", "submit"])
+def test_terms_are_ticked_optional_boxes_left_and_arbitration_still_stops(box, mode):  # G3
+    text = prompt(box, mode)
+    terms = text[text.index("- TERMS AND CONSENT:") :]
+    assert "terms of use" in terms and "background check" in terms and "Do not stop for these" in terms
+    assert "marketing" in terms and "unticked" in terms and "ARBITRATION" in terms
+    assert "Consent, declaration and signature checkboxes and dates may be completed." not in text
+
+
+def test_an_auto_submitted_tab_is_closed_except_at_a_gate(box):  # G5
+    text = prompt(box, "submit")
+    assert "close this tab, except at a GATE" in text
+    assert "except at a GATE" not in prompt(box, "stop")  # a stopped form keeps its tab anyway
+
+
+def test_a_resumed_job_takes_over_its_tab_and_checks_it_was_not_submitted(box):  # G11 a
+    url = "https://careers.zetapay.test/apply/step2"
+    text = prompt(box, "submit", resume=True, resume_url=url, resume_tab="N7")
+    tabs = text[text.index("- TABS:") :]
+    assert f"select the tab showing {url}" in tabs and 'browser_tabs action "new"' not in tabs
+    assert "skip steps 1 and 2" in tabs and "RESULT:FAILED:already_applied" in tabs
+
+
+def test_a_resumed_job_without_its_tab_starts_from_the_job_address(box):  # G11 c
+    text = prompt(box, "submit", resume=True)
+    tabs = text[text.index("- TABS:") :]
+    assert 'browser_tabs action "new"' in tabs and "already applied" in tabs and "signed in" in tabs
+
+
+def test_the_apply_agent_runs_without_the_solving_key(box, tmp_path, monkeypatch):  # G4
+    monkeypatch.setenv("CAPSOLVER_API_KEY", "CAP-SYNTHETIC-123")
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_ENV)
+    apply_bridge.run_application(
+        box._apply_spec(job, "submit"), box.data_dir, box.settings, box._applicant().profile, 9
+    )
+    seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
+    assert seen["key"] is None
+
+
+def test_the_form_fill_agent_reads_gmail_but_can_never_send(box):  # spec section 10 item 105
+    s = box.settings
+    assert "mcp__gmail__send_email" in s.form_fill.disallowed_tools
+    command = apply_bridge.claude_command(s, Path("/x/mcp.json"), extra_disallowed=tuple(s.form_fill.disallowed_tools))
+    allowed = command[command.index("--allowedTools") + 1].split(",")
+    assert "mcp__gmail__read_email" in allowed and "mcp__gmail__search_emails" in allowed
+    assert "mcp__gmail__send_email" not in allowed
+    assert "mcp__gmail__send_email" in command[command.index("--disallowedTools") + 1].split(",")
+    rules = flat(form_fill_runner.RUN_RULES)
+    assert "Gmail" in rules and "never send" in rules.lower() and "no email tools" not in rules
+
+
+def test_the_form_fill_run_starts_gmail_in_its_own_config(box, tmp_path, monkeypatch):
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_ENV)
+    entry = {"command": "/venv/bin/python", "args": ["-m", "intent_job_agent.form_fill.checkpoint", "/x/c.json"]}
+    apply_bridge.run_application(
+        box._apply_spec(job, "stop"),
+        box.data_dir,
+        box.settings,
+        box._applicant().profile,
+        9,
+        log_path=tmp_path / "runs" / "r1" / job / "log.jsonl",
+        extra_servers={"checkpoint": entry},
+    )
+    seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
+    argv = seen["argv"]
+    assert Path(argv[argv.index("--mcp-config") + 1]).name == ".mcp-form-fill-0.json"
+    assert list(json.loads(seen["mcp"])["mcpServers"]) == ["playwright", "gmail", "checkpoint"]
+
+
+def test_the_chrome_runner_keeps_the_tab_of_a_held_job(box, monkeypatch):  # G5
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    before = [{"id": "T1", "type": "page", "url": "https://news.example.test/"}]
+    after = [*before, {"id": "N7", "type": "page", "url": "https://careers.zetapay.test/login"}]
+    lists = iter([before, after])
+    monkeypatch.setattr(apply_bridge.readback, "list_targets", lambda port: next(lists))
+    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda port: True)
+    held_run = apply_bridge.ApplyOutcome("held", "login_issue", ["sign in"], last_url="https://careers.zetapay.test/")
+    monkeypatch.setattr(apply_bridge, "run_application", lambda *a, **k: held_run)
+    runner = apply_bridge.ChromeRunner(box.data_dir, box.settings, box._applicant().profile)
+    runner.port = 9222
+    outcome = runner(box._apply_spec(job, "submit"))
+    assert outcome.tab == {"id": "N7", "url": "https://careers.zetapay.test/login"}
+
+
+def test_the_chrome_runner_finds_a_resumed_tab_by_its_id(box, monkeypatch):  # G5, G14
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    tabs = [{"id": "N7", "type": "page", "url": "https://careers.zetapay.test/apply/review"}]
+    monkeypatch.setattr(apply_bridge.readback, "list_targets", lambda port: tabs)
+    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda port: True)
+    monkeypatch.setattr(apply_bridge, "run_application", lambda *a, **k: apply_bridge.ApplyOutcome("held", "captcha"))
+    runner = apply_bridge.ChromeRunner(box.data_dir, box.settings, box._applicant().profile)
+    runner.port = 9222
+    spec = dataclasses.replace(box._apply_spec(job, "submit"), resume=True, resume_tab="N7", resume_url=tabs[0]["url"])
+    assert runner(spec).tab == {"id": "N7", "url": "https://careers.zetapay.test/apply/review"}
+
+
+def test_the_last_address_the_agent_opened_is_kept():
+    events = [
+        {"name": "mcp__playwright__browser_navigate", "input": {"url": "https://careers.zetapay.test/"}},
+        {"name": "mcp__playwright__browser_click", "input": {"element": "Sign in"}},
+        {"name": "mcp__playwright__browser_tabs", "input": {"action": "new", "url": "https://sso.zetapay.test/"}},
+    ]
+    assert apply_bridge.last_url(events) == "https://sso.zetapay.test/"
+    assert apply_bridge.last_url([]) is None
+
+
+FAKE_CLAUDE_ENV = """#!/usr/bin/env python3
+import json, os, sys
+prompt = sys.stdin.read()
+argv = sys.argv[1:]
+mcp = argv[argv.index("--mcp-config") + 1]
+open(os.environ["FAKE_ARGS"], "w").write(json.dumps(
+    {"argv": argv, "prompt": prompt, "mcp": open(mcp).read(), "key": os.environ.get("CAPSOLVER_API_KEY")}))
+print(json.dumps({"type": "result", "result": "RESULT:APPLIED"}), flush=True)
+"""
+
+
+def test_a_form_fill_job_hands_over_the_tab_it_was_read_in(box):  # G5, form-fill path
+    (job,) = add_jobs(box, ["Acme"])
+    write_letters(box, [job])
+    box.apply_runner = FakeRunner({job: ("failed", "captcha", ["hcaptcha on the last page"])})
+    batch = box.prepare_apply_batch("2026-10-14")
+    box.start_applying(batch["batch_id"], batch["summary"])
+    (row,) = box.store.holds()
+    assert row["tab_id"] == f"N1-{job}" and row["tab_url"] == f"https://jobs.example.test/{job}/apply"
+    run = box.apply_status()["run_id"]
+    meta = json.loads((box.data_dir / "form-fill" / "runs" / run / job / "meta.json").read_text(encoding="utf-8"))
+    assert meta["tab_id"] == f"N1-{job}"

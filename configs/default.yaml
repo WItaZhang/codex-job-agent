@@ -94,12 +94,17 @@ apply:                            # 投递（spec 4.10）
     - https://vault.bitwarden.com
     - https://my.1password.com
     - https://www.lastpass.com
+    - https://api.capsolver.com     # 破解验证码的服务：系统永远不破解（spec §10 第 98 条），多一层保险
+    - https://2captcha.com
+    - https://api.2captcha.com
+    - https://api.anti-captcha.com
+    - https://api.capmonster.cloud
   builtin_tools: ""               # 投递 agent 可用的 Claude Code 内置工具（--tools）；空 = 一个都没有
   file_tools: "Read,Glob,Grep"    # applicant.yaml 列了 apply_agent_read 时改用这些（只读），并以 --restricted 运行
   permission_mode: default        # 不跳过权限检查（ApplyPilot 用 bypassPermissions）；只放行下面的白名单
   allowed_tools:                  # 预先放行的工具，其余一律自动拒绝
     - mcp__playwright             # Playwright MCP 的浏览器工具
-    - mcp__gmail__search_emails   # 找验证码
+    - mcp__gmail__search_emails   # 找验证码（填表 agent 也能用，spec §10 第 105 条）
     - mcp__gmail__read_email
     - mcp__gmail__send_email      # 只接受邮件投递的岗位
   disallowed_tools:               # ApplyPilot 关掉的 Gmail 工具（多一层保险）
@@ -139,6 +144,7 @@ apply:                            # 投递（spec 4.10）
       - no_ai                     # 筛选题要本人作答、不许用 AI
       - expired                   # 岗位已下架
       - timeout                   # 网络超时
+  notify: true                    # 一步做完、有岗位等你处理或填好等你检查时，发一条 Mac 系统通知（spec 4.10 第 10 条）
 form_fill:                        # 填表模块（specs/form-fill.md；切片计划见 specs/form-fill.plan.md、form-fill.slice2a.plan.md）。模型和超时沿用 apply.*
   dir: form-fill                  # 运行目录，位于 storage.data_dir 下：runs/<运行编号>/<岗位 id>/ 和 feasibility.md
   recordings_dir: recordings      # 录制目录，位于 form_fill.dir 下：recordings/<录制编号>/（spec 6.2）
@@ -150,6 +156,7 @@ form_fill:                        # 填表模块（specs/form-fill.md；切片�
     - mcp__playwright__browser_close             # 会关掉你正在检查的标签页
     - mcp__playwright__browser_network_request   # 这两个会把带 Cookie 的请求头交给模型，进而写进运行记录
     - mcp__playwright__browser_network_requests
+    - mcp__gmail__send_email                     # 填表 agent 只能搜索、读邮件找验证码，永远不发信（spec §10 第 105 条）
   checkpoint_timeout_seconds: 5   # checkpoint 在这个时间内返回（spec 6.1 第 3 项）
   watch_interval_seconds: 1       # 后台补录读页的间隔（spec 4.2）
   stuck_after: 3                  # 同一页连续几次 checkpoint("filled") 没换页就让填表 agent 停下（spec 4.2）

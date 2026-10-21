@@ -1425,6 +1425,7 @@ class Toolbox:
             todo=tuple(report.todo),
             report=str(path) if path else None,
             recording_id=outcome.recording_id or report.recording_id,  # the report's copy went through the mask
+            tab={"id": outcome.tab_id, "url": outcome.tab_url} if outcome.tab_id else None,
         )
 
     def _sync_apply_results(self) -> None:

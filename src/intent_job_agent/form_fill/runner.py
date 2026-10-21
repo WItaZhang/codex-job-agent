@@ -81,10 +81,8 @@ RUN_RULES = """
 - Fill the form up to the final submit button and stop there. Never click Submit, Submit application, Send or
   Finish, and never use submit: true or press Enter in a field where that could send the form.
 - Do not judge location eligibility: skip the LOCATION CHECK above and fill the form whatever the location.
-- This run has no email tools. If the site wants a code or a link from email, stop on that page, write a "NOTE:"
-  line naming the site, and output RESULT:FAILED:email_verification
-- Do not try to solve a CAPTCHA: stop on that page, write a "NOTE:" line, and output RESULT:CAPTCHA
-- Single sign-on (Google, Microsoft, Apple, Okta and the like): stop and output RESULT:FAILED:sso_required
+- EMAIL: you may search Gmail and read emails (search_emails, read_email) for a code or a link the site sent, but
+  never send an email. A code that does not come, a CAPTCHA and single sign-on are GATES (additional rules above).
 - If the page says applicants like this one are not accepted or are rejected automatically (for example "not open
   to current students") and the true answer would be rejected: stop on that page, write a "NOTE:" line quoting the
   statement, and output RESULT:FAILED:not_eligible. Never give an untrue answer to get past it.
@@ -123,6 +121,8 @@ class JobOutcome(BaseModel):
     checks: dict[str, bool | int] = {}
     recording_id: str | None = None
     other_sites: tuple[str, ...] = ()  # sites opened besides the job's, for /apply's checklist (spec 4.10 item 6)
+    tab_id: str | None = None  # the job's tab as read back: /apply keeps it for a job held at a gate (spec item 97)
+    tab_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -506,7 +506,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
             log_path=job_dir / LOG_FILE,
             mask=ctx.redactor.mask,
             extra_prompt=instructions(ctx.answers, ctx.checklist) + run_rules(entry) + CHECKPOINT_RULES,
-            gmail=False,
+            gmail=True,  # search and read only: send_email is in form_fill.disallowed_tools (spec section 10 item 105)
             extra_disallowed=tuple(ctx.settings.form_fill.disallowed_tools),
             extra_servers={checkpoint.SERVER_NAME: checkpoint.server_entry(config)},
             extra_allowed=(checkpoint.ALLOWED_TOOL,),
@@ -545,6 +545,8 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         checks=checks,
         recording_id=store.rec_id,
         other_sites=sites,
+        tab_id=str(seen.target.get("id")) if seen.target else None,
+        tab_url=ctx.redactor.mask(str(seen.target.get("url", ""))) if seen.target else None,
     )
     meta = {
         "job_id": entry.id,
@@ -555,6 +557,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         "agent_result": result.agent_result,
         "fields": result.fields,
         "tab": seen.target.get("url") if seen.target else None,
+        "tab_id": result.tab_id,
         "checks": result.checks,
         "page": seen.state.model_dump(mode="json") if seen.state else None,
         "submit_warnings": list(seen.signs),
