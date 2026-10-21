@@ -11,7 +11,9 @@ import pytest
 import yaml
 
 from intent_job_agent import apply_bridge, apply_fill, notify
+from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill.models import JobReport
+from intent_job_agent.store import Store
 
 from .conftest import settings
 
@@ -113,3 +115,95 @@ def test_the_mac_notifier_does_nothing_elsewhere_and_never_raises(monkeypatch):
 
     monkeypatch.setattr(notify.subprocess, "run", broken)
     assert notify.mac("t", "b") is False
+
+
+# --- G1, G8, G9, G16: what the database keeps ----------------------------------------------------------------------
+
+HOLD = {
+    "batch_id": "batch-gate01",
+    "phase": "rest",
+    "n": 7,
+    "mode": "submit",
+    "via": "applypilot",
+    "reason": "login_issue",
+    "note": "careers.zetapay.test: sign in to continue",
+    "tab_id": "N7",
+    "tab_url": "https://careers.zetapay.test/login",
+    "times": 1,
+}
+ATTEMPT = {"batch_id": "batch-gate01", "phase": "rest", "mode": "submit", "via": "applypilot"}
+
+
+@pytest.fixture
+def store(tmp_path):
+    s = Store(tmp_path / "agent.sqlite", settings())
+    s.list_applications(["g_zeta", "g_eta"], "2026-10-20")
+    return s
+
+
+def held(store, job_id="g_zeta", **hold):
+    store.record_application_result(
+        job_id,
+        "held",
+        "login_issue; careers.zetapay.test: sign in to continue",
+        attempt={**ATTEMPT, "reason": "login_issue"},
+        hold={**HOLD, **hold},
+    )
+
+
+def test_a_held_job_is_kept_with_its_tab_in_the_same_write(store):
+    held(store)
+    assert store.applications()["g_zeta"]["status"] == "held"
+    (row,) = store.holds()
+    assert {key: row[key] for key in HOLD} == HOLD and row["job_id"] == "g_zeta" and row["resuming"] is False
+    assert row["held_at"] and store.hold("g_zeta") == row and store.hold("g_eta") is None
+    (attempt,) = store.apply_attempts()
+    assert (attempt["status"], attempt["reason"]) == ("held", "login_issue")
+
+
+def test_a_held_result_needs_its_hold_and_any_other_result_ends_it(store):
+    with pytest.raises(InvariantError):
+        store.record_application_result("g_zeta", "held", None, attempt={**ATTEMPT, "reason": "captcha"})
+    held(store)
+    store.record_application_result("g_zeta", "applied", None, attempt={**ATTEMPT, "phase": "resume", "reason": None})
+    assert store.holds() == [] and store.applications()["g_zeta"]["status"] == "applied"
+
+
+def test_holding_again_replaces_the_row(store):
+    held(store)
+    held(store, reason="captcha", times=2, tab_url="https://careers.zetapay.test/apply/review")
+    (row,) = store.holds()
+    assert (row["reason"], row["times"], row["tab_url"]) == ("captcha", 2, "https://careers.zetapay.test/apply/review")
+
+
+def test_holds_survive_a_restart_with_the_resuming_mark(store, tmp_path):
+    held(store)
+    store.set_resuming(["g_zeta"], True)
+    again = Store(tmp_path / "agent.sqlite", settings())
+    (row,) = again.holds()
+    assert row["job_id"] == "g_zeta" and row["resuming"] is True
+    again.set_resuming(["g_zeta"], False)
+    assert store.hold("g_zeta")["resuming"] is False
+
+
+@pytest.mark.parametrize(
+    ("status", "attempt"),
+    [
+        ("applied", ("applied", None)),  # "7 已投": the user submitted it in the tab
+        ("skipped", ("failed", "login_issue")),  # "7 不处理了": an allowed failure, by its gate
+        ("pending", ("pending", None)),  # back to the list: not counted
+    ],
+)
+def test_what_the_user_does_with_a_held_job(store, status, attempt):  # G9
+    held(store)
+    store.set_application_status(["g_zeta"], status, by_user=True)
+    assert store.applications()["g_zeta"]["status"] == status and store.holds() == []
+    user = store.apply_attempts()[-1]
+    assert (user["via"], user["status"], user["reason"]) == ("user", *attempt)
+    assert user["batch_id"] == "batch-gate01"  # the first step's verdict reads it (spec section 10 item 101)
+
+
+def test_a_job_that_was_not_held_is_marked_as_before(store):
+    store.set_application_status(["g_eta"], "skipped", by_user=True)
+    user = store.apply_attempts()[-1]
+    assert (user["status"], user["reason"], user["batch_id"]) == ("skipped", None, None)

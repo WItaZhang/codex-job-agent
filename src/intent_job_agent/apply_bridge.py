@@ -65,6 +65,7 @@ class ApplyOutcome:
     other_sites: list[str] = field(default_factory=list)
     emails: list[dict] = field(default_factory=list)
     log: str | None = None
+    tab: dict | None = None  # a held job's tab: its CDP id and address (spec section 10 item 97)
 
 
 # --- setup ------------------------------------------------------------------------------------------------

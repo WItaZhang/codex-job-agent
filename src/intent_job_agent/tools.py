@@ -75,6 +75,7 @@ class _FormFilled:
     report: str | None  # the job's report (<run>/<job>.json)
     recording_id: str | None
     emails: tuple = ()  # the form-fill module never sends email
+    tab: dict | None = None  # the job's tab, kept for a held job (spec section 10 item 97)
 
 
 def _tool(tier: str):
@@ -1327,8 +1328,9 @@ class Toolbox:
                     else:
                         outcome = self._masked(runner(spec), inputs.redactor)
                         note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
+                    hold = self._hold(item, phase, batch_id, outcome) if outcome.status == "held" else None
                     writer.record_application_result(
-                        item["job_id"], outcome.status, note, attempt={**attempt, "reason": outcome.reason}
+                        item["job_id"], outcome.status, note, attempt={**attempt, "reason": outcome.reason}, hold=hold
                     )
                     item["outcome"], item["state"] = outcome, "done"
                 if ctx is not None:
@@ -1355,6 +1357,23 @@ class Toolbox:
             elif not checked:
                 result["warning"] = form_fill.PERSONAL_TABS_UNCHECKED
         return result
+
+    @staticmethod
+    def _hold(item: dict, phase: str, batch_id: str, outcome, times: int = 1) -> dict:
+        """What the database keeps of a job held at a gate (spec section 10 item 97): its notes are already masked."""
+        tab = outcome.tab or {}
+        return {
+            "batch_id": batch_id,
+            "phase": phase,
+            "n": item["n"],
+            "mode": item["mode"],
+            "via": item["via"],
+            "reason": outcome.reason,
+            "note": "；".join(n for n in outcome.notes if n) or None,
+            "tab_id": tab.get("id"),
+            "tab_url": tab.get("url"),
+            "times": times,
+        }
 
     @staticmethod
     def _masked(outcome: apply_bridge.ApplyOutcome, redactor: Redactor) -> apply_bridge.ApplyOutcome:

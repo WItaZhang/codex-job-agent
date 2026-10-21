@@ -51,11 +51,19 @@ CREATE TRIGGER IF NOT EXISTS apply_attempts_no_update BEFORE UPDATE ON apply_att
 BEGIN SELECT RAISE(ABORT, 'apply_attempts is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS apply_attempts_no_delete BEFORE DELETE ON apply_attempts
 BEGIN SELECT RAISE(ABORT, 'apply_attempts is append-only'); END;
+CREATE TABLE IF NOT EXISTS apply_holds (job_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, phase TEXT NOT NULL,
+                                        n INTEGER, mode TEXT NOT NULL, via TEXT NOT NULL, reason TEXT NOT NULL,
+                                        note TEXT, tab_id TEXT, tab_url TEXT, held_at TEXT NOT NULL,
+                                        times INTEGER NOT NULL, resuming INTEGER NOT NULL DEFAULT 0);
 """
 
 
 APPLICATION_STATUSES = ("pending", "applied", "skipped")  # what the user sets
 ATTEMPT_FIELDS = ("job_id", "batch_id", "phase", "mode", "via", "status", "reason", "run_id", "at")
+# A job held at a gate (spec section 10 item 97): where it stopped, its tab, which hold this is (1 or 2).
+HOLD_FIELDS = ("batch_id", "phase", "n", "mode", "via", "reason", "note", "tab_id", "tab_url", "times")
+# What the user's own attempt row says when the user decides a held job (spec section 10 item 104).
+HELD_BY_USER = {"applied": "applied", "skipped": "failed", "pending": "pending"}
 # What an application run reports: waiting = stopped before submit; held = stopped at a gate for the user (spec
 # section 10 item 97); pending = never reached the site.
 RUN_STATUSES = ("applied", "waiting", "held", "failed", "pending")
@@ -346,7 +354,8 @@ class Store:
 
     def set_application_status(self, job_ids: list[str], status: str, by_user: bool = False) -> None:
         """`by_user`: the user changed these jobs themselves (mark_applications): each one whose status changes gets
-        an attempt row (spec section 10 item 95), in the same transaction."""
+        an attempt row (spec section 10 item 95), in the same transaction. A held job leaves its hold; the user's row
+        carries the hold's batch, and giving it up (skipped) is a failed attempt at its gate (item 104)."""
         if status not in APPLICATION_STATUSES:
             raise InvariantError(f"Status must be one of {list(APPLICATION_STATUSES)}, not {status!r}")
         listed = self.applications()
@@ -355,22 +364,34 @@ class Store:
             raise InvariantError(f"Jobs {unknown} were never on the apply list")
         now = _now()
         changed = [job_id for job_id in dict.fromkeys(job_ids) if listed[job_id]["status"] != status]
+        holds = {job_id: self.hold(job_id) for job_id in changed}
         with self.db:
             self.db.executemany(
                 "UPDATE applications SET status = ?, updated_at = ?, note = NULL WHERE job_id = ?",
                 [(status, now, job_id) for job_id in job_ids],
             )
+            self.db.executemany("DELETE FROM apply_holds WHERE job_id = ?", [(job_id,) for job_id in changed])
             if by_user:
                 for job_id in changed:
-                    self._add_attempt({"job_id": job_id, "via": "user", "status": status, "at": now})
+                    row = {"job_id": job_id, "via": "user", "status": status, "at": now}
+                    hold = holds[job_id] if listed[job_id]["status"] == "held" else None
+                    if hold is not None:
+                        row.update(batch_id=hold["batch_id"], status=HELD_BY_USER[status])
+                        row["reason"] = hold["reason"] if status == "skipped" else None
+                    self._add_attempt(row)
 
     def record_application_result(
-        self, job_id: str, status: str, note: str | None, attempt: dict | None = None
+        self, job_id: str, status: str, note: str | None, attempt: dict | None = None, hold: dict | None = None
     ) -> None:
         """A run's result. `attempt` (batch_id, phase, mode, via, reason, run_id) also logs it as one attempt, in the
-        same transaction (spec section 10 item 95)."""
+        same transaction (spec section 10 item 95). A held result needs its `hold` (HOLD_FIELDS), kept in the same
+        transaction; any other result ends the job's hold (item 97)."""
         if status not in RUN_STATUSES:
             raise InvariantError(f"Run status must be one of {list(RUN_STATUSES)}, not {status!r}")
+        if (status == "held") != (hold is not None):
+            raise InvariantError("A held result, and only a held result, comes with its hold")
+        if hold is not None and set(hold) != set(HOLD_FIELDS):
+            raise InvariantError(f"A hold has exactly these fields: {list(HOLD_FIELDS)}")
         now = _now()
         with self.db:
             self.db.execute(
@@ -379,6 +400,30 @@ class Store:
             )
             if attempt is not None:
                 self._add_attempt({**attempt, "job_id": job_id, "status": status, "at": now})
+            if hold is None:
+                self.db.execute("DELETE FROM apply_holds WHERE job_id = ?", (job_id,))
+            else:
+                self.db.execute(
+                    f"INSERT OR REPLACE INTO apply_holds (job_id, {', '.join(HOLD_FIELDS)}, held_at, resuming) "
+                    f"VALUES (?, {', '.join('?' * len(HOLD_FIELDS))}, ?, 0)",
+                    [job_id, *(hold[name] for name in HOLD_FIELDS), now],
+                )
+
+    def holds(self) -> list[dict]:
+        """The jobs held at a gate, oldest first (spec section 10 item 97)."""
+        rows = self.db.execute("SELECT * FROM apply_holds ORDER BY held_at, rowid")
+        return [{**dict(row), "resuming": bool(row["resuming"])} for row in rows]
+
+    def hold(self, job_id: str) -> dict | None:
+        return next((row for row in self.holds() if row["job_id"] == job_id), None)
+
+    def set_resuming(self, job_ids: list[str], on: bool) -> None:
+        """Mark held jobs as being resumed, before their run starts (item 102): a mark left behind by a stopped
+        server tells the next resume to check the tab first."""
+        with self.db:
+            self.db.executemany(
+                "UPDATE apply_holds SET resuming = ? WHERE job_id = ?", [(int(on), job_id) for job_id in job_ids]
+            )
 
     def _add_attempt(self, row: dict) -> None:
         unknown = set(row) - set(ATTEMPT_FIELDS)

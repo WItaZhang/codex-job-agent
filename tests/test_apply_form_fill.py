@@ -476,8 +476,9 @@ def test_every_result_and_every_change_by_the_user_is_one_attempt(box):
     users = [r for r in box.store.apply_attempts() if r["via"] == "user"]
     assert [(r["job_id"], r["status"], r["batch_id"], r["phase"]) for r in users] == [
         ("j00", "applied", None, None),
-        ("j01", "applied", None, None),
+        ("j01", "applied", batch["batch_id"], None),  # j01 was held: its batch decides the first step (item 101)
     ]
+    assert box.store.holds() == []
     assert jobs  # all seven were tried
 
 
