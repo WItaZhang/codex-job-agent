@@ -3,6 +3,7 @@ entry, a form-fill report as an apply-list status, profile.json against answers.
 All data is SYNTHETIC (tests/fixtures/apply_form_fill/samples.yaml)."""
 
 import datetime
+import time
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,37 @@ def test_a_week_counts_in_local_time():
     assert (
         apply_fill.week_stats(late, datetime.date(2026, 10, 26), datetime.UTC, settings().apply.done)["submitted"] == 0
     )
+
+
+def test_each_attempt_is_turned_into_local_time_on_its_own_day(monkeypatch):  # review #4
+    monkeypatch.setenv("TZ", "America/Los_Angeles")  # daylight saving ends on 2026-11-01
+    time.tzset()
+    try:
+        monday = [
+            {"job_id": "j", "via": "applypilot", "status": "applied", "reason": None, "at": "2026-10-26T07:30:00+00:00"}
+        ]
+        numbers = apply_fill.week_stats(monday, datetime.date(2026, 10, 26), None, settings().apply.done)
+        assert numbers["submitted"] == 1  # Monday 00:30 PDT, although the clock now (or later) may be on PST
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_apply_stats_reads_local_time_per_attempt(monkeypatch):
+    seen = []
+    monkeypatch.setattr(apply_fill, "week_stats", lambda attempts, week, tz, done: seen.append(tz) or {})
+    from intent_job_agent.tools import Toolbox
+
+    class Box:
+        settings = settings()
+
+        class store:
+            @staticmethod
+            def apply_attempts():
+                return []
+
+    Toolbox.apply_stats(Box(), week="2026-10-26")
+    assert seen == [None]  # None: each attempt is turned into local time with the rules of its own day
 
 
 @pytest.mark.parametrize("text", ["2026-10-27", "last week", "2026-13-01", ""])

@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import threading
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -1504,9 +1504,8 @@ class Toolbox:
             today = date.today()
             monday = today - timedelta(days=today.weekday())
             weeks = [monday, monday - timedelta(days=7)]
-        tz = datetime.now().astimezone().tzinfo
-        attempts = self.store.apply_attempts()
-        return {"weeks": [apply_fill.week_stats(attempts, w, tz, self.settings.apply.done) for w in weeks]}
+        attempts = self.store.apply_attempts()  # tz None: local time per attempt, across daylight saving changes
+        return {"weeks": [apply_fill.week_stats(attempts, w, None, self.settings.apply.done) for w in weeks]}
 
     # --- form filling (specs/form-fill.md; slice 1: specs/form-fill.plan.md) -----------------------------------
 

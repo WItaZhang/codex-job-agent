@@ -171,10 +171,11 @@ def _count(counts: dict, key: str) -> None:
     counts[key] = counts.get(key, 0) + 1
 
 
-def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo, done: ApplyDone) -> dict:
+def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: ApplyDone) -> dict:
     """The week's numbers against the done standard (spec section 9, section 10 item 96). An attempt belongs to the
-    week its time falls in, in `tz`. Submitted: ApplyPilot's submissions (not already_applied) and the user's own
-    after checking a form. Not submitted: the failed attempts, allowed or to fix. Everything else is listed apart."""
+    week its time falls in, in `tz` (None: local time, with the rules of that attempt's own day). Submitted:
+    ApplyPilot's submissions (not already_applied) and the user's own after checking a form. Not submitted: the
+    failed attempts, allowed or to fix. Everything else is listed apart."""
     end = week + datetime.timedelta(days=6)
     submitted, allowed, to_fix = 0, {}, {}
     apart = dict.fromkeys(
