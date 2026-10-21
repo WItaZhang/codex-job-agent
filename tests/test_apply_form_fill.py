@@ -102,6 +102,21 @@ def test_auto_submitted_jobs_carry_the_answer_sheet_and_the_checklist(box):
         assert spec.sheet == "" and "== ANSWER SHEET ==" in options["extra_prompt"]
 
 
+STOP_RULES = ("ARBITRATION", "SSN", "PAYMENT", "ALREADY APPLIED", "NO AI WRITING")
+
+
+def test_the_sheet_never_overrides_a_rule_that_says_stop(box):  # review #2
+    ready(box, COMPANIES[:6] + ["Acme"])
+    batch, _ = run_step(box)
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
+    (submitted,) = direct(box)
+    _, options = box.form_fill_runner.fills[0]
+    for sheet in (submitted.sheet, options["extra_prompt"]):
+        rules = sheet[sheet.index("these win") :]
+        assert "never override" in rules and all(name in rules for name in STOP_RULES)
+        assert rules.index("never override") < rules.index("== CHECKLIST ==")
+
+
 def test_the_chrome_runner_hands_the_sheet_to_the_run(box, monkeypatch):
     seen = []
     monkeypatch.setattr(apply_bridge, "configure", lambda *args, **kwargs: None)

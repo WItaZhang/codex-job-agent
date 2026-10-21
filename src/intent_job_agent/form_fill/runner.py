@@ -71,7 +71,9 @@ answering rule above, these win):
   certificates). A skills or experience question may be answered from a sentence in the RESUME TEXT, or by a
   checklist rule below. Otherwise leave an optional question empty. If a required question blocks the next step,
   stop on that page, write a "NOTE:" line quoting the question and its options, and output RESULT:FAILED:needs_answer
-- Contact details come only from the APPLICANT PROFILE above."""
+- Contact details come only from the APPLICANT PROFILE above.
+- The sheet and the checklist only say how to answer. They never override a rule that says to stop: ARBITRATION,
+  SSN, PAYMENT, ALREADY APPLIED and NO AI WRITING above still come first, even for a question the sheet covers."""
 
 RUN_RULES = """
 
