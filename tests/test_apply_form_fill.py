@@ -193,7 +193,7 @@ def test_results_reach_the_apply_list_with_the_code_first_in_the_note(box):
     _, result = run_step(box)
     run_id = box.apply_status()["run_id"]
     applications = box.store.applications()
-    assert [applications[j]["status"] for j in jobs] == ["waiting", "failed", "applied", "pending", "failed"]
+    assert [applications[j]["status"] for j in jobs] == ["waiting", "held", "applied", "pending", "failed"]
     assert applications["j00"]["note"].startswith(f"check_then_submit；检查后可提交；填表运行 {run_id}")
     assert applications["j01"]["note"].startswith("captcha；没填完：门槛；")
     assert "Cloudflare check on the first page." in applications["j01"]["note"]
@@ -207,8 +207,8 @@ def test_nothing_worked_in_the_first_step_voids_the_batch(box):  # S4
     ready(box)
     box.apply_runner = FakeRunner(
         {
-            "j00": ("failed", "captcha", []),
-            "j01": ("failed", "captcha", []),
+            "j00": ("failed", "arbitration", []),  # not a gate: a gate would wait for the user (decision 22)
+            "j01": ("failed", "payment_required", []),
             "j02": ("failed", "expired", []),
             "j03": ("pending", "system_error", ["Error: cannot start"]),
         }
@@ -461,7 +461,7 @@ def test_every_result_and_every_change_by_the_user_is_one_attempt(box):
     rows = box.store.apply_attempts()
     assert [(r["job_id"], r["via"], r["phase"], r["mode"], r["status"]) for r in rows] == [
         ("j00", "form_fill", "review", "review", "waiting"),
-        ("j01", "form_fill", "review", "review", "failed"),
+        ("j01", "form_fill", "review", "review", "held"),
         ("j02", "form_fill", "review", "review", "waiting"),
         ("j03", "form_fill", "review", "review", "waiting"),
         ("j04", "form_fill", "review", "review", "waiting"),
@@ -493,7 +493,7 @@ def test_attempts_are_append_only(box):
 
 def test_apply_stats_gives_this_week_and_last_week(box):
     jobs = ready(box, COMPANIES[:6] + ["Acme"])
-    box.apply_runner = FakeRunner({"j01": ("failed", "captcha", []), "j06": ("failed", "wrong_job_redirect", [])})
+    box.apply_runner = FakeRunner({"j01": ("failed", "expired", []), "j06": ("failed", "wrong_job_redirect", [])})
     batch, _ = run_step(box)
     box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
     box.mark_applications([jobs[0]], "applied")
@@ -503,7 +503,7 @@ def test_apply_stats_gives_this_week_and_last_week(box):
     assert this["week"] == (today - datetime.timedelta(days=today.weekday())).isoformat()
     assert last["week"] == (datetime.date.fromisoformat(this["week"]) - datetime.timedelta(days=7)).isoformat()
     assert (this["submitted"], this["failed"]) == (1, 2)
-    assert this["allowed"] == {"captcha": 1} and this["to_fix"] == {"wrong_job_redirect": 1}
+    assert this["allowed"] == {"expired": 1} and this["to_fix"] == {"wrong_job_redirect": 1}
     assert this["not_counted"]["waiting"] == 5 and this["met"] is False
     assert last["submitted"] == last["failed"] == 0
     assert box.apply_stats(week=this["week"])["weeks"] == [this]

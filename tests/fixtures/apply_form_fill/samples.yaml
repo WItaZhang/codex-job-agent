@@ -15,11 +15,11 @@ mapping:
   - {id: d, report: {conclusion: not_eligible, status: filled, agent_result: not_eligible},
      expect: {status: failed, reason: not_eligible, worked: false}}
   - {id: e, report: {conclusion: not_filled, status: gate, agent_result: captcha, not_filled_reason: gate},
-     expect: {status: failed, reason: captcha, worked: false}}
+     expect: {status: held, reason: captcha, worked: false}}  # a gate waits for the user (decision 22)
   - {id: f, report: {conclusion: not_filled, status: gate, agent_result: email_verification, not_filled_reason: gate},
-     expect: {status: failed, reason: email_verification, worked: false}}
+     expect: {status: held, reason: email_verification, worked: false}}
   - {id: g, report: {conclusion: not_filled, status: filled, agent_result: login_issue, not_filled_reason: login_failed},
-     expect: {status: failed, reason: login_issue, worked: false}}
+     expect: {status: held, reason: login_issue, worked: false}}
   - {id: h, report: {conclusion: not_filled, status: filled, agent_result: needs_answer, not_filled_reason: needs_answer},
      expect: {status: failed, reason: needs_answer, worked: false}}
   - {id: i, report: {conclusion: not_filled, status: filled, agent_result: timeout, not_filled_reason: stuck},
@@ -122,5 +122,5 @@ stats:
     success_rate: 0.5
     allowed: {captcha: 1, expired: 1}
     to_fix: {wrong_job_redirect: 1}
-    not_counted: {waiting: 3, maybe_submitted: 0, already_applied: 1, pending: 1, user_skipped: 1, user_pending: 0}
+    not_counted: {waiting: 3, held: 0, maybe_submitted: 0, already_applied: 1, pending: 1, user_skipped: 1, user_pending: 0}
     met: false

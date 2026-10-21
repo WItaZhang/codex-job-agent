@@ -56,8 +56,9 @@ BEGIN SELECT RAISE(ABORT, 'apply_attempts is append-only'); END;
 
 APPLICATION_STATUSES = ("pending", "applied", "skipped")  # what the user sets
 ATTEMPT_FIELDS = ("job_id", "batch_id", "phase", "mode", "via", "status", "reason", "run_id", "at")
-# What an application run reports: waiting = stopped before submit; pending = never reached the site.
-RUN_STATUSES = ("applied", "waiting", "failed", "pending")
+# What an application run reports: waiting = stopped before submit; held = stopped at a gate for the user (spec
+# section 10 item 97); pending = never reached the site.
+RUN_STATUSES = ("applied", "waiting", "held", "failed", "pending")
 
 
 def _now() -> str:

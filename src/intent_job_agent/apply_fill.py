@@ -6,6 +6,7 @@ import datetime
 import re
 from dataclasses import dataclass
 
+from .apply_bridge import GATES
 from .config import ApplyDone
 from .domain import InvariantError
 from .form_fill.matching import norm
@@ -17,7 +18,7 @@ UNKNOWN_COMPANY = "Unknown company (see the posting)"  # the form-fill list need
 
 # The done standard's failure categories (spec section 9) and the result codes that fall into each.
 CATEGORIES = {
-    "login": ("login_issue", "login_failed", "sso_required"),
+    "login": ("login_issue", "login_failed", "sso_required", "email_verification"),  # e-mail: decision 22
     "captcha": ("captcha",),
     "arbitration": ("arbitration",),
     "ssn": ("ssn_required",),
@@ -53,7 +54,7 @@ _NUMBER = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(k\b)?", re.I)
 
 @dataclass(frozen=True)
 class Result:
-    status: str  # pending | waiting | applied | failed (the apply list's run statuses)
+    status: str  # pending | waiting | held | applied | failed (the apply list's run statuses)
     reason: str
 
 
@@ -97,7 +98,8 @@ def list_entry(job_id: str, url: str, company: str, title: str, resume: str, let
 def application_result(report: JobReport) -> Result:
     """A form-fill report as the apply-list status and the reason recorded first in its note (spec section 10
     item 89). The reason is the filling agent's own result code, written as ApplyPilot writes it; code's own
-    findings use the form-fill module's names."""
+    findings use the form-fill module's names. A gate holds the job for the user (item 97), even when its tab was
+    lost: the user can still pass it and the job is resumed from its address."""
     agent, conclusion = report.agent_result, report.conclusion
     if conclusion == "maybe_submitted":  # before anything else: a page said "received", so never pending again
         return Result("applied", "maybe_submitted")
@@ -113,6 +115,8 @@ def application_result(report: JobReport) -> Result:
         return Result("waiting", "unreadable")  # the agent said it filled the form; the tab is there to check
     if conclusion == "not_filled" and agent == "already_applied":
         return Result("applied", "already_applied")
+    if agent in GATES:
+        return Result("held", agent)
     if agent and agent != "dry_run":
         return Result("failed", agent)
     return Result("failed", report.not_filled_reason or conclusion)
@@ -185,19 +189,21 @@ def _count(counts: dict, key: str) -> None:
 def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: ApplyDone) -> dict:
     """The week's numbers against the done standard (spec section 9, section 10 item 96). An attempt belongs to the
     week its time falls in, in `tz` (None: local time, with the rules of that attempt's own day). Submitted:
-    ApplyPilot's submissions (not already_applied) and the user's own after checking a form. Not submitted: the
-    failed attempts, allowed or to fix. Everything else is listed apart."""
+    ApplyPilot's submissions (not already_applied), the user's own after checking a form or passing a gate, and a
+    form the user submitted in a held job's tab (submitted_by_user). Not submitted: the failed attempts, allowed or
+    to fix, including a held job the user gave up (the user's own failed attempt, decision 22). Held jobs and
+    everything else are listed apart."""
     end = week + datetime.timedelta(days=6)
     submitted, allowed, to_fix = 0, {}, {}
     apart = dict.fromkeys(
-        ("waiting", "maybe_submitted", "already_applied", "pending", "user_skipped", "user_pending"), 0
+        ("waiting", "held", "maybe_submitted", "already_applied", "pending", "user_skipped", "user_pending"), 0
     )
     for attempt in attempts:
         day = datetime.datetime.fromisoformat(attempt["at"]).astimezone(tz).date()
         if not week <= day <= end:
             continue
         status, reason, via = attempt["status"], attempt.get("reason"), attempt["via"]
-        if via == "user":
+        if via == "user" and status != "failed":
             if status == "applied":
                 submitted += 1
             elif status in ("skipped", "pending"):
@@ -212,7 +218,7 @@ def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: 
                 _count(allowed, name)
             else:
                 _count(to_fix, reason or "unknown")
-        elif status in ("waiting", "pending"):
+        elif status in ("waiting", "held", "pending"):
             apart[status] += 1
     failed = sum(allowed.values()) + sum(to_fix.values())
     rate = submitted / (submitted + failed) if submitted + failed else None
@@ -236,6 +242,7 @@ def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: 
 
 APART = {  # what is not counted, as the line names it
     "waiting": ("停在提交前", " 次"),
+    "held": ("等你处理", " 次"),
     "maybe_submitted": ("可能已提交", ""),
     "already_applied": ("已申请过", ""),
     "pending": ("退回待投", ""),

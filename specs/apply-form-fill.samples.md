@@ -63,9 +63,9 @@ jobs:
 | b | 不能提交：1 个错的事实 | waiting | `do_not_submit` | 算 |
 | c | 可能已提交 | applied | `maybe_submitted` | 算（另见 S5） |
 | d | 不符合申请资格 | failed | `not_eligible` | 不算 |
-| e | 没填完：门槛（captcha） | failed | `captcha` | 不算 |
-| f | 没填完：门槛（邮件验证码） | failed | `email_verification` | 不算 |
-| g | 没填完：登录或注册失败 | failed | `login_issue` | 不算 |
+| e | 没填完：门槛（captcha） | held（2026-10-20 起，决定 22；原来是 failed） | `captcha` | 不算 |
+| f | 没填完：门槛（邮件验证码） | held（同上） | `email_verification` | 不算 |
+| g | 没填完：登录或注册失败 | held（同上） | `login_issue` | 不算 |
 | h | 没填完：缺标准答案 | failed | `needs_answer` | 不算 |
 | i | 没填完：超时 | failed | `timeout` | 不算 |
 | j | 没填完：卡住（2a 的 checkpoint 判定同一页 3 次没进展） | failed | `stuck` | 不算 |

@@ -316,19 +316,23 @@ def parse_result(output: str) -> str:
 
 
 SYSTEM_RESULTS = ("failed:no_result_line", "failed:timeout")
+# Gates the user passes personally: the job waits as held, its tab kept (spec 4.10 item 10, section 10 item 97).
+GATES = ("captcha", "login_issue", "sso_required", "email_verification")
 
 
 def outcome_status(mode: str, result: str, acted: bool = True) -> tuple[str, str | None]:
     """ApplyPilot's result for this run -> the apply-list status. A dry run that reports APPLIED filled the form;
     a site saying the user already applied means the job is done, in either mode. A run that made no tool call
-    and gave no result never reached the site: the job goes back to pending (spec section 10 item 67)."""
+    and gave no result never reached the site: the job goes back to pending (spec section 10 item 67). A gate holds
+    the job for the user, in either mode."""
     if result == "applied":
         return ("waiting" if mode == "stop" else "applied"), None
     if result == "failed:already_applied":
         return "applied", "already_applied"
     if not acted and result in SYSTEM_RESULTS:
         return "pending", "system_error"
-    return "failed", result.removeprefix("failed:")
+    reason = result.removeprefix("failed:")
+    return ("held" if reason in GATES else "failed"), reason
 
 
 def notes(output: str) -> list[str]:
