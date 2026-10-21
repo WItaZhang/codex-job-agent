@@ -95,6 +95,8 @@ def application_result(report: JobReport) -> Result:
     if conclusion in ("check_then_submit", "do_not_submit"):
         return Result("waiting", conclusion)
     if conclusion == "unreadable":
+        if agent not in (None, "dry_run"):  # the agent itself said it failed: never waiting
+            return Result("failed", agent)
         if report.status == "tab_lost":
             return Result("failed", "tab_lost")
         return Result("waiting", "unreadable")  # the agent said it filled the form; the tab is there to check

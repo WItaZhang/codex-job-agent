@@ -716,7 +716,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
     - 自动提交前没有读回和核对，要求清单里的条目（例如 Websites 栏只放领英和 GitHub）只能做到"指令里有"。
 89. **结论到投递状态**：填表模块每做完一个岗位就出这个岗位的报告，马上写进数据库。
     - 检查后可提交、不能提交 → waiting（标签页里的表都在，改好就能交）。
-    - 读不出：标签页丢了 → failed（`tab_lost`）；程序没跑起来 → pending（`system_error`）；其余（填表 agent 说填完了，读回失败或一栏都没读到）→ waiting（`unreadable`，请用户逐栏自己看）。
+    - 读不出：填表 agent 自己报了失败的 → failed（它的结果码）；标签页丢了 → failed（`tab_lost`）；程序没跑起来 → pending（`system_error`）；填表 agent 说填完了、读回却失败或一栏都没读到的 → waiting（`unreadable`，请用户逐栏自己看）。
     - 可能已提交 → applied（`maybe_submitted`），见第 90 条。
     - 没填完：已经申请过 → applied（`already_applied`，第 63 条）；程序没跑起来 → pending（`system_error`，第 67 条）；其余 → failed。
     - 不符合申请资格 → failed。

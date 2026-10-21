@@ -46,6 +46,10 @@ mapping:
      expect: {status: waiting, reason: unreadable, worked: true}}
   - {id: q, report: {conclusion: unreadable, status: tab_lost, agent_result: dry_run},
      expect: {status: failed, reason: tab_lost, worked: false}}
+  - {id: p3, report: {conclusion: unreadable, status: readback_failed, agent_result: wrong_job_redirect},
+     expect: {status: failed, reason: wrong_job_redirect, worked: false}}  # the agent failed: never waiting
+  - {id: q2, report: {conclusion: unreadable, status: tab_lost, agent_result: unknown},
+     expect: {status: failed, reason: unknown, worked: false}}
   - {id: r, report: {conclusion: not_filled, status: filled, agent_result: screening_requires_candidate_written_answers,
                      not_filled_reason: screening_requires_candidate_written_answers},
      expect: {status: failed, reason: screening_requires_candidate_written_answers, worked: false}}

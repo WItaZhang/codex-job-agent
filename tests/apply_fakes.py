@@ -56,14 +56,15 @@ def _line(*blocks, kind="assistant") -> str:
 class FormFillFake:
     """The applying Chrome and the filling agent of the form-fill jobs of an apply step. The agent's outcome comes
     from `box.apply_runner`, so a FakeRunner's canned outcomes and its `calls` cover both kinds of job; the job's tab
-    opens on its own site (unless the job is in `no_tab`), and its last page reads back `fields`. `state` is the last
+    opens on its own site (unless the job is in `no_tab`), and its last page reads back `fields` (or fails to, for
+    the jobs in `unreadable`). `state` is the last
     page's state, `states` the state of particular jobs (`received` makes a page look submitted)."""
 
     running = True  # whether the applying Chrome already runs when a step starts
 
-    def __init__(self, box, fields=FIELDS, state=FINAL, states=None, no_tab=(), personal=()):
+    def __init__(self, box, fields=FIELDS, state=FINAL, states=None, no_tab=(), personal=(), unreadable=()):
         self.box, self.fields, self.state = box, tuple(fields), state
-        self.states, self.no_tab = states or {}, set(no_tab)
+        self.states, self.no_tab, self.unreadable = states or {}, set(no_tab), set(unreadable)
         self.tabs = [{"id": f"P{n}", "type": "page", "url": url} for n, url in enumerate(personal)]
         self.tabs.append({"id": "T1", "type": "page", "url": "https://jobs.example.test/checking"})
         self.fills, self.reads = [], []
@@ -98,6 +99,8 @@ class FormFillFake:
 
     def read(self, target, out_dir, redactor, sheet=None):
         self.reads.append(target)
+        if target["id"].split("-", 1)[1] in self.unreadable:
+            raise readback.ReadbackError("the page could not be read")
         out_dir.mkdir(parents=True, exist_ok=True)
         dumped = [field.model_dump(mode="json") for field in self.fields]
         (out_dir / "readback.json").write_text(json.dumps(redactor.mask_json(dumped)), encoding="utf-8")
