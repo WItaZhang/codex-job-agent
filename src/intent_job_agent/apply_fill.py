@@ -235,7 +235,7 @@ def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: 
 
 
 APART = {  # what is not counted, as the line names it
-    "waiting": ("停在提交前", "次"),
+    "waiting": ("停在提交前", " 次"),
     "maybe_submitted": ("可能已提交", ""),
     "already_applied": ("已申请过", ""),
     "pending": ("退回待投", ""),
