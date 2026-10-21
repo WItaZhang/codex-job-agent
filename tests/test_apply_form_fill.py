@@ -222,7 +222,6 @@ def test_nothing_worked_in_the_first_step_voids_the_batch(box):  # S4
     assert applications["j04"]["note"].startswith("tab_lost；")
 
 
-
 def test_a_failed_agent_whose_page_cannot_be_read_back_is_a_failure(box):  # review #3
     jobs = ready(box)
     box.apply_runner = FakeRunner({job: ("failed", "wrong_job_redirect", []) for job in jobs[:5]})
@@ -231,6 +230,7 @@ def test_a_failed_agent_whose_page_cannot_be_read_back_is_a_failure(box):  # rev
     assert {box.store.applications()[j]["status"] for j in jobs[:5]} == {"failed"}
     assert box.apply_status()["void"] is True  # nothing worked in the first step
     assert [a["reason"] for a in box.store.apply_attempts()] == ["wrong_job_redirect"] * 5
+
 
 def test_a_maybe_submitted_form_stops_the_step_and_voids_the_batch(box):  # S5
     jobs = ready(box)
