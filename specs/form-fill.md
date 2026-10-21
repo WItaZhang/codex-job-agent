@@ -194,7 +194,7 @@ entries:
       major: [Computer Science, Computer and Information Science]   # 下拉里没有原专业时选其中一个
     source: '简历："M.S. Data Science, Example State University, Aug 2025 – Expected May 2027"'
   compensation.expected:
-    answer: 95000
+    answer: 85000
     kind: number_min
     asks: ["salary expectation", "desired salary"]
   eeo.hispanic_latino:

@@ -98,6 +98,18 @@ def test_a_result_code_is_kept_short(reason, code):
     assert apply_fill.short_code(reason) == code
 
 
+def test_the_shipped_examples_agree(tmp_path):  # review #7: following the examples must not block /apply
+    import json as json_module
+
+    from intent_job_agent.form_fill.inputs import load_answers, profile_field_paths
+
+    examples = Path(__file__).parent.parent / "docs" / "examples" / "applicant"
+    profile_path = examples / "profile.example.json"
+    profile = json_module.loads(profile_path.read_text(encoding="utf-8"))
+    answers = load_answers(examples / "answers.example.yaml", profile_field_paths(profile_path), {"relocation"})
+    assert apply_fill.profile_conflicts(profile, answers) == []
+
+
 def test_reasons_fall_into_the_done_standards_categories():
     assert apply_fill.category("captcha") == "captcha"
     assert apply_fill.category("login_issue") == apply_fill.category("sso_required") == "login"
