@@ -28,6 +28,14 @@ CATEGORIES = {
     "timeout": ("timeout",),
 }
 _CATEGORY_OF = {code: name for name, codes in CATEGORIES.items() for code in codes}
+# A held job's gate as apply_status names it (spec section 10 item 97).
+GATE_TEXT = {
+    "login_issue": "登录和注册都不成",
+    "sso_required": "单点登录",
+    "captcha": "验证码",
+    "email_verification": "邮箱验证码",
+}
+STEP_NAMES = {"review": "第一步", "rest": "第二步", "resume": "接着做"}  # in the notification (item 99)
 LABELS = {
     "login": "登录",
     "captcha": "验证码",

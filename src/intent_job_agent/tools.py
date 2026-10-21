@@ -20,13 +20,14 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 import httpx
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import applicant as applicant_files
-from . import apply_bridge, apply_fill, apply_list, applypilot_bridge, avature, duplicates, funnel
+from . import apply_bridge, apply_fill, apply_list, applypilot_bridge, avature, duplicates, funnel, notify
 from .boards import BoardSpec, load_boards
 from .changes import (
     AddEntry,
@@ -262,6 +263,7 @@ class Toolbox:
         self._form_fill_run: dict | None = None  # the current or last form-fill run
         self.form_fill_runner = None  # None: Chrome + Claude Code (form_fill.runner.FormFillRunner); tests pass a fake
         self.form_fill_in_background = True
+        self.notifier = None  # None: a macOS notification when apply.notify is on (notify.mac); tests pass a fake
         self.engine = Engine(store, settings, NoModelClient())
 
     # --- views --------------------------------------------------------------------------------
@@ -1004,9 +1006,38 @@ class Toolbox:
         phases = data["phases"]
         if phases["review"] == "proposed":
             return "review"
-        if phases["review"] in ("done", "none") and phases["rest"] == "proposed":
+        if phases["review"] in ("done", "none") and phases["rest"] == "proposed" and not data.get("review_holds"):
             return "rest"
         return None
+
+    def _settle(self, batch_id: str) -> dict:
+        """The batch, after deciding a first step that ended with nothing but held jobs (spec section 10 item 101):
+        one of them filled or submitted since, in this batch (the append-only attempt log, so a form the user later
+        skipped still counts), lets the rest start; all of them done with and none worked voids the batch."""
+        data = self.store.apply_batch(batch_id)
+        waiting = data.get("review_holds")
+        if not waiting:
+            return data
+        worked = any(
+            row["batch_id"] == batch_id and row["job_id"] in waiting and apply_fill.worked(row["status"])
+            for row in self.store.apply_attempts()
+        )
+        applications = self.store.applications()
+        if worked:
+            data.pop("review_holds")
+        elif not any(applications.get(job_id, {}).get("status") == "held" for job_id in waiting):
+            data.pop("review_holds")
+            data["void"] = True
+            if data["phases"]["rest"] == "proposed":
+                data["phases"]["rest"] = "void"
+        else:
+            return data
+        self.store.save_apply_batch(batch_id, data.pop("day"), data)
+        return self.store.apply_batch(batch_id)
+
+    def _waiting_on(self, data: dict) -> str:
+        numbers = {job["job_id"]: job["n"] for job in data["jobs"]}
+        return "、".join(str(numbers[job_id]) for job_id in data.get("review_holds") or [])
 
     @staticmethod
     def _phase_jobs(data: dict, phase: str) -> list[dict]:
@@ -1041,7 +1072,7 @@ class Toolbox:
         return problems
 
     def _batch_view(self, batch_id: str) -> dict:
-        data = self.store.apply_batch(batch_id)
+        data = self._settle(batch_id)
         phase = self._next_phase(data)
         jobs = [{**job, "letter": "ready" if self._letter_ready(job["job_id"]) else "missing"} for job in data["jobs"]]
         return {
@@ -1200,7 +1231,9 @@ class Toolbox:
         if _running(self._apply_run):
             raise InvariantError("An apply step is still running; check apply_status")
         self._sync_apply_results()
-        data = self.store.apply_batch(batch_id)
+        data = self._settle(batch_id)
+        if data.get("review_holds"):
+            raise InvariantError(f"第一步还在等 {self._waiting_on(data)} 处理完（spec §10 第 101 条）；处理完再说继续")
         phase = self._next_phase(data)
         if phase is None:
             raise InvariantError(f"Batch {batch_id} has no step left to start")
@@ -1343,6 +1376,7 @@ class Toolbox:
                 run["status"] = "failed"
             finally:
                 writer.db.close()
+                self._notify(run)
 
         if self.apply_in_background:
             threading.Thread(target=work, name="intent-agent-apply", daemon=True).start()
@@ -1437,8 +1471,11 @@ class Toolbox:
             data = self.store.apply_batch(run["batch_id"])
             data["phases"][run["phase"]] = "done"
             worked = any(item["outcome"] and apply_fill.worked(item["outcome"].status) for item in run["jobs"])
+            held = [item["job_id"] for item in run["jobs"] if item["outcome"] and item["outcome"].status == "held"]
             stopped = run.get("stopped")
-            if stopped or (run["phase"] == "review" and (run["status"] == "failed" or not worked)):
+            if run["phase"] == "review" and run["status"] == "done" and not (stopped or worked) and held:
+                data["review_holds"] = held  # not void yet: decided once the held jobs are dealt with (item 101)
+            elif stopped or (run["phase"] == "review" and (run["status"] == "failed" or not worked)):
                 # Nothing in the reviewed step worked (spec item 68), or a form may have been submitted (item 90):
                 # the rest of this batch must not start.
                 if data["phases"]["rest"] == "proposed":
@@ -1459,7 +1496,7 @@ class Toolbox:
         start_applying."""
         run = self._apply_run
         if run is None:
-            return {"status": "idle"}
+            return {"status": "idle", "held": self._held_view()}
         self._sync_apply_results()
         jobs, checklist = [], []
         for item in run["jobs"]:
@@ -1492,7 +1529,7 @@ class Toolbox:
                     {"job_id": item["job_id"], "other_sites": list(outcome.other_sites), "emails": list(outcome.emails)}
                 )
         upcoming = None
-        data = self.store.apply_batch(run["batch_id"])
+        data = self._settle(run["batch_id"])
         if run["status"] != "running":
             phase = self._next_phase(data)
             if phase:
@@ -1509,6 +1546,7 @@ class Toolbox:
             "checklist": checklist,
             "next": upcoming,
             "void": void,
+            "held": self._held_view(),
         }
         stopped = (data.get("void_reason") or {}).get("job_id")
         if stopped:
@@ -1521,7 +1559,66 @@ class Toolbox:
             status["notice"] = (
                 "Nothing in the first step worked, so this batch is void; fix the problem and prepare a new batch."
             )
+        elif data.get("review_holds"):
+            status["notice"] = (
+                f"第一步还在等 {self._waiting_on(data)} 处理完：其中一个接着做成了（填好或交上），就能开始第二步；"
+                "都处理完还是一个都没成，这一批作废（spec §10 第 101 条）。"
+            )
         return status
+
+    def _held_view(self) -> list[dict]:
+        """The jobs held at a gate, from the database (spec section 10 item 97), so they are listed after a restart
+        too: where each one stopped, what the user has to do, and how it goes on once the user is done."""
+        rows = []
+        resuming = self._resuming()
+        for hold in self.store.holds():
+            job = self.store.job(hold["job_id"])
+            item = next(
+                (j for j in self.store.apply_batch(hold["batch_id"])["jobs"] if j["job_id"] == hold["job_id"]), {}
+            )
+            rows.append(
+                {
+                    "batch_id": hold["batch_id"],
+                    "n": hold["n"],
+                    "job_id": hold["job_id"],
+                    "title": item.get("title") or job.title,
+                    "company": item.get("company") or job.company,
+                    "gate": apply_fill.GATE_TEXT.get(hold["reason"], hold["reason"]),
+                    "site": urlparse(hold["tab_url"] or job.url or "").hostname,
+                    "todo": hold["note"],
+                    "then": "自动提交" if hold["mode"] == "submit" else "停在提交前（填表模块从岗位地址重填）",
+                    "times": hold["times"],
+                    "interrupted": hold["resuming"] and hold["job_id"] not in resuming,
+                }
+            )
+        return rows
+
+    def _resuming(self) -> set[str]:
+        """The jobs of the resume running now."""
+        run = self._apply_run
+        if not _running(run) or run["phase"] != "resume":
+            return set()
+        return {item["job_id"] for item in run["jobs"]}
+
+    def _notify(self, run: dict) -> None:
+        """One notification when a step or a resume ends and something waits for the user (spec section 10 item
+        99): the held jobs by number, company and gate, and how many forms are filled. Never stops the run."""
+        done = [item for item in run["jobs"] if item["outcome"]]
+        held = [
+            (item["n"], item["company"] or item["title"], item["outcome"].reason)
+            for item in done
+            if item["outcome"].status == "held"
+        ]
+        waiting = sum(1 for item in done if item["outcome"].status == "waiting")
+        text = notify.notice(held, waiting, apply_fill.STEP_NAMES[run["phase"]])
+        if text is None:
+            return
+        notifier = self.notifier or (notify.mac if self.settings.apply.notify else None)
+        try:
+            if notifier:
+                notifier(*text)
+        except Exception:  # noqa: BLE001 - a notification never stops applying; the chat lists everything
+            pass
 
     @_tool("read")
     def apply_stats(self, week: str | None = None) -> dict:

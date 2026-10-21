@@ -442,3 +442,228 @@ def test_a_form_fill_job_hands_over_the_tab_it_was_read_in(box):  # G5, form-fil
     run = box.apply_status()["run_id"]
     meta = json.loads((box.data_dir / "form-fill" / "runs" / run / job / "meta.json").read_text(encoding="utf-8"))
     assert meta["tab_id"] == f"N1-{job}"
+
+
+# --- G1, G2, G6, G8, G9, G17: a step with gates --------------------------------------------------------------------
+
+DAY = "2026-10-14"
+COMPANIES = ["Co0", "Co1", "Co2", "Co3", "Co4", "Stripe, Inc.", "Acme", "Beta"]  # 1-5 review, 6 careful, 7-8 submit
+ACME_TAB = {"id": "N7", "url": "https://careers.acme.test/login"}
+
+
+class GateRunner(FakeRunner):
+    """FakeRunner whose auto-submitted runs also say which tab a held job stopped in, as ChromeRunner does."""
+
+    def __init__(self, outcomes=None, tabs=None):
+        super().__init__(outcomes)
+        self.tabs = tabs or {}
+
+    def __call__(self, spec):
+        outcome = super().__call__(spec)
+        return dataclasses.replace(outcome, tab=self.tabs.get(spec.job_id)) if outcome.status == "held" else outcome
+
+
+def step(box, batch=None, summary=None):
+    batch = batch or box.prepare_apply_batch(DAY)
+    box.start_applying(batch["batch_id"], summary or batch["summary"])
+    return batch
+
+
+def both_steps(box):
+    batch = step(box)
+    return step(box, batch, box.apply_status()["next"]["summary"])
+
+
+def test_a_held_job_waits_with_its_tab_and_the_step_goes_on(box):  # G1
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner(
+        {
+            "j01": ("failed", "captcha", ["jobs.example.test: tick the human check on the last page"]),
+            "j06": ("held", "login_issue", ["careers.acme.test: sign in as sam.synthetic@example.test"]),
+        },
+        tabs={"j06": ACME_TAB},
+    )
+    batch = both_steps(box)
+    applications = box.store.applications()
+    assert [applications[j]["status"] for j in jobs] == [
+        "waiting",
+        "held",
+        "waiting",
+        "waiting",
+        "waiting",
+        "waiting",
+        "held",
+        "applied",
+    ]
+    holds = {row["job_id"]: row for row in box.store.holds()}
+    assert set(holds) == {"j01", "j06"}
+    assert (holds["j01"]["via"], holds["j01"]["mode"], holds["j01"]["phase"], holds["j01"]["n"]) == (
+        "form_fill",
+        "review",
+        "review",
+        2,
+    )
+    assert holds["j01"]["tab_id"] == "N2-j01" and holds["j01"]["reason"] == "captcha"
+    acme = holds["j06"]
+    assert (acme["via"], acme["mode"], acme["phase"], acme["n"], acme["times"]) == (
+        "applypilot",
+        "submit",
+        "rest",
+        7,
+        1,
+    )
+    assert (acme["tab_id"], acme["tab_url"]) == (ACME_TAB["id"], ACME_TAB["url"])
+    assert "sam.synthetic" not in acme["note"] and "sign in" in acme["note"]  # masked like every note
+    assert {row["batch_id"] for row in holds.values()} == {batch["batch_id"]}
+    listed = {item["job_id"] for item in box.build_apply_list(DAY, limit=10**9)["jobs"]}
+    assert not {"j01", "j06"} & listed  # held is not pending: no other batch picks it up
+    with pytest.raises(InvariantError, match="not pending"):
+        box.prepare_apply_batch(DAY, only=["j06"])
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "arbitration",
+        "ssn_required",
+        "payment_required",
+        "screening_requires_candidate_written_answers",
+        "unsafe_verification",
+        "expired",
+    ],
+)
+def test_stops_that_are_not_gates_still_fail(box, code):  # G2
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner({"j01": ("failed", code, []), "j06": ("failed", code, [])})
+    both_steps(box)
+    applications = box.store.applications()
+    assert applications["j01"]["status"] == applications["j06"]["status"] == "failed"
+    assert box.store.holds() == [] and box.notices[-1] == ("投递：1 个填好等你检查", "第二步做完")
+
+
+def test_each_step_ends_with_one_notification_of_what_waits_for_the_user(box):  # G6
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner({"j01": ("failed", "captcha", []), "j06": ("held", "login_issue", [])})
+    both_steps(box)
+    assert box.notices == [
+        ("投递：1 个等你处理，4 个填好等你检查", "1 个验证码：2 Co1"),
+        ("投递：1 个等你处理，1 个填好等你检查", "1 个要登录：7 Acme"),
+    ]
+
+
+def test_a_step_with_nothing_to_do_for_the_user_sends_nothing(box):  # G6 c
+    jobs = add_jobs(box, ["Co0", "Acme", "Beta"])
+    write_letters(box, jobs)
+    box.settings = box.settings.model_copy(update={"apply": box.settings.apply.model_copy(update={"review_first": 0})})
+    step(box)  # both auto-submitted
+    assert box.notices == []
+
+
+def test_the_shipped_setting_uses_the_mac_notifier(box, monkeypatch):
+    from intent_job_agent.config import Settings
+
+    assert Settings.load(Path(__file__).parent.parent / "configs/default.yaml").apply.notify is True
+    seen = []
+    monkeypatch.setattr(notify, "mac", lambda title, body: seen.append(title))
+    box.notifier = None
+    box.settings = box.settings.model_copy(update={"apply": box.settings.apply.model_copy(update={"notify": True})})
+    jobs = add_jobs(box, ["Co0"])
+    write_letters(box, jobs)
+    step(box)
+    assert seen == ["投递：1 个填好等你检查"]
+    seen.clear()
+    box.settings = box.settings.model_copy(update={"apply": box.settings.apply.model_copy(update={"notify": False})})
+    box.mark_applications(jobs, "pending")
+    step(box)
+    assert seen == []
+
+
+def test_held_jobs_are_listed_from_the_database_after_a_restart(box, tmp_path):  # G8
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner(
+        {
+            "j01": ("failed", "captcha", ["jobs.example.test: tick the human check"]),
+            "j06": ("held", "login_issue", ["careers.acme.test: sign in to continue"]),
+        },
+        tabs={"j06": ACME_TAB},
+    )
+    batch = both_steps(box)
+    fresh = Toolbox(box.settings, Store(box.store.path, box.settings), data_dir=box.data_dir)
+    status = fresh.apply_status()
+    assert status["status"] == "idle"
+    assert [(row["n"], row["company"], row["gate"], row["site"], row["then"]) for row in status["held"]] == [
+        (2, "Co1", "验证码", "jobs.example.test", "停在提交前（填表模块从岗位地址重填）"),
+        (7, "Acme", "登录和注册都不成", "careers.acme.test", "自动提交"),
+    ]
+    row = status["held"][1]
+    assert row["batch_id"] == batch["batch_id"] and row["job_id"] == "j06" and row["title"] == "ML Engineer 6"
+    assert row["todo"] == "careers.acme.test: sign in to continue" and row["times"] == 1
+    assert row["interrupted"] is False
+    assert box.apply_status()["held"] == status["held"]  # the same list next to a step's own results
+
+
+def test_the_user_decides_held_jobs_with_mark_applications(box):  # G9
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner({"j01": ("failed", "captcha", []), "j06": ("held", "sso_required", [])})
+    both_steps(box)
+    box.mark_applications(["j06"], "skipped")  # "7 不处理了"
+    box.mark_applications(["j01"], "applied")  # "2 已投"
+    assert box.store.holds() == [] and box.apply_status()["held"] == []
+    users = [(r["job_id"], r["status"], r["reason"]) for r in box.store.apply_attempts() if r["via"] == "user"]
+    assert users == [("j06", "failed", "sso_required"), ("j01", "applied", None)]
+    this = box.apply_stats()["weeks"][0]
+    assert this["allowed"] == {"login": 1} and this["not_counted"]["held"] == 2
+
+
+def first_step_held(box):
+    """G17: the first step's five - three held at gates, two already gone."""
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner(
+        {
+            "j00": ("failed", "login_issue", []),
+            "j01": ("failed", "captcha", []),
+            "j02": ("failed", "sso_required", []),
+            "j03": ("failed", "expired", []),
+            "j04": ("failed", "expired", []),
+        }
+    )
+    return step(box)
+
+
+def test_a_first_step_held_at_gates_waits_instead_of_voiding(box):  # G17
+    batch = first_step_held(box)
+    status = box.apply_status()
+    assert status["void"] is False and status["next"] is None
+    assert "第一步还在等 1、2、3 处理完" in status["notice"]
+    rest = box._phase_summary(batch["batch_id"], box.store.apply_batch(batch["batch_id"]), "rest")
+    with pytest.raises(InvariantError, match="1、2、3"):
+        box.start_applying(batch["batch_id"], rest)
+
+
+def test_one_held_job_that_worked_after_all_lets_the_second_step_start(box):  # G17, G-d
+    batch = first_step_held(box)
+    attempt = {"batch_id": batch["batch_id"], "phase": "resume", "mode": "review", "via": "form_fill"}
+    box.store.record_application_result(
+        "j01", "waiting", "check_then_submit", {**attempt, "reason": "check_then_submit"}
+    )
+    status = box.apply_status()
+    assert status["void"] is False and status["next"]["phase"] == "rest"
+    box.mark_applications(["j01"], "skipped")  # the user later skipped that form: it still worked
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
+    assert box.store.applications()["j05"]["status"] == "waiting"
+
+
+def test_a_first_step_whose_held_jobs_all_came_to_nothing_is_void(box):  # G17
+    batch = first_step_held(box)
+    box.mark_applications(["j00", "j01"], "skipped")
+    assert box.apply_status()["void"] is False  # 3 still waits
+    box.mark_applications(["j02"], "pending")
+    status = box.apply_status()
+    assert status["void"] is True and status["next"] is None
+    assert box.store.apply_batch(batch["batch_id"])["phases"]["rest"] == "void"
