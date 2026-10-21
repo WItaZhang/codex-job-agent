@@ -136,6 +136,18 @@ def test_the_weeks_numbers():
     assert "。；" not in line and "；。" not in line and line.endswith("。")
 
 
+def test_a_form_the_user_checked_and_skipped_stays_out_of_the_rate():  # spec section 9, decision 21
+    at = "2026-10-27T10:00:00+00:00"
+    skipped = [
+        {"job_id": "j", "via": "form_fill", "status": "waiting", "reason": "do_not_submit", "at": at},
+        {"job_id": "j", "via": "user", "status": "skipped", "reason": None, "at": at},
+        {"job_id": "k", "via": "applypilot", "status": "applied", "reason": None, "at": at},
+    ]
+    numbers = apply_fill.week_stats(skipped, datetime.date(2026, 10, 26), datetime.UTC, settings().apply.done)
+    assert (numbers["submitted"], numbers["failed"], numbers["success_rate"]) == (1, 0, 1.0)
+    assert numbers["not_counted"]["user_skipped"] == 1
+
+
 def test_a_week_without_attempts_gives_no_rate():
     numbers = apply_fill.week_stats([], datetime.date(2026, 10, 26), datetime.UTC, settings().apply.done)
     assert numbers["submitted"] == numbers["failed"] == 0 and numbers["success_rate"] is None
