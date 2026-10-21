@@ -61,6 +61,17 @@ def worked(status: str) -> bool:
     return status in WORKED
 
 
+SHORT_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def short_code(reason: str | None) -> str | None:
+    """A result code as the attempt log keeps it: a short code as written, any other text "other" (review #5: an
+    agent may write free text, even an e-mail address, after RESULT:FAILED:; that text goes masked into the note)."""
+    if not reason:
+        return None
+    return reason if SHORT_CODE.fullmatch(reason) else "other"
+
+
 def category(reason: str | None) -> str | None:
     """The done standard's category of a result code, or None for a failure that has to be fixed."""
     return _CATEGORY_OF.get(reason or "")

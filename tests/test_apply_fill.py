@@ -82,6 +82,22 @@ def test_conflicts_never_name_a_value():
     assert conflicts and not any("123456" in c or "99999" in c for c in conflicts)
 
 
+@pytest.mark.parametrize(
+    ("reason", "code"),
+    [
+        ("captcha", "captcha"),
+        ("wrong_job_redirect", "wrong_job_redirect"),
+        (None, None),
+        ("", None),
+        ("account exists for a@b.test", "other"),
+        ("Login-Failed", "other"),
+        ("x" * 80, "other"),
+    ],
+)
+def test_a_result_code_is_kept_short(reason, code):
+    assert apply_fill.short_code(reason) == code
+
+
 def test_reasons_fall_into_the_done_standards_categories():
     assert apply_fill.category("captcha") == "captcha"
     assert apply_fill.category("login_issue") == apply_fill.category("sso_required") == "login"

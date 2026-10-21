@@ -394,6 +394,27 @@ def test_no_contact_detail_reaches_the_database_or_the_status(box, tmp_path):
     assert not any(secret in status or secret.encode() in raw for secret in SECRETS)
 
 
+def test_a_free_text_result_code_is_kept_short_and_masked(box):  # review #5
+    jobs = ready(box, COMPANIES[:7])  # j06 Acme is submitted by ApplyPilot
+    free = "account exists for sam.synthetic@example.test"
+    box.apply_runner = FakeRunner(
+        {
+            "j00": ("failed", "login failed for sam.synthetic@example.test", []),  # through the form-fill module
+            "j06": ("failed", free, ["Call 555-0100 to reset the password."]),  # through ApplyPilot
+        }
+    )
+    batch, _ = run_step(box)
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
+    reasons = {a["job_id"]: a["reason"] for a in box.store.apply_attempts()}
+    assert reasons["j00"] == reasons["j06"] == "other"
+    applications = box.store.applications()
+    assert applications["j06"]["note"].startswith("other; account exists for ")
+    assert applications["j00"]["note"].startswith("other；")
+    shown = json.dumps([box.apply_status(), box.apply_stats(), applications], ensure_ascii=False)
+    assert not any(secret in shown for secret in SECRETS)
+    assert jobs
+
+
 # --- S11: screening answers that must be written without AI --------------------------------------------------------
 
 

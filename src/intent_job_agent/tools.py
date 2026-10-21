@@ -1325,7 +1325,7 @@ class Toolbox:
                         if outcome.reason == "maybe_submitted":
                             run["stopped"] = item["job_id"]
                     else:
-                        outcome = runner(spec)
+                        outcome = self._masked(runner(spec), inputs.redactor)
                         note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
                     writer.record_application_result(
                         item["job_id"], outcome.status, note, attempt={**attempt, "reason": outcome.reason}
@@ -1356,6 +1356,15 @@ class Toolbox:
                 result["warning"] = form_fill.PERSONAL_TABS_UNCHECKED
         return result
 
+    @staticmethod
+    def _masked(outcome: apply_bridge.ApplyOutcome, redactor: Redactor) -> apply_bridge.ApplyOutcome:
+        """ApplyPilot's result as the apply list and the attempt log keep it: a short result code, and any free text
+        the agent wrote after RESULT:FAILED: masked into the notes, like the notes themselves (review #5)."""
+        code = apply_fill.short_code(outcome.reason)
+        said = [outcome.reason] if code != outcome.reason else []
+        notes = [redactor.mask(text) for text in [*said, *outcome.notes]]
+        return dataclasses.replace(outcome, reason=code, notes=notes)
+
     def _fill_one(self, entry, ctx) -> "_FormFilled":
         """One job through the form-fill module, then its report, as the apply list's status (spec section 10
         item 89). The run's reports and summary.md are written again after every job."""
@@ -1382,14 +1391,16 @@ class Toolbox:
             )
             path = None
         result = apply_fill.application_result(report)
+        code = apply_fill.short_code(result.reason)  # the agent's free text (already masked) moves to the notes
+        said = (result.reason,) if code != result.reason else ()
         conclusion = FORM_FILL_CONCLUSIONS[report.conclusion]
         if report.not_filled_reason:
             reason = FORM_FILL_REASONS.get(report.not_filled_reason, report.not_filled_reason)
             conclusion = f"{conclusion}：{reason}"
         return _FormFilled(
             status=result.status,
-            reason=result.reason,
-            notes=tuple(report.notes),
+            reason=code,
+            notes=(*said, *report.notes),
             other_sites=sites,
             conclusion=conclusion,
             todo=tuple(report.todo),
