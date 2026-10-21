@@ -1430,11 +1430,13 @@ class Toolbox:
     @staticmethod
     def _masked(outcome: apply_bridge.ApplyOutcome, redactor: Redactor) -> apply_bridge.ApplyOutcome:
         """ApplyPilot's result as the apply list and the attempt log keep it: a short result code, and any free text
-        the agent wrote after RESULT:FAILED: masked into the notes, like the notes themselves (review #5)."""
+        the agent wrote after RESULT:FAILED: masked into the notes, like the notes themselves (review #5). A held
+        tab's address is masked too: a page address may carry the e-mail."""
         code = apply_fill.short_code(outcome.reason)
         said = [outcome.reason] if code != outcome.reason else []
         notes = [redactor.mask(text) for text in [*said, *outcome.notes]]
-        return dataclasses.replace(outcome, reason=code, notes=notes)
+        tab = {**outcome.tab, "url": redactor.mask(outcome.tab.get("url") or "")} if outcome.tab else None
+        return dataclasses.replace(outcome, reason=code, notes=notes, tab=tab)  # a held tab's address is kept
 
     def _fill_one(self, entry, ctx) -> "_FormFilled":
         """One job through the form-fill module, then its report, as the apply list's status (spec section 10

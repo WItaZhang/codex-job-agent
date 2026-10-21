@@ -21,7 +21,7 @@ from intent_job_agent.tools import Toolbox
 
 from .apply_fakes import FormFillFake
 from .conftest import BASE_INTENT, BASE_VOCAB, settings
-from .test_slice6 import FakeRunner, add_jobs, fake_claude, write_applicant, write_letters
+from .test_slice6 import SECRETS, FakeRunner, add_jobs, fake_claude, write_applicant, write_letters
 
 SAMPLES = yaml.safe_load(
     (Path(__file__).parent / "fixtures" / "gate_handoff" / "samples.yaml").read_text(encoding="utf-8")
@@ -819,3 +819,15 @@ def test_resuming_is_the_users_own_approval_and_never_scheduled():  # spec 5.1, 
 
     assert TOOL_TIERS["resume_applying"] == "commit" and TOOL_TIERS["prepare_resume"] == "prepare"
     assert "resume_applying" in COMMIT_TOOLS and not {"resume_applying", "prepare_resume"} & SCHEDULED_TOOLS
+
+
+def test_a_held_tabs_address_is_masked_before_it_is_kept(box):  # privacy: CLAUDE.md, spec 4.10 item 8
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    leaky = {"id": "N7", "url": "https://careers.acme.test/verify?email=sam.synthetic@example.test"}
+    box.apply_runner = GateRunner({"j06": ("held", "email_verification", [])}, tabs={"j06": leaky})
+    both_steps(box)
+    kept = box.store.hold("j06")
+    assert "sam.synthetic" not in kept["tab_url"] and kept["tab_url"].startswith("https://careers.acme.test/verify")
+    assert not any(secret in json.dumps(box.apply_status(), ensure_ascii=False) for secret in SECRETS)
+    assert not any(secret in json.dumps(box.store.holds(), ensure_ascii=False) for secret in SECRETS)
