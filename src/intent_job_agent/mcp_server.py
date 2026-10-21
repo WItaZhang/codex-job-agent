@@ -58,11 +58,17 @@ Apply list (project skill /apply-list):
   the agreement line first, as returned. mark_applications records applied / skipped / back to pending; it is not
   a label and never a reason to propose an intent change.
 Applying (project skill /apply):
-- get_apply_setup first. prepare_apply_batch picks the batch; cover letters are written by cover-letter-writer
-  subagents and saved with save_cover_letter, which checks them.
+- get_apply_setup first, then apply_status: list the jobs still held at a gate (`held`) before a new batch.
+- prepare_apply_batch picks the batch; cover letters are written by cover-letter-writer subagents and saved with
+  save_cover_letter, which checks them.
 - start_applying starts one step: first the reviewed jobs (all stop before submit), then, after the user checked
   them and said to continue, the rest. Call it only on the user's go for that step, with that step's summary
-  exactly as shown. Poll apply_status; report waiting tabs, failures with their notes, and the checklist.
+  exactly as shown. Poll apply_status; report held jobs (number, company, site, what to do), waiting tabs,
+  failures with their notes, and the checklist.
+- CAPTCHAs are never solved. A login, single sign-on, CAPTCHA or e-mail code the run could not get holds the job
+  with its tab kept for the user. When the user says they handled them ("好了", with numbers or without: then all
+  held jobs), call prepare_resume, show its summary and problems, then resume_applying with its job_ids and summary
+  exactly; the host asks the user. "N 已投" and "N 不处理了" are mark_applications applied and skipped.
 - Never ask for or show passwords, an SSN, card details or keys in chat."""
 
 
