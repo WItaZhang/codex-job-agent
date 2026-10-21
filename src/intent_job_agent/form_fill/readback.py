@@ -884,6 +884,9 @@ def _same_url(a: str, b: str) -> bool:
     return key(a) == key(b)
 
 
+same_url = _same_url  # /apply finds a held job's tab by its address the same way (spec section 10 item 100)
+
+
 def _shared_segments(a: str, b: str) -> int:
     """Leading path segments two URLs share, or -1 when the hosts differ."""
     sa, sb = urlsplit(a), urlsplit(b)
@@ -1047,6 +1050,21 @@ def _read_live(port: int, target: dict, redactor: Redactor, sheet) -> tuple:
         snap = snapshot(raw, tab=str(target.get("id", "")), read_at=datetime.now().isoformat(timespec="seconds"))
         masked, hide, _ = mask_snapshot(snap, redactor, sheet)
         return raw, masked, serialize(page, hide), *_masked_screenshot(page, redactor, hide)
+
+
+def tab_state(port: int, target: dict) -> PageState:
+    """Where the page in one open tab stands, read only and without saving anything: /apply glances at a held job's
+    tab before resuming it, and a page saying the application was received means the user submitted it there (spec
+    section 10 item 100)."""
+
+    def read() -> dict:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:  # leaving it drops the CDP connection; the browser and its tabs stay
+            return _extract(_find_page(p.chromium.connect_over_cdp(f"http://127.0.0.1:{int(port)}"), target))
+
+    with ThreadPoolExecutor(max_workers=1) as pool:  # not inside the MCP server's asyncio loop
+        return page_state(pool.submit(read).result())
 
 
 def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> FinalPage:

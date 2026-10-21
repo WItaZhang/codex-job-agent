@@ -985,6 +985,9 @@ class FormFillRunner:
     def read(self, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> readback.FinalPage:
         return readback.read_final_page(self._port(), target, out_dir, redactor, sheet)
 
+    def tab_state(self, target: dict) -> PageState:
+        return readback.tab_state(self._port(), target)
+
     def _port(self) -> int:
         if self.port is None:
             raise InvariantError("The applying Chrome is not started; call ensure_chrome first")

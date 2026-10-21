@@ -15,7 +15,7 @@ import yaml
 from intent_job_agent import apply_bridge, apply_fill, notify
 from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill import runner as form_fill_runner
-from intent_job_agent.form_fill.models import JobReport
+from intent_job_agent.form_fill.models import JobReport, PageState
 from intent_job_agent.store import Store
 from intent_job_agent.tools import Toolbox
 
@@ -667,3 +667,155 @@ def test_a_first_step_whose_held_jobs_all_came_to_nothing_is_void(box):  # G17
     status = box.apply_status()
     assert status["void"] is True and status["next"] is None
     assert box.store.apply_batch(batch["batch_id"])["phases"]["rest"] == "void"
+
+
+# --- G10-G16: resuming held jobs -----------------------------------------------------------------------------------
+
+STEP2 = "https://careers.acme.test/apply/step2"  # where the user's sign-in left Acme's tab
+
+
+def held_three(box):
+    """2 Co1 (reviewed, CAPTCHA, its tab N2-j01), 7 Acme (auto-submit, login, tab N7 still open) and 8 Beta
+    (auto-submit, CAPTCHA, its tab closed by the user)."""
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner(
+        {
+            "j01": ("failed", "captcha", ["jobs.example.test: tick the human check"]),
+            "j06": ("held", "login_issue", ["careers.acme.test: sign in to continue"]),
+            "j07": ("held", "captcha", ["careers.beta.test: tick the human check"]),
+        },
+        tabs={"j06": ACME_TAB, "j07": {"id": "N8", "url": "https://careers.beta.test/apply"}},
+    )
+    batch = both_steps(box)
+    box.form_fill_runner.tabs.append({"id": "N7", "type": "page", "url": STEP2})  # the user signed in there
+    box.apply_runner.outcomes = {}  # from now on every run goes through
+    box.notices.clear()
+    return batch
+
+
+SUMMARY = (
+    "接着做 3 个：自动提交 2 个：7 Acme（回原标签页）、8 Beta（从岗位地址重开）；"
+    "停在提交前 1 个（填表模块从岗位地址重填）：2 Co1"
+)
+HELD = ["j01", "j06", "j07"]
+
+
+def resumed(box, job_ids=HELD):
+    plan = box.prepare_resume(job_ids)
+    box.resume_applying(plan["job_ids"], plan["summary"])
+    return plan
+
+
+def test_the_summary_says_how_each_held_job_goes_on(box):  # G10
+    held_three(box)
+    plan = box.prepare_resume(HELD)
+    assert plan["summary"] == SUMMARY and plan["job_ids"] == HELD and plan["problems"] == []
+    assert box.store.holds()[0]["resuming"] is False  # preparing changes nothing
+
+
+def test_resuming_takes_over_the_tab_submits_and_refills(box):  # G11 a, c; G13
+    batch = held_three(box)
+    calls = len(box.apply_runner.calls)
+    resumed(box)
+    submitted = [spec for spec in box.apply_runner.calls[calls:] if spec.mode == "submit"]
+    acme, beta = submitted
+    assert (acme.job_id, acme.resume, acme.resume_url, acme.resume_tab) == ("j06", True, STEP2, "N7")
+    assert (beta.job_id, beta.resume, beta.resume_url, beta.resume_tab) == ("j07", True, None, None)
+    assert "== ANSWER SHEET ==" in acme.sheet and "== ANSWER SHEET ==" in beta.sheet
+    co1, _ = box.form_fill_runner.fills[-1]
+    assert (co1.job_id, co1.mode) == ("j01", "stop")
+    applications = box.store.applications()
+    assert [applications[j]["status"] for j in HELD] == ["waiting", "applied", "applied"]
+    assert box.store.holds() == []
+    rows = box.store.apply_attempts()[-3:]
+    assert [(r["job_id"], r["phase"], r["mode"], r["via"], r["batch_id"]) for r in rows] == [
+        ("j01", "resume", "review", "form_fill", batch["batch_id"]),
+        ("j06", "resume", "submit", "applypilot", batch["batch_id"]),
+        ("j07", "resume", "submit", "applypilot", batch["batch_id"]),
+    ]
+    status = box.apply_status()
+    assert status["phase"] == "resume" and status["next"] is None and status["held"] == []
+    (refill,) = [row for row in status["jobs"] if row["job_id"] == "j01"]
+    assert any("原来等你处理的那个标签页可以关掉" in item for item in refill["todo"])
+    assert box.notices == [("投递：1 个填好等你检查", "接着做做完")]
+    (decision,) = [d for d in box.store.decisions() if d["kind"] == "resume"]
+    assert json.loads(decision["payload"]) == {"job_ids": HELD, "approved_via": "host_permission_prompt"}
+
+
+def test_two_tabs_on_the_same_address_keep_that_job_waiting(box):  # G11 d
+    held_three(box)
+    box.form_fill_runner.tabs.append({"id": "X9", "type": "page", "url": STEP2})
+    plan = box.prepare_resume(HELD)
+    assert plan["job_ids"] == ["j01", "j07"]
+    assert plan["problems"] == [{"job_id": "j06", "problem": "7 Acme：同一个地址开着 2 个标签页，关掉多余的再说“好了”"}]
+    with pytest.raises(InvariantError, match="summary"):
+        box.resume_applying(HELD, plan["summary"])
+    box.resume_applying(plan["job_ids"], plan["summary"])
+    assert box.store.hold("j06")["resuming"] is False and box.store.applications()["j06"]["status"] == "held"
+
+
+def test_a_tab_the_user_already_submitted_is_counted_without_an_agent(box):  # G12
+    held_three(box)
+    box.form_fill_runner.tab_states["N7"] = PageState(actions=(), received="Thank you for applying!")
+    calls = len(box.apply_runner.calls)
+    resumed(box, ["j06"])
+    assert box.apply_runner.calls[calls:] == [] and box.form_fill_runner.glances[-1] == "N7"
+    application = box.store.applications()["j06"]
+    assert application["status"] == "applied" and application["note"].startswith("submitted_by_user；")
+    row = box.store.apply_attempts()[-1]
+    assert (row["status"], row["reason"], row["phase"]) == ("applied", "submitted_by_user", "resume")
+    assert box.apply_stats()["weeks"][0]["submitted"] == 1  # the user's own submission (G-e)
+
+
+def test_a_job_held_a_third_time_fails_at_its_gate(box):  # G14
+    held_three(box)
+    box.apply_runner.outcomes = {"j07": ("held", "captcha", ["careers.beta.test: a CAPTCHA on the review page"])}
+    resumed(box, ["j07"])
+    hold = box.store.hold("j07")
+    assert (hold["times"], hold["reason"]) == (2, "captcha") and box.store.applications()["j07"]["status"] == "held"
+    assert box.notices == [("投递：1 个等你处理", "1 个验证码：8 Beta")]
+    resumed(box, ["j07"])
+    application = box.store.applications()["j07"]
+    assert application["status"] == "failed" and application["note"].startswith("captcha；第三次卡在门槛")
+    assert box.store.hold("j07") is None
+    assert box.apply_stats()["weeks"][0]["allowed"] == {"captcha": 1}
+
+
+def test_resuming_refuses_what_it_cannot_do_safely(box):  # G15
+    held_three(box)
+    with pytest.raises(InvariantError, match="summary"):
+        box.resume_applying(HELD, SUMMARY.replace("8 Beta", "8 Gamma"))
+    with pytest.raises(InvariantError, match="held"):
+        box.prepare_resume(["j00"])  # waiting, not held
+    with pytest.raises(InvariantError):
+        box.prepare_resume([])
+    box._apply_run = {"status": "running", "phase": "rest", "jobs": []}
+    with pytest.raises(InvariantError, match="running"):
+        box.resume_applying(HELD, SUMMARY)
+    box._apply_run = {"status": "running", "phase": "resume", "jobs": [{"job_id": "j06"}]}
+    with pytest.raises(InvariantError):
+        box.start_applying("batch-x", "x")
+    with pytest.raises(InvariantError, match="j06"):
+        box.mark_applications(["j06"], "applied")
+
+
+def test_a_resume_cut_short_is_flagged_next_time(box):  # G16
+    held_three(box)
+    box.store.set_resuming(["j06"], True)  # the server stopped while j06 was being resumed
+    fresh = Toolbox(box.settings, Store(box.store.path, box.settings), data_dir=box.data_dir)
+    fresh.form_fill_runner = box.form_fill_runner
+    (acme,) = [row for row in fresh.apply_status()["held"] if row["job_id"] == "j06"]
+    assert acme["interrupted"] is True
+    plan = fresh.prepare_resume(["j06"])
+    assert (
+        plan["summary"]
+        == "接着做 1 个：自动提交 1 个：7 Acme（上次接着做时中断，可能已经交过，请先看标签页；回原标签页）"
+    )
+
+
+def test_resuming_is_the_users_own_approval_and_never_scheduled():  # spec 5.1, 5.2, section 10 item 100
+    from intent_job_agent.tools import COMMIT_TOOLS, SCHEDULED_TOOLS, TOOL_TIERS
+
+    assert TOOL_TIERS["resume_applying"] == "commit" and TOOL_TIERS["prepare_resume"] == "prepare"
+    assert "resume_applying" in COMMIT_TOOLS and not {"resume_applying", "prepare_resume"} & SCHEDULED_TOOLS
