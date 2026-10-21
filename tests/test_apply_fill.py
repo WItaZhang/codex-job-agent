@@ -118,6 +118,10 @@ def test_the_weeks_numbers():
         assert numbers[key] == value, key
     assert numbers["target"] == 200 and numbers["rate_target"] == 0.8
     assert "提交 3 份" in numbers["line"] and "50%" in numbers["line"] and "没达标" in numbers["line"]
+    line = numbers["line"]  # review #6: what is not counted is in the line too, and the punctuation is plain
+    assert "不算进去：停在提交前 3 次、已申请过 1、退回待投 1、你跳过 1" in line
+    assert "允许的 2 份：验证码 1、岗位已下架 1；要修的 1 份：wrong_job_redirect 1。" in line
+    assert "。；" not in line and "；。" not in line and line.endswith("。")
 
 
 def test_a_week_without_attempts_gives_no_rate():

@@ -234,18 +234,33 @@ def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: 
     return numbers
 
 
+APART = {  # what is not counted, as the line names it
+    "waiting": ("停在提交前", "次"),
+    "maybe_submitted": ("可能已提交", ""),
+    "already_applied": ("已申请过", ""),
+    "pending": ("退回待投", ""),
+    "user_skipped": ("你跳过", ""),
+    "user_pending": ("你改回待投", ""),
+}
+
+
 def _line(n: dict) -> str:
     span = f"{n['week']} – {n['end'][5:]}"
     goal = f"要 {n['target']} 份、{round(n['rate_target'] * 100)}%"
     if n["success_rate"] is None:
-        return f"{span}：还没有提交或失败的尝试。没达标：{goal}。"
-    rate = f"{round(n['success_rate'] * 100)}%（{n['submitted']}/{n['submitted'] + n['failed']}）"
-    verdict = "达标" if n["met"] else f"没达标：{goal}"
-    parts = [f"{span}：提交 {n['submitted']} 份，失败 {n['failed']} 份，成功率 {rate}。{verdict}。"]
+        head = f"{span}：还没有提交或失败的尝试。没达标：{goal}。"
+    else:
+        rate = f"{round(n['success_rate'] * 100)}%（{n['submitted']}/{n['submitted'] + n['failed']}）"
+        verdict = "达标" if n["met"] else f"没达标：{goal}"
+        head = f"{span}：提交 {n['submitted']} 份，失败 {n['failed']} 份，成功率 {rate}。{verdict}。"
+    failures = []
     if n["allowed"]:
         listed = "、".join(f"{LABELS[k]} {v}" for k, v in n["allowed"].items())
-        parts.append(f"失败里允许的 {sum(n['allowed'].values())} 份：{listed}")
+        failures.append(f"失败里允许的 {sum(n['allowed'].values())} 份：{listed}")
     if n["to_fix"]:
         listed = "、".join(f"{k} {v}" for k, v in n["to_fix"].items())
-        parts.append(f"要修的 {sum(n['to_fix'].values())} 份：{listed}")
-    return "；".join(parts) + "。"
+        failures.append(f"要修的 {sum(n['to_fix'].values())} 份：{listed}")
+    apart = [f"{APART[k][0]} {v}{APART[k][1]}" for k, v in n["not_counted"].items() if v]
+    return (
+        head + ("；".join(failures) + "。" if failures else "") + (f"不算进去：{'、'.join(apart)}。" if apart else "")
+    )
