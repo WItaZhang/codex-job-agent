@@ -1333,3 +1333,26 @@ def test_a_step_records_which_agent_it_started(box, tmp_path, monkeypatch):  # r
     assert (agent, row["agent_started"]) in watchdog.identify([agent])
     finished(box)
     assert box.store.activity() is None
+
+
+def test_the_interrupted_notice_goes_once_the_user_dealt_with_that_job(box):  # review #9
+    batch = batch_of(box)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    left_running(box, batch["batch_id"], "rest", dead_server(), ("j06", "submit", "applypilot"))
+    again = restarted(box)
+    assert "可能已经交过" in again.apply_status()["notice"]
+    again.mark_applications(["j06"], "applied")  # "7 已投"
+    status = again.apply_status()
+    assert status["held"] == [] and "notice" not in status
+    assert "interrupted" not in again.store.apply_batch(batch["batch_id"])
+
+
+def test_starting_a_step_of_the_batch_drops_the_interrupted_notice(box):  # review #9
+    batch = batch_of(box)
+    left_running(box, batch["batch_id"], "review", dead_server(), ("j02", "review", "form_fill"))
+    result(box, "j00", "waiting", batch["batch_id"], "review", reason="check_then_submit")
+    again = restarted(box)
+    status = again.apply_status()
+    assert "退回待投" in status["notice"]
+    again.start_applying(batch["batch_id"], status["next"]["summary"])
+    assert "interrupted" not in again.store.apply_batch(batch["batch_id"])

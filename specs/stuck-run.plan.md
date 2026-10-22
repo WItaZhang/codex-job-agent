@@ -83,7 +83,7 @@
 
 ### 1.3 读标签页有上限（`readback.py`）
 
-- `_bounded(read, seconds)`：在自己的线程里读，`result(timeout=seconds)`，超时就 `kill_new_drivers`，抛 `ReadbackError("读标签页 N 秒没有回应")`，线程池 `shutdown(wait=False)`。
+- `_bounded(read, seconds)`：在自己的线程里读，`result(timeout=seconds)`，超时就 `kill_drivers`（只结束这次读页自己起的驱动，审查 #6），抛 `ReadbackError("读标签页 N 秒没有回应")`，线程池 `shutdown(wait=False)`。
 - `read_final_page`、`tab_state` 多一个参数 `seconds`；`FormFillRunner.read`、`tab_state` 传 `apply.watchdog.read_seconds`。
 - 调用的地方照旧：`_after_fill` 记 `readback_failed`（第 89 条照旧映射），`_resume_one` 当作没读到。
 
@@ -124,7 +124,7 @@
   - 正在做的岗位还是待投时：模式 `submit` → held，原因 `interrupted`，备注"工具服务在这个岗位做到一半时停了，agent 可能已经交过：请先在投递用的 Chrome 里看它交上了没有"，写尝试记录（held、`interrupted`），hold 的标签页为空；其他模式 → 留在待投，写尝试记录（pending、`interrupted`）。
   - 从这一批这一步的尝试记录算出：成功过没有（waiting / applied）、哪些还是 held、有没有 `maybe_submitted`。
   - 用 `apply_fill.close_step` 收尾（和 `_sync_apply_results` 共用的纯函数）：这一步 done；第一步一个都没成：有 held → `review_holds`，没有 → 作废；`maybe_submitted` → 作废。
-  - 批次里记 `interrupted`：步骤、岗位、时间，`apply_status` 的 `notice` 用。
+  - 批次里记 `interrupted`：步骤、岗位、时间，`apply_status` 的 `notice` 用。等你处理的那个岗位处理完（已投、不处理了、接着做了），或者这一批开始下一步，就清掉（审查 #9）。
 - 一步的线程碰到任何异常（包括 `Exception` 以外的）都把状态改成 failed，不留下 running。
 - `apply_status` 在没有在跑的一步时（`idle`）：`next` 是最近一批的下一步，只在它这一步的岗位都还是待投时给；`notice` 写上次停在哪里。
 
@@ -176,7 +176,7 @@
 ## 3. 步骤（每一步测试先行，通过后提交）
 
 1. **watchdog 和 agent 的运行**：`watchdog.py`（进程表、`Tree`、`Live`、`follow`）、`run_application`、配置、`SYSTEM_RESULTS`、报告的两个原因词。测试 S1–S4。
-2. **读标签页有上限**：`_bounded`、`kill_new_drivers`、两个读页函数和 `FormFillRunner`。测试 S5。
+2. **读标签页有上限**：`_bounded`、`own_driver`、`kill_drivers`、两个读页函数和 `FormFillRunner`。测试 S5。
 3. **停下和时间**：`stop_applying`、一步和接着做的线程、`apply_status` 的时间。测试 S6–S11。
 4. **重启以后**：`apply_running`、`_recover`、`close_step`、`interrupted`、空闲时的 `next`、别的会话。测试 S12–S17、S25。
 5. **有人在用 Chrome**：`cdp_targets`、`ChromeWatch`、两条路带回来、`chrome_warning`、`reminder`。测试 S18–S24。

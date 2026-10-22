@@ -1321,6 +1321,7 @@ class Toolbox:
             self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
         )
         data["phases"][phase] = "running"
+        data.pop("interrupted", None)  # the user has moved on from the cut-short step (review #9)
         owner = self._owner()
         self.store.begin_activity(owner, "step", batch=(batch_id, phase, data.pop("day"), data))
         try:
@@ -1732,10 +1733,18 @@ class Toolbox:
             return None
         return {"batch_id": batch_id, "phase": phase, "summary": self._phase_summary(batch_id, data, phase)}
 
-    @staticmethod
-    def _interrupted_notice(data: dict) -> str | None:
+    def _interrupted_notice(self, batch_id: str, data: dict) -> str | None:
+        """What apply_status says, while idle, about a step a stopped tool server cut short (spec section 10 item
+        112). Once the job it held is dealt with (the user said it was sent, gave it up, or it was resumed), nothing,
+        and the batch forgets it (review #9)."""
         cut = data.get("interrupted")
         if not cut:
+            return None
+        if cut.get("held") and self.store.applications().get(cut.get("job_id"), {}).get("status") != "held":
+            with self.store.exclusive():
+                fresh = self.store.apply_batch(batch_id)
+                fresh.pop("interrupted", None)
+                self.store.save_apply_batch(batch_id, fresh.pop("day"), fresh)
             return None
         step = apply_fill.STEP_NAMES[cut["phase"]]
         job = next((job for job in data["jobs"] if job["job_id"] == cut.get("job_id")), None)
@@ -1836,7 +1845,7 @@ class Toolbox:
             if latest is not None:
                 data = self._settle(latest)
                 status["next"] = self._pending_step(latest, data)
-                notice = self._interrupted_notice(data)
+                notice = self._interrupted_notice(latest, data)
                 if notice:
                     status["notice"] = notice
             if other is not None:

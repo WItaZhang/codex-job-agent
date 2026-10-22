@@ -19,7 +19,8 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 
 - `other_session` 不为空：另一个会话的工具服务正在跑投递的一步，把它的 `message` 告诉用户。这里什么都不开始，等那边做完，或者请用户在那个会话里说"停下"。
 - `held` 里有等你处理的岗位，就先按第 6 节列给用户（不会自动算失败，会一直等）。
-- `notice` 写着"上次……时工具服务停了"：工具服务中途停过，已经按数据库收尾。原样告诉用户。`next` 不为空时，那一批的下一步还能做：展示 `next.summary` 原文，问用户要不要继续（用户说继续才 `start_applying(next.batch_id, next.summary)`，会弹窗）。
+- `notice` 写着"上次……时工具服务停了"：工具服务中途停过，已经按数据库收尾。原样告诉用户。
+- `next` 不为空：最近一批还有一步没开始（例如工具服务重启以后）。展示 `next.summary` 原文，问用户继续这一步还是换新的一批。用户说继续才 `start_applying(next.batch_id, next.summary)`（会弹窗）；要新的一批就按第 2 节。
 
 然后再往下。
 
@@ -58,7 +59,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 1. 展示批次和返回的 summary 原文，问用户："开始吗？"
 2. 用户说开始：`start_applying(batch_id, summary)`（弹窗）。把返回的 `reminder` 原样告诉用户：这一步在跑时不要用投递用的 Chrome，要用就先说"停下"。返回里有 `warning` 时（投递用的 Chrome 里开着邮箱、网银、学校系统之类的标签页），原样告诉用户，建议关掉；投递照常进行。
 3. 每个岗位要几分钟。每隔两三分钟调用一次 `apply_status()`，直到 status 不是 running。
-   - 正在做的岗位 `quiet_seconds` 超过 120 时，告诉用户"第 N 个已经 M 分钟没有动静"：满 5 分钟（配置 `apply.watchdog.stall_seconds`）会自动算卡住、结束它、接着做下一个；`agent_alive` 为假时它在读回标签页，很快就好。
+   - 正在做的岗位 `quiet_seconds` 超过 120 时，告诉用户"第 N 个已经 M 分钟没有动静"：满 5 分钟（配置 `apply.watchdog.stall_seconds`）会自动算卡住、结束它、接着做下一个；`agent_alive` 为假时 agent 还没起来，或者已经结束、正在读回标签页收尾，很快就好。
    - 用户说"停下"：`stop_applying()`，把 `message` 原样告诉用户。正在填、停在提交前的马上结束，回到待投；正在自动提交的做完再停。继续轮询到 status 不是 running（`stopping` 为真时还在等正在做的岗位）。
    - 有 `chrome_warning`：原样告诉用户（可能有人在用投递用的 Chrome），提醒一步在跑时不要用它。
 4. 汇报：先给 `summary`（这次填表的 summary.md 路径），再按结论分组，每个岗位写批次里的序号、职位、公司、`conclusion`，下面编号列出 `todo`（第一条是一句话的结论）。`todo` 里的"重跑 <岗位编号>"写成"重跑 <序号>"。这一步做完时 Mac 会弹一条通知（有等你处理或填好等你检查的才弹）。
@@ -93,7 +94,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 2. 用户说"好了"（或"3、7 好了"；不说序号就是 `held` 里的全部）：`prepare_resume(job_ids)`，展示 summary 原文和 `problems`（同一个地址开着几个标签页的，请用户关掉多余的再说"好了"），然后 `resume_applying(job_ids, summary)`，job_ids 和 summary 用 `prepare_resume` 返回的（弹窗）。
    - 投递的一步还在跑时不能接着做，等它做完。返回的 `reminder` 同样原样告诉用户。接着做时用户说"停下"，同样 `stop_applying()`：正在重填的马上结束，仍是等你处理。
 3. 同样每隔两三分钟 `apply_status()`，结束后按第 4、5 节汇报。又卡住的会再次出现在 `held` 里。
-4. 用户说"N 已投"（自己在标签页里交了）：`mark_applications([它], "applied")`，算成功提交。说"N 不处理了"：`mark_applications([它], "skipped")`，算一次允许的失败。想以后从头再投：`mark_applications([它], "pending")`。
+4. 用户说"N 已投"（自己在标签页里交了）：`mark_applications([它], "applied")`，算成功提交。说"N 不处理了"：`mark_applications([它], "skipped")`，算一次失败：门槛的算允许的失败；`gate` 是"工具服务中途停了"的（`interrupted`）算要修的失败（决定 24）。想以后从头再投：`mark_applications([它], "pending")`。
 
 ## 7. 这一周达标了吗
 
