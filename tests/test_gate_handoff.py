@@ -916,3 +916,17 @@ def test_already_applied_outside_a_resume_is_still_not_a_new_submission(box):  #
     both_steps(box)
     assert box.store.apply_attempts()[-2]["reason"] == "already_applied"
     assert box.apply_stats()["weeks"][0]["not_counted"]["already_applied"] == 1
+
+
+@pytest.mark.parametrize(
+    ("name", "shown"),
+    [
+        ("Acme‮etaN olleH", "AcmeetaN olleH"),  # right-to-left override: would show the text reversed
+        ("Ac​me⁦x⁩", "Acmex"),  # zero-width space, isolates
+        ("Beta﻿‍Health", "BetaHealth"),  # byte-order mark, zero-width joiner
+        ("Line two three", "Line two three"),  # line and paragraph separators
+        ("Tab\there\x85next", "Tab here next"),  # controls become spaces
+    ],
+)
+def test_a_company_name_cannot_disguise_the_notification(name, shown):  # review 5: spec section 10 item 99
+    assert notify.clean(name) == shown

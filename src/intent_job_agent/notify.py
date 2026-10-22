@@ -4,9 +4,9 @@ which kind of gate, and the batch number and company of each held job. Never an 
 address. Company names come from job data (untrusted, spec 4.8): they are cleaned, cut short and passed to osascript
 as arguments, never written into the script."""
 
-import re
 import subprocess
 import sys
+import unicodedata
 
 # How the notification names a gate: what the user has to do (decision 23).
 KINDS = {
@@ -19,12 +19,18 @@ KIND_ORDER = ("要登录", "验证码", "邮箱验证码")
 LISTED = 5  # held jobs named in the body; the rest are counted
 NAME_CHARS = 20
 SCRIPT = ("on run argv", "display notification (item 2 of argv) with title (item 1 of argv)", "end run")
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+BREAKS = ("Cc", "Zl", "Zp")  # controls and line or paragraph separators: a space
+HIDDEN = "Cf"  # format characters (bidirectional overrides, zero-width): dropped, they could disguise the text
 
 
 def clean(text: str, limit: int = NAME_CHARS) -> str:
-    """Untrusted text as one short plain line: control characters become spaces, then it is cut to `limit`."""
-    text = " ".join(_CONTROL.sub(" ", str(text)).split())
+    """Untrusted text as one short plain line: controls and separators become spaces, format characters such as
+    U+202E or U+200B are dropped (review 5), then it is cut to `limit`."""
+    kept = []
+    for char in str(text):
+        kind = unicodedata.category(char)
+        kept.append(" " if kind in BREAKS else "" if kind == HIDDEN else char)
+    text = " ".join("".join(kept).split())
     return text if len(text) <= limit else text[:limit] + "…"
 
 
