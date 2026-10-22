@@ -97,7 +97,9 @@ class FormFillFake:
         if outcome.status != "pending" and spec.job_id not in self.no_tab:  # a run that never started opened no tab
             self.tabs.append({"id": f"N{len(self.fills)}-{spec.job_id}", "type": "page", "url": url})  # a new id
         notes, sites, emails = list(outcome.notes), list(outcome.other_sites), list(outcome.emails)
-        return apply_bridge.ApplyOutcome(outcome.status, outcome.reason, notes, sites, emails, str(log))
+        return apply_bridge.ApplyOutcome(
+            outcome.status, outcome.reason, notes, sites, emails, str(log), chrome=list(outcome.chrome)
+        )
 
     def tab_state(self, target) -> PageState:
         self.glances.append(target["id"])

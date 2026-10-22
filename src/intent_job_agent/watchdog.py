@@ -8,17 +8,27 @@
 - `kill_new_drivers`: the Playwright drivers a read started, ended when the read runs out of time.
 - `me`, `alive`, `kill_orphans`: which tool server runs a step, whether it still does, and the agents one that
   stopped left behind.
+- `ChromeWatch`: the applying Chrome's tabs while an agent works (CDP Target.getTargets, which knows which tab opened
+  which), and what changed that the agent did not do: someone may be using that Chrome (spec section 10 item 114).
 
-Nothing here clicks, types or navigates.
+Nothing here clicks, types or navigates: the Chrome is only listed.
 """
 
+import base64
+import json
 import os
+import re
 import select
 import signal
+import socket
+import struct
 import subprocess
 import threading
 import time
+import urllib.request
 from dataclasses import dataclass
+from datetime import datetime
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -295,3 +305,190 @@ def follow(
     if buffer:
         on_line(buffer.decode("utf-8", errors="replace"))
     return why
+
+
+# --- the applying Chrome while an agent works (spec section 10 item 114) -------------------------------------------
+
+CHROME_USE = "可能有人在用投递用的 Chrome"
+IGNORED = ("chrome-extension://", "devtools://")  # not tabs a person uses (as readback.IGNORED_SCHEMES)
+PAGE_URL = re.compile(r"Page URL: (\S+)")
+MAX_MESSAGE = 32 * 2**20
+
+
+class ChromeDown(OSError):
+    """The applying Chrome does not answer on its debugging port."""
+
+
+def _clock(at: float) -> str:
+    return datetime.fromtimestamp(at).strftime("%H:%M:%S")
+
+
+def _send(sock: socket.socket, payload: bytes) -> None:
+    """One masked text frame (a client must mask, RFC 6455 5.3)."""
+    mask, size = os.urandom(4), len(payload)
+    if size < 126:
+        length = bytes([0x80 | size])
+    elif size < 2**16:
+        length = bytes([0x80 | 126]) + struct.pack(">H", size)
+    else:
+        length = bytes([0x80 | 127]) + struct.pack(">Q", size)
+    sock.sendall(bytes([0x81]) + length + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+
+def _receive(reader) -> bytes:
+    """One whole message: its frames joined (text, then continuations); pings and pongs skipped."""
+    parts, total = [], 0
+    while True:
+        head = reader.read(2)
+        if len(head) < 2:
+            raise ConnectionError("the websocket closed")
+        fin, opcode, size = head[0] & 0x80, head[0] & 0x0F, head[1] & 0x7F
+        if size == 126:
+            size = struct.unpack(">H", reader.read(2))[0]
+        elif size == 127:
+            size = struct.unpack(">Q", reader.read(8))[0]
+        mask = reader.read(4) if head[1] & 0x80 else b""
+        total += size
+        if total > MAX_MESSAGE:
+            raise ConnectionError("the websocket message is too large")
+        payload = reader.read(size)
+        if mask:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        if opcode == 0x8:
+            raise ConnectionError("the websocket closed")
+        if opcode in (0x9, 0xA):
+            continue
+        parts.append(payload)
+        if fin:
+            return b"".join(parts)
+
+
+def cdp_targets(port: int, timeout: float = 3.0) -> list[dict]:
+    """The applying Chrome's targets with their openers: CDP Target.getTargets over the browser's websocket (/json/list
+    has no openerId). A minimal RFC 6455 client - one request, its answer - that never attaches to a page. Raises
+    ChromeDown when nothing answers on the port."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{int(port)}/json/version", timeout=timeout) as resp:
+            path = urlsplit(json.load(resp)["webSocketDebuggerUrl"]).path
+    except OSError as error:
+        raise ChromeDown(str(error)) from None
+    with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout) as sock:
+        key = base64.b64encode(os.urandom(16)).decode()
+        sock.sendall(
+            f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{int(port)}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode()
+        )
+        reader = sock.makefile("rb")
+        if b" 101 " not in reader.readline():
+            raise ConnectionError("CDP refused the websocket")
+        while reader.readline() not in (b"\r\n", b""):
+            pass
+        _send(sock, json.dumps({"id": 1, "method": "Target.getTargets"}).encode())
+        while True:
+            message = json.loads(_receive(reader))
+            if message.get("id") == 1:
+                infos = (message.get("result") or {}).get("targetInfos") or []
+                return [
+                    {
+                        "id": i.get("targetId"),
+                        "type": i.get("type"),
+                        "url": i.get("url", ""),
+                        "openerId": i.get("openerId"),
+                    }
+                    for i in infos
+                ]
+
+
+def _host(url: str) -> str:
+    parts = urlsplit(str(url))
+    return (parts.hostname or "").lower() if parts.scheme in ("http", "https") else ""
+
+
+def _same(a: str, b: str) -> bool:
+    return a.split("#", 1)[0].rstrip("/") == b.split("#", 1)[0].rstrip("/")
+
+
+def _tab_action(event: dict) -> str | None:
+    """What an agent tool call did to the tabs: "new", "close" or nothing."""
+    tool, data = str(event.get("name", "")).rsplit("__", 1)[-1], event.get("input") or {}
+    if tool == "browser_tabs":
+        return data.get("action") if data.get("action") in ("new", "close") else None
+    return {"browser_tab_new": "new", "browser_tab_close": "close", "browser_close": "close"}.get(tool)
+
+
+class ChromeWatch:
+    """The applying Chrome's tabs while one agent works, listed every few seconds (`check`), never touched: the tabs
+    open before it started, every tab seen since with the tab that opened it and the addresses it showed, and when
+    Chrome stopped answering. `report` tells what changed that the agent's own tool calls do not explain."""
+
+    def __init__(self, port: int, blocked_origins, targets=cdp_targets, clock=time.time):
+        self.port, self._targets, self._clock = port, targets, clock
+        self.blocked = {(urlsplit(o).hostname or "").lower().removeprefix("www.") for o in blocked_origins} - {""}
+        self.before: dict[str, str] | None = None  # the tabs open before the agent started, and their addresses
+        self.tabs: dict[str, dict] = {}  # every tab seen: its opener and the addresses it showed
+        self.present: set[str] = set()  # the tabs at the last check
+        self.down: float | None = None  # when Chrome stopped answering, after it had answered
+        self.up: float | None = None  # when it answered again
+
+    def check(self) -> None:
+        now = self._clock()
+        try:
+            listed = self._targets(self.port)
+        except ChromeDown:
+            if self.before is not None and self.down is None:
+                self.down = now
+            return
+        except Exception:  # noqa: BLE001 - a list that could not be read says nothing either way
+            return
+        pages = [t for t in listed if t.get("type") == "page" and not str(t.get("url", "")).startswith(IGNORED)]
+        if self.down is not None and self.up is None:
+            self.up = now
+        if self.before is None:
+            self.before = {t["id"]: str(t.get("url", "")) for t in pages}
+        for t in pages:
+            entry = self.tabs.setdefault(t["id"], {"opener": t.get("openerId"), "urls": []})
+            if str(t.get("url", "")) not in entry["urls"]:
+                entry["urls"].append(str(t.get("url", "")))
+        self.present = {t["id"] for t in pages}
+
+    def _personal(self, host: str) -> bool:
+        """A site the agent cannot open (apply.blocked_origins and their subdomains) or a school system."""
+        return any(host == site or host.endswith("." + site) for site in self.blocked) or "edu" in host.split(".")
+
+    def report(self, events: list[dict], pages=()) -> list[str]:
+        """What changed in the applying Chrome that the agent's own tool calls (`events`; `pages`: the Page URLs its
+        browser answered with) do not explain, one short line each, naming only sites (spec section 10 item 114):
+        Chrome stopped answering; more new tabs without an opener than the agent opened; more of them closed than the
+        agent closed; tabs open before the run closed or moved; a tab of the run on a site the agent cannot open."""
+        if self.before is None:
+            return []
+        if self.down is not None:  # a Chrome that went away has other tabs when it is back: nothing else to compare
+            line = f"投递用的 Chrome 从 {_clock(self.down)} 起连不上了（被关掉、崩溃，或调试端口没有响应）"
+            return [line + (f"，{_clock(self.up)} 又连上了" if self.up is not None else "")]
+        lines = []
+        actions = [_tab_action(event) for event in events]
+        visited = {_host((e.get("input") or {}).get("url", "")) for e in events} | {_host(url) for url in pages}
+        new = {tab_id: entry for tab_id, entry in self.tabs.items() if tab_id not in self.before}
+        bare = {tab_id: entry for tab_id, entry in new.items() if not entry["opener"]}
+        extra = len(bare) - actions.count("new")
+        if extra > 0:
+            hosts = sorted({h for e in bare.values() for h in map(_host, e["urls"]) if h and h not in visited})
+            lines.append(f"运行中多了 {extra} 个不是 agent 开的新标签页（{'、'.join(hosts) or '新标签页'}）")
+        gone = len([tab_id for tab_id in bare if tab_id not in self.present]) - actions.count("close")
+        if gone > 0:
+            lines.append(f"这次运行开的标签页有 {gone} 个被关掉了，不是 agent 关的")
+        shut = [tab_id for tab_id in self.before if tab_id not in self.present]
+        moved = {
+            tab_id: [u for u in self.tabs[tab_id]["urls"] if not _same(u, url)]
+            for tab_id, url in self.before.items()
+            if tab_id in self.present
+        }
+        moved = {tab_id: urls for tab_id, urls in moved.items() if urls}
+        if shut or moved:
+            counts = [f"{len(shut)} 个被关掉"] * bool(shut) + [f"{len(moved)} 个换了地址"] * bool(moved)
+            hosts = sorted({_host(u) for urls in moved.values() for u in urls} - {""})
+            lines.append("开始前就开着的标签页里，" + "、".join(counts) + (f"（{'、'.join(hosts)}）" if hosts else ""))
+        personal = sorted({h for e in new.values() for h in map(_host, e["urls"]) if h and self._personal(h)})
+        if personal:
+            lines.append(f"这次运行开的标签页打开过 {'、'.join(personal)}：agent 打不开这类网站")
+        return lines

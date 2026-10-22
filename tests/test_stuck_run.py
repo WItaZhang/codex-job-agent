@@ -5,6 +5,7 @@ agent did not make are reported.
 All data is SYNTHETIC. The real process handling runs against stand-in `claude` scripts and sleeping processes; nothing
 here starts Chrome or Claude Code or reaches a website."""
 
+import dataclasses
 import json
 import os
 import subprocess
@@ -665,3 +666,241 @@ def test_a_row_of_this_server_whose_run_never_started_does_not_block_the_next_st
     fresh = box.prepare_apply_batch(DAY)  # the first step's jobs are pending again: a new batch can take them
     box.start_applying(fresh["batch_id"], fresh["summary"])
     assert box.store.applications()["j00"]["status"] == "waiting"
+
+
+# --- S18-S24: someone using the applying Chrome ---------------------------------------------------------------------
+
+import socketserver  # noqa: E402 - the fake CDP endpoint below is the only user
+
+BLOCKED = ["https://mail.google.com", "https://www.chase.com"]
+T1 = {"id": "T1", "type": "page", "url": "https://news.example.test/"}
+T2 = {"id": "T2", "type": "page", "url": "https://jobs.omega.test/apply"}
+
+
+def tab(tab_id, url, opener=None, kind="page"):
+    return {"id": tab_id, "type": kind, "url": url, "openerId": opener}
+
+
+def scripted(*lists):
+    """A stand-in for cdp_targets: one list per check (None: Chrome does not answer), the last one repeated."""
+    calls = iter(lists)
+    last = {"tabs": None}
+
+    def targets(_port):
+        try:
+            last["tabs"] = next(calls)
+        except StopIteration:
+            pass
+        if last["tabs"] is None:
+            raise watchdog.ChromeDown("connection refused")
+        return [dict(t) for t in last["tabs"]]
+
+    return targets
+
+
+def watched(*lists, events=(), pages=(), clock=None):
+    watch = watchdog.ChromeWatch(9222, BLOCKED, targets=scripted(*lists), **({"clock": clock} if clock else {}))
+    for _ in lists:
+        watch.check()
+    return watch.report(list(events), list(pages))
+
+
+def call(name, **data):
+    return {"name": f"mcp__playwright__{name}", "input": data}
+
+
+NEW, NAV = call("browser_tabs", action="new"), call("browser_navigate", url="https://jobs.acme.test/1")
+
+
+def test_a_tab_the_agent_did_not_open_is_reported_by_its_site():  # S18
+    job = tab("N1", "https://jobs.acme.test/1")
+    lines = watched(
+        [T1, T2],
+        [T1, T2, job, tab("U1", "chrome://newtab/")],
+        [T1, T2, job, tab("U1", "https://sports.example.test/scores")],
+        events=[NEW, NAV],
+    )
+    assert lines == ["运行中多了 1 个不是 agent 开的新标签页（sports.example.test）"]
+
+
+def test_the_job_tab_closed_by_someone_else_is_reported():  # S19
+    job = tab("N1", "https://jobs.acme.test/1")
+    assert watched([T1, T2], [T1, T2, job], [T1, T2], events=[NEW, NAV]) == [
+        "这次运行开的标签页有 1 个被关掉了，不是 agent 关的"
+    ]
+
+
+def test_chrome_going_away_is_reported_with_the_time():  # S20
+    times = iter([1000.0, 1001.0, 1002.0, 1003.0])
+    job = tab("N1", "https://jobs.acme.test/1")
+    lines = watched([T1, T2], [T1, T2, job], None, None, events=[NEW, NAV], clock=lambda: next(times))
+    clock = watchdog._clock(1002.0)
+    assert lines == [f"投递用的 Chrome 从 {clock} 起连不上了（被关掉、崩溃，或调试端口没有响应）"]
+
+
+def test_a_chrome_that_never_answered_is_not_reported():  # the agent's own result says so
+    assert watched(None, None, events=[NEW]) == []
+
+
+def test_tabs_open_before_the_run_that_changed_are_reported():  # S21
+    lines = watched(
+        [T1, T2],
+        [tab("T1", "https://sports.example.test/today"), tab("N1", "https://jobs.acme.test/1")],
+        events=[NEW, NAV],
+    )
+    assert lines == ["开始前就开着的标签页里，1 个被关掉、1 个换了地址（sports.example.test）"]
+
+
+def test_a_site_the_agent_cannot_open_seen_in_a_tab_of_the_run_is_reported():  # S22
+    job = tab("N1", "https://jobs.acme.test/1")
+    lines = watched([T1, T2], [T1, T2, job], [T1, T2, tab("N1", "https://mail.google.com/mail/u/0/")], events=[NEW])
+    assert lines == ["这次运行开的标签页打开过 mail.google.com：agent 打不开这类网站"]
+
+
+def test_popups_and_the_agent_s_own_tabs_are_not_reported():  # S23
+    job = tab("N1", "https://jobs.acme.test/1")
+    popup = tab("P1", "https://accounts.linkedin.test/oauth", opener="N1")
+    lines = watched(
+        [T1, T2],
+        [T1, T2, job],
+        [T1, T2, job, popup],
+        [T1, T2, job],  # the popup closed itself
+        [T1, T2],  # the agent closed its own tab at the end
+        events=[NEW, NAV, call("browser_tabs", action="close")],
+    )
+    assert lines == []
+
+
+class FakeCDP(socketserver.ThreadingTCPServer):
+    """A local stand-in for Chrome's DevTools endpoint: /json/version and the browser websocket, answering
+    Target.getTargets with the tabs in `tabs_file` (re-read on every request), in two fragments after an event."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def __init__(self, tabs_file):
+        self.tabs_file = tabs_file
+        super().__init__(("127.0.0.1", 0), FakeCDPHandler)
+
+
+class FakeCDPHandler(socketserver.StreamRequestHandler):
+    def handle(self):
+        request = self.rfile.readline().decode()
+        while self.rfile.readline() not in (b"\r\n", b""):
+            pass
+        port = self.server.server_address[1]
+        if request.startswith("GET /json/version"):
+            body = json.dumps({"webSocketDebuggerUrl": f"ws://127.0.0.1:{port}/devtools/browser/fake"}).encode()
+            self.wfile.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+            self.wfile.write(f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
+            return
+        self.wfile.write(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+        head = self.rfile.read(2)
+        length = head[1] & 0x7F
+        if length == 126:
+            length = int.from_bytes(self.rfile.read(2), "big")
+        mask = self.rfile.read(4)
+        asked = json.loads(bytes(b ^ mask[i % 4] for i, b in enumerate(self.rfile.read(length))))
+        tabs = json.loads(self.server.tabs_file.read_text(encoding="utf-8"))
+        infos = [
+            {
+                "targetId": t["id"],
+                "type": t["type"],
+                "url": t["url"],
+                **({"openerId": t["openerId"]} if t.get("openerId") else {}),
+            }
+            for t in tabs
+        ]
+        self.frame(json.dumps({"method": "Target.targetInfoChanged", "params": {}}).encode(), 0x1, True)
+        answer = json.dumps({"id": asked["id"], "result": {"targetInfos": infos}}).encode()
+        self.frame(answer[:10], 0x1, False)
+        self.frame(answer[10:], 0x0, True)
+
+    def frame(self, payload, opcode, fin):
+        size = len(payload)
+        head = bytes([(0x80 if fin else 0) | opcode])
+        head += bytes([size]) if size < 126 else bytes([126]) + size.to_bytes(2, "big")
+        self.wfile.write(head + payload)
+
+
+@pytest.fixture
+def cdp(tmp_path):
+    tabs_file = tmp_path / "tabs.json"
+    tabs_file.write_text(json.dumps([T1, T2]), encoding="utf-8")
+    server = FakeCDP(tabs_file)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield server
+    server.shutdown()
+    server.server_close()
+
+
+def test_the_cdp_client_lists_the_tabs_with_their_openers(cdp):
+    cdp.tabs_file.write_text(json.dumps([T1, tab("P1", "https://x.test/", opener="T1")]), encoding="utf-8")
+    port = cdp.server_address[1]
+    assert watchdog.cdp_targets(port) == [{**T1, "openerId": None}, tab("P1", "https://x.test/", opener="T1")]
+
+
+def test_no_chrome_on_the_port_is_chrome_down():
+    with pytest.raises(watchdog.ChromeDown):
+        watchdog.cdp_targets(9)
+
+
+FAKE_USER_OPENS_A_TAB = (
+    HEAD
+    + """
+sys.stdin.read()
+open(os.environ["FAKE_PIDS"], "w").write(json.dumps({"agent": os.getpid()}))
+say({"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "name": "mcp__playwright__browser_tabs", "input": {"action": "new"}}]}})
+act()
+time.sleep(0.4)
+tabs = json.load(open(os.environ["FAKE_TABS"]))
+tabs += [{"id": "N1", "type": "page", "url": "https://jobs.example.test/j00", "openerId": None},
+         {"id": "U1", "type": "page", "url": "https://news2.example.test/", "openerId": None}]
+open(os.environ["FAKE_TABS"], "w").write(json.dumps(tabs))
+time.sleep(0.6)
+say({"type": "result", "result": "RESULT:APPLIED"})
+"""
+)
+
+
+def test_an_agent_run_reports_a_tab_someone_else_opened(box, tmp_path, monkeypatch, cdp):  # S18, end to end
+    spec = one_job(box, tmp_path, monkeypatch, FAKE_USER_OPENS_A_TAB)
+    monkeypatch.setenv("FAKE_TABS", str(cdp.tabs_file))
+    outcome = apply_bridge.run_application(
+        spec, box.data_dir, quick(box.settings), box._applicant().profile, cdp.server_address[1]
+    )
+    assert outcome.status == "applied"
+    assert outcome.chrome == ["运行中多了 1 个不是 agent 开的新标签页（news2.example.test）"]
+
+
+def test_the_report_reaches_apply_status_and_the_job_notes(box):  # S18-S22, both paths
+    batch = batch_of(box)
+    seen = ["运行中多了 1 个不是 agent 开的新标签页（news2.example.test）"]
+
+    class Seen(FakeRunner):
+        def __call__(self, spec):
+            outcome = super().__call__(spec)
+            return dataclasses.replace(outcome, chrome=list(seen)) if spec.job_id in ("j01", "j05") else outcome
+
+    box.apply_runner = Seen()
+    box.start_applying(batch["batch_id"], batch["summary"])
+    status = box.apply_status()
+    rows = {row["job_id"]: row for row in status["jobs"]}
+    assert rows["j01"]["chrome_use"] == seen and rows["j00"]["chrome_use"] == []
+    assert status["chrome_warning"].startswith("可能有人在用投递用的 Chrome：第 2 个岗位运行时运行中多了 1 个")
+    assert "请不要用这个 Chrome" in status["chrome_warning"]
+    assert "可能有人在用投递用的 Chrome" in box.store.applications()["j01"]["note"]
+    box.start_applying(batch["batch_id"], status["next"]["summary"])
+    rows = {row["job_id"]: row for row in box.apply_status()["jobs"]}
+    assert rows["j05"]["chrome_use"] == seen
+    assert "可能有人在用投递用的 Chrome" in box.store.applications()["j05"]["note"]
+
+
+def test_starting_a_step_or_a_resume_reminds_the_user_to_leave_the_chrome_alone(box):  # S24
+    batch = batch_of(box)
+    box.apply_runner = FakeRunner({"j01": ("failed", "captcha", [])})
+    started = box.start_applying(batch["batch_id"], batch["summary"])
+    assert "请不要用投递用的 Chrome" in started["reminder"] and "停下" in started["reminder"]
+    plan = box.prepare_resume(["j01"])
+    assert "请不要用投递用的 Chrome" in box.resume_applying(plan["job_ids"], plan["summary"])["reminder"]

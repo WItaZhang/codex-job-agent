@@ -78,6 +78,7 @@ class _FormFilled:
     recording_id: str | None
     emails: tuple = ()  # the form-fill module never sends email
     tab: dict | None = None  # the job's tab, kept for a held job (spec section 10 item 97)
+    chrome: tuple[str, ...] = ()  # what changed in the applying Chrome that the agent did not do (item 114)
 
 
 def _tool(tier: str):
@@ -104,6 +105,11 @@ HELD_TODO = (
     "等你处理（{gate}）：请在投递用的 Chrome 里那个标签页里处理完，再说“好了”，系统会接着做（spec 4.10 第 10 条）。"
 )
 CLOSE_OLD_TAB = "原来等你处理的那个标签页可以关掉：填好的表在新开的标签页里。"
+# Said when a step or a resume starts (spec section 10 item 115).
+REMINDER = (
+    "这一步在跑时，请不要用投递用的 Chrome：不开新标签页、不关它的标签页、不在里面点。agent 和你共用它，用了会打乱"
+    "这一步。要用就先说“停下”。"
+)
 # A job a stopped tool server left half done (spec section 10 items 112, 113).
 INTERRUPTED_NOTE = "工具服务在这个岗位做到一半时停了，agent 可能已经交过：请先在投递用的 Chrome 里看它交上了没有"
 INTERRUPTED_PENDING = "工具服务在这个岗位做到一半时停了；它停在提交前、没有提交，已退回待投"
@@ -1370,7 +1376,7 @@ class Toolbox:
                             run["stopped"] = item["job_id"]
                     else:
                         outcome = self._masked(runner(spec), inputs.redactor)
-                        note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
+                        note = self._note(outcome)
                     item["outcome"], item["finished"] = outcome, time.time()
                     if self._stopped(outcome):  # back where it was, pending: no result, no attempt (item 109)
                         item["state"] = "stopped"
@@ -1396,7 +1402,13 @@ class Toolbox:
         else:
             work()
             self._sync_apply_results()
-        result = {"batch_id": batch_id, "phase": phase, "status": run["status"], "jobs": len(specs)}
+        result = {
+            "batch_id": batch_id,
+            "phase": phase,
+            "status": run["status"],
+            "jobs": len(specs),
+            "reminder": REMINDER,
+        }
         if filled:
             result.update({"form_fill_run": ctx.run_id, "personal_tabs": personal})
             if personal:
@@ -1460,7 +1472,15 @@ class Toolbox:
         said = [outcome.reason] if code != outcome.reason else []
         notes = [redactor.mask(text) for text in [*said, *outcome.notes]]
         tab = {**outcome.tab, "url": redactor.mask(outcome.tab.get("url") or "")} if outcome.tab else None
-        return dataclasses.replace(outcome, reason=code, notes=notes, tab=tab)  # a held tab's address is kept
+        chrome = [redactor.mask(line) for line in outcome.chrome]
+        return dataclasses.replace(outcome, reason=code, notes=notes, tab=tab, chrome=chrome)  # a held tab's kept
+
+    @staticmethod
+    def _note(outcome: apply_bridge.ApplyOutcome) -> str | None:
+        """An auto-submitted job's note in the apply list: its result code, the agent's notes, and what changed in
+        the applying Chrome that it did not do (spec section 10 item 114)."""
+        used = [f"{watchdog.CHROME_USE}：{line}" for line in outcome.chrome]
+        return "; ".join(x for x in [outcome.reason, *outcome.notes, *used] if x) or None
 
     def _fill_one(self, entry, ctx) -> "_FormFilled":
         """One job through the form-fill module, then its report, as the apply list's status (spec section 10
@@ -1508,6 +1528,7 @@ class Toolbox:
             report=str(path) if path else None,
             recording_id=outcome.recording_id or report.recording_id,  # the report's copy went through the mask
             tab={"id": outcome.tab_id, "url": outcome.tab_url} if outcome.tab_id else None,
+            chrome=tuple(outcome.chrome),
         )
 
     def _sync_apply_results(self) -> None:
@@ -1764,6 +1785,7 @@ class Toolbox:
                 "result": outcome.status if outcome else None,
                 "reason": outcome.reason if outcome else None,
                 "notes": list(outcome.notes) if outcome else [],
+                "chrome_use": list(getattr(outcome, "chrome", ()) or ()),
                 **self._activity(item),
             }
             if item["via"] == "form_fill":
@@ -1812,6 +1834,11 @@ class Toolbox:
         }
         if other is not None:
             status["other_session"] = self._other_view(other)
+        used = [f"第 {row['n']} 个岗位运行时{line}" for row in jobs for line in row["chrome_use"]]
+        if used:
+            status["chrome_warning"] = (
+                f"{watchdog.CHROME_USE}：{'；'.join(used)}。一步在跑时请不要用这个 Chrome；要用就先说“停下”。"
+            )
         stopped = (data.get("void_reason") or {}).get("job_id")
         if run["phase"] == "resume" and run.get("stopped"):
             status["notice"] = (
@@ -2097,7 +2124,13 @@ class Toolbox:
         else:
             work()
             self._sync_apply_results()
-        return {"phase": "resume", "status": run["status"], "jobs": len(items), "form_fill_run": run["run_id"]}
+        return {
+            "phase": "resume",
+            "status": run["status"],
+            "jobs": len(items),
+            "form_fill_run": run["run_id"],
+            "reminder": REMINDER,
+        }
 
     @staticmethod
     def _own_submission(outcome):
@@ -2143,7 +2176,7 @@ class Toolbox:
                 resume_tab=str(target["id"]) if target else None,
             )
             outcome = self._own_submission(self._masked(runner(spec), redactor))
-            note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
+            note = self._note(outcome)
         else:
             outcome = self._fill_one(entries[job_id], ctx)
             if self._stopped(outcome):  # the user stopped the resume: still held, no longer being resumed (item 109)

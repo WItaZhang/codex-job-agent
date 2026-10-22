@@ -73,6 +73,7 @@ class ApplyOutcome:
     log: str | None = None
     tab: dict | None = None  # a held job's tab: its CDP id and address (spec section 10 item 97)
     last_url: str | None = None  # the last address the agent opened, to tell its tab apart
+    chrome: list[str] = field(default_factory=list)  # what changed in the Chrome the agent did not do (item 114)
 
 
 # --- setup ------------------------------------------------------------------------------------------------
@@ -628,6 +629,8 @@ def run_application(
     env.pop("CAPSOLVER_API_KEY", None)  # nothing in a run may solve a CAPTCHA (spec section 10 item 98)
     # The working directory holds only the files to upload (ApplyPilot copies them to apply-workers/current),
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
+    chrome = watchdog.ChromeWatch(port, settings.apply.blocked_origins)
+    chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
     proc = subprocess.Popen(
         claude_command(
             settings,
@@ -647,7 +650,7 @@ def run_application(
     limits = settings.apply.watchdog
     tree = watchdog.Tree(proc.pid)
     stop = watchdog.LIVE.begin(spec.job_id, spec.mode)
-    texts, events = [], []
+    texts, events, pages = [], [], []
     try:
         with log_path.open("w", encoding="utf-8") as log:
 
@@ -655,7 +658,7 @@ def run_application(
                 watchdog.LIVE.touch()
                 log.write(mask(line) if mask else line)
                 log.flush()  # the log's time is the agent's last output (spec section 10 item 107)
-                _read_line(line, texts, events)
+                _read_line(line, texts, events, pages)
 
             why = watchdog.follow(
                 proc,
@@ -666,8 +669,9 @@ def run_application(
                 drain=limits.drain_seconds,
                 interval=limits.interval_seconds,
                 stop=stop,
-                ticks=(tree.scan,),
+                ticks=(tree.scan, chrome.check),
             )
+        chrome.check()  # how the agent left the tabs
     finally:  # whatever ended the run: the agent and everything it started (spec section 10 item 107)
         tree.kill(alive=proc.poll() is None)
         try:
@@ -677,10 +681,11 @@ def run_application(
         proc.stdout.close()
         watchdog.LIVE.end(stop)
     seen = audit(events, spec.url)
+    used = chrome.report(events, pages)
     if why == "stopped":  # the user stopped the step (item 109): nothing was submitted, the job goes back
         said = ["你停下了这一步：这个岗位没有做完，网站上没有提交任何东西"]
         return ApplyOutcome(
-            "pending", "stopped", said, seen["other_sites"], seen["emails"], str(log_path), last_url=last_url(events)
+            "pending", "stopped", said, seen["other_sites"], seen["emails"], str(log_path), None, last_url(events), used
         )
     output = "\n".join(texts)
     result = f"failed:{why}" if why else parse_result(output)
@@ -692,12 +697,13 @@ def run_application(
     if why == "stalled":
         said.append(f"投递 agent {limits.stall_seconds:g} 秒没有任何输出，算卡住，已结束它")
     return ApplyOutcome(
-        status, reason, said, seen["other_sites"], seen["emails"], str(log_path), last_url=last_url(events)
+        status, reason, said, seen["other_sites"], seen["emails"], str(log_path), None, last_url(events), used
     )
 
 
-def _read_line(line: str, texts: list, events: list) -> None:
-    """One line of the agent's stream-json: its text and final result go to `texts`, its tool calls to `events`."""
+def _read_line(line: str, texts: list, events: list, pages: list) -> None:
+    """One line of the agent's stream-json: its text and final result go to `texts`, its tool calls to `events`, the
+    Page URLs its browser answered with to `pages`."""
     try:
         message = json.loads(line)
     except json.JSONDecodeError:
@@ -713,6 +719,14 @@ def _read_line(line: str, texts: list, events: list) -> None:
                 events.append({"name": block.get("name", ""), "input": block.get("input", {})})
     elif message.get("type") == "result":
         texts.append(message.get("result", "") or "")
+    elif message.get("type") == "user":
+        for block in (message.get("message") or {}).get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                content = block.get("content")
+                items = content if isinstance(content, list) else [{"text": content}]
+                for item in items:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        pages.extend(watchdog.PAGE_URL.findall(item["text"]))
 
 
 class ChromeRunner:
