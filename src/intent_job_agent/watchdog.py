@@ -511,9 +511,11 @@ class ChromeWatch:
     Chrome stopped answering. `report` tells what changed that the agent's own tool calls do not explain. `own`: tabs
     open before the run that the agent works in (a resumed job's held tab, spec section 10 item 100)."""
 
-    def __init__(self, port: int, blocked_origins, targets=cdp_targets, clock=time.time, own=()):
+    def __init__(self, port: int, blocked_origins, targets=cdp_targets, clock=time.time, own=(), down_after: int = 3):
         self.port, self._targets, self._clock = port, targets, clock
         self.own = {tab_id for tab_id in own if tab_id}
+        self.down_after = down_after  # misses in a row before Chrome counts as gone: one slow answer is not (review #8)
+        self.misses, self.first_miss = 0, None
         self.blocked = {(urlsplit(o).hostname or "").lower().removeprefix("www.") for o in blocked_origins} - {""}
         self.before: dict[str, str] | None = None  # the tabs open before the agent started, and their addresses
         self.tabs: dict[str, dict] = {}  # every tab seen: its opener and the addresses it showed
@@ -526,12 +528,16 @@ class ChromeWatch:
         try:
             listed = self._targets(self.port)
         except ChromeDown:
-            if self.before is not None and self.down is None:
-                self.down = now
+            if self.before is not None:
+                self.misses += 1
+                self.first_miss = self.first_miss if self.misses > 1 else now
+                if self.misses >= self.down_after and self.down is None:
+                    self.down = self.first_miss
             return
         except Exception:  # noqa: BLE001 - a list that could not be read says nothing either way
             return
         pages = [t for t in listed if t.get("type") == "page" and not str(t.get("url", "")).startswith(IGNORED)]
+        self.misses = 0
         if self.down is not None and self.up is None:
             self.up = now
         if self.before is None:
@@ -553,10 +559,10 @@ class ChromeWatch:
         agent closed; tabs open before the run closed or moved; a tab of the run on a site the agent cannot open."""
         if self.before is None:
             return []
-        if self.down is not None:  # a Chrome that went away has other tabs when it is back: nothing else to compare
-            line = f"投递用的 Chrome 从 {_clock(self.down)} 起连不上了（被关掉、崩溃，或调试端口没有响应）"
-            return [line + (f"，{_clock(self.up)} 又连上了" if self.up is not None else "")]
         lines = []
+        if self.down is not None:  # then the tabs are compared all the same (review #8)
+            line = f"投递用的 Chrome 从 {_clock(self.down)} 起连不上了（被关掉、崩溃，或调试端口没有响应）"
+            lines.append(line + (f"，{_clock(self.up)} 又连上了" if self.up is not None else ""))
         actions = [_tab_action(event) for event in events]
         visited = {_host((e.get("input") or {}).get("url", "")) for e in events} | {_host(url) for url in pages}
         new = {tab_id: entry for tab_id, entry in self.tabs.items() if tab_id not in self.before}

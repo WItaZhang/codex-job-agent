@@ -143,7 +143,7 @@
 
 ### 1.8 配置、工具清单、说明
 
-- 配置 `apply.watchdog`：`stall_seconds: 300`、`drain_seconds: 10`、`read_seconds: 120`、`interval_seconds: 3`（`config.py` 加 `ApplyWatchdog`）。
+- 配置 `apply.watchdog`：`stall_seconds: 300`、`drain_seconds: 10`、`read_seconds: 120`、`interval_seconds: 3`、`down_after: 3`（`config.py` 加 `ApplyWatchdog`）。
 - `stop_applying` 是准备级：不进 `.claude/settings.json` 的 ask、`.codex/config.toml`，也不在定时任务的工具里。
 - `start_applying`、`resume_applying` 的返回加 `reminder`。
 - `mcp_server.py` 的说明（Applying 一段）、`/apply` skill（开始前的提醒、停下、时间、`chrome_warning`、重启后的 `next` 和 `interrupted`）、`README.md` 的风险一节。

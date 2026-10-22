@@ -758,12 +758,33 @@ def test_the_job_tab_closed_by_someone_else_is_reported():  # S19
     ]
 
 
-def test_chrome_going_away_is_reported_with_the_time():  # S20
-    times = iter([1000.0, 1001.0, 1002.0, 1003.0])
+def test_chrome_going_away_is_reported_with_the_time():  # S20; three misses in a row (review #8)
+    times = iter([1000.0, 1001.0, 1002.0, 1003.0, 1004.0])
     job = tab("N1", "https://jobs.acme.test/1")
-    lines = watched([T1, T2], [T1, T2, job], None, None, events=[NEW, NAV], clock=lambda: next(times))
+    lines = watched([T1, T2], [T1, T2, job], None, None, None, events=[NEW, NAV], clock=lambda: next(times))
     clock = watchdog._clock(1002.0)
     assert lines == [f"投递用的 Chrome 从 {clock} 起连不上了（被关掉、崩溃，或调试端口没有响应）"]
+
+
+def test_one_slow_answer_is_not_chrome_going_away_and_hides_nothing():  # review #8
+    job = tab("N1", "https://jobs.acme.test/1")
+    sports = tab("U1", "https://sports.example.test/scores")
+    lines = watched([T1, T2], None, [T1, T2, job, sports], events=[NEW, NAV])
+    assert lines == ["运行中多了 1 个不是 agent 开的新标签页（sports.example.test）"]
+
+
+def test_after_chrome_answers_again_the_tabs_are_still_compared():  # review #8
+    times = iter([1000.0, 1001.0, 1002.0, 1003.0, 1004.0, 1005.0])
+    job = tab("N1", "https://jobs.acme.test/1")
+    sports = tab("U1", "https://sports.example.test/scores")
+    lines = watched(
+        [T1, T2], None, None, None, [T1, T2, job], [T1, T2, job, sports], events=[NEW, NAV], clock=lambda: next(times)
+    )
+    down, back = watchdog._clock(1001.0), watchdog._clock(1004.0)
+    assert lines == [
+        f"投递用的 Chrome 从 {down} 起连不上了（被关掉、崩溃，或调试端口没有响应），{back} 又连上了",
+        "运行中多了 1 个不是 agent 开的新标签页（sports.example.test）",
+    ]
 
 
 def test_a_chrome_that_never_answered_is_not_reported():  # the agent's own result says so

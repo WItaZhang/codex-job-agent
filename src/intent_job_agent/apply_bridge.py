@@ -631,7 +631,12 @@ def run_application(
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
     stop = watchdog.LIVE.begin(spec.job_id, spec.mode)  # from here a stop is heard, before the agent starts
     try:
-        chrome = watchdog.ChromeWatch(port, settings.apply.blocked_origins, own=(spec.resume_tab,))
+        chrome = watchdog.ChromeWatch(
+            port,
+            settings.apply.blocked_origins,
+            own=(spec.resume_tab,),
+            down_after=settings.apply.watchdog.down_after,
+        )
         chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
         proc = None
         if watchdog.LIVE.launch(stop):  # a stop asked before this point keeps the agent from starting (review #5)
