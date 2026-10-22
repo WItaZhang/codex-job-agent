@@ -502,10 +502,13 @@ class Store:
         row = self.db.execute("SELECT * FROM apply_running WHERE id = 1").fetchone()
         return dict(row) if row else None
 
-    def activity_job(self, job_id: str | None, mode: str | None, via: str | None) -> None:
-        """The job the running step is on (written before it reaches its site), or none."""
+    def activity_job(self, owner: tuple[int, str], job_id: str | None, mode: str | None, via: str | None) -> None:
+        """The job `owner`'s running step is on (written before it reaches its site), or none."""
         with self.db:
-            self.db.execute("UPDATE apply_running SET job_id = ?, mode = ?, via = ? WHERE id = 1", (job_id, mode, via))
+            self.db.execute(
+                "UPDATE apply_running SET job_id = ?, mode = ?, via = ? WHERE owner_pid = ? AND owner_started = ?",
+                (job_id, mode, via, owner[0], owner[1]),
+            )
 
     def end_activity(self, owner: tuple[int, str] | None = None) -> None:
         """The step or resume is closed (of `owner` only, when given)."""

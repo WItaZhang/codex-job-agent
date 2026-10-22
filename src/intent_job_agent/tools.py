@@ -1366,7 +1366,7 @@ class Toolbox:
                         item["state"] = "stopped"
                         continue
                     item["state"], item["started"] = "running", time.time()
-                    writer.activity_job(item["job_id"], item["mode"], item["via"])  # before it reaches the site
+                    writer.activity_job(self._owner(), item["job_id"], item["mode"], item["via"])  # before the site
                     attempt = {"batch_id": batch_id, "phase": phase, "mode": item["mode"], "via": item["via"]}
                     if item["via"] == "form_fill":
                         outcome = self._fill_one(entries[item["job_id"]], ctx)
@@ -1694,7 +1694,7 @@ class Toolbox:
             run["status"], run["error"] = "failed", run["error"] or "the apply thread stopped unexpectedly"
         watchdog.LIVE.disarm()
         try:
-            writer.activity_job(None, None, None)
+            writer.activity_job(self._owner(), None, None, None)
         finally:
             writer.db.close()
             self._notify(run)
@@ -1756,8 +1756,7 @@ class Toolbox:
         is the one-line verdict) and its report; the step has the form-fill run's summary.md. Includes a checklist
         of other sites opened and emails sent, and, once the step is done, the next step's summary for
         start_applying."""
-        self._sync_apply_results()
-        other = self._recover()
+        other = self._recover()  # closes this server's ended run first (_sync_apply_results)
         run = self._apply_run
         if run is None:
             status = {"status": "idle", "held": self._held_view(), "next": None}

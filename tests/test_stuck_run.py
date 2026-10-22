@@ -496,7 +496,7 @@ def left_running(box, batch_id, phase, owner, job=None):
     data["phases"][phase] = "running"
     box.store.begin_activity(owner, "step", batch=(batch_id, phase, data.pop("day"), data))
     if job:
-        box.store.activity_job(*job)
+        box.store.activity_job(owner, *job)
 
 
 def result(box, job_id, status, batch_id, phase, mode="review", via="form_fill", reason=None):
@@ -904,3 +904,10 @@ def test_starting_a_step_or_a_resume_reminds_the_user_to_leave_the_chrome_alone(
     assert "请不要用投递用的 Chrome" in started["reminder"] and "停下" in started["reminder"]
     plan = box.prepare_resume(["j01"])
     assert "请不要用投递用的 Chrome" in box.resume_applying(plan["job_ids"], plan["summary"])["reminder"]
+
+
+def test_stopping_is_a_prepare_tool_that_no_scheduled_run_gets():  # spec 5.1, section 10 item 109
+    from intent_job_agent.tools import COMMIT_TOOLS, SCHEDULED_TOOLS, TOOL_TIERS
+
+    assert TOOL_TIERS["stop_applying"] == "prepare"
+    assert "stop_applying" not in COMMIT_TOOLS | SCHEDULED_TOOLS
