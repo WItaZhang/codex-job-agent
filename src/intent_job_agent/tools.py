@@ -1871,6 +1871,14 @@ class Toolbox:
             self._sync_apply_results()
         return {"phase": "resume", "status": run["status"], "jobs": len(items), "form_fill_run": run["run_id"]}
 
+    @staticmethod
+    def _own_submission(outcome):
+        """A resumed job the agent finds already submitted: the user finished it while it was held, so it is the
+        user's own submission (decision 23 G-e), not an earlier application (spec section 10 item 100)."""
+        if outcome.status == "applied" and outcome.reason == "already_applied":
+            return dataclasses.replace(outcome, reason="submitted_by_user")
+        return outcome
+
     def _resume_one(self, item, writer, redactor, *, browser, runner, sheet, entries, ctx):
         """One held job resumed (spec section 10 item 100), its result recorded. None: its address is now open in
         several tabs, so it was not touched and stays held."""
@@ -1906,10 +1914,10 @@ class Toolbox:
                 resume_url=target.get("url") if target else None,
                 resume_tab=str(target["id"]) if target else None,
             )
-            outcome = self._masked(runner(spec), redactor)
+            outcome = self._own_submission(self._masked(runner(spec), redactor))
             note = "; ".join(x for x in [outcome.reason, *outcome.notes] if x) or None
         else:
-            outcome = self._fill_one(entries[job_id], ctx)
+            outcome = self._own_submission(self._fill_one(entries[job_id], ctx))
             outcome = dataclasses.replace(outcome, todo=(*outcome.todo, CLOSE_OLD_TAB))
             note = apply_fill.note(outcome.reason, outcome.conclusion, ctx.run_id, outcome.notes)
             attempt["run_id"] = ctx.run_id

@@ -890,3 +890,29 @@ def test_a_held_form_says_to_say_done_not_to_run_it_again(box):  # review 3: spe
         assert todo and gate in todo[0] and "好了" in todo[0], job_id
         assert not any("重跑" in item for item in todo), job_id
     assert any("重跑" in item for item in rows["j03"]["todo"]) or rows["j03"]["result"] == "failed"
+
+
+def test_a_resumed_job_the_agent_finds_already_submitted_counts_as_the_users(box):  # review 4: decision 23 G-e
+    held_three(box)
+    said = ["The page says the application was submitted on 2026-10-21"]
+    box.apply_runner.outcomes = {
+        "j06": ("applied", "already_applied", said),
+        "j01": ("applied", "already_applied", said),
+    }
+    resumed(box, ["j06", "j01"])  # the glance at the tab missed it (wording not recognised): the agents saw it
+    rows = box.store.apply_attempts()[-2:]
+    assert [(r["job_id"], r["status"], r["reason"]) for r in rows] == [
+        ("j06", "applied", "submitted_by_user"),
+        ("j01", "applied", "submitted_by_user"),
+    ]
+    assert box.store.applications()["j06"]["note"].startswith("submitted_by_user")
+    assert box.apply_stats()["weeks"][0]["submitted"] == 2
+
+
+def test_already_applied_outside_a_resume_is_still_not_a_new_submission(box):  # spec section 10 item 63
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    box.apply_runner = GateRunner({"j06": ("applied", "already_applied", [])})
+    both_steps(box)
+    assert box.store.apply_attempts()[-2]["reason"] == "already_applied"
+    assert box.apply_stats()["weeks"][0]["not_counted"]["already_applied"] == 1
