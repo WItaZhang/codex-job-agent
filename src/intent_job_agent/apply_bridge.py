@@ -629,27 +629,38 @@ def run_application(
     env.pop("CAPSOLVER_API_KEY", None)  # nothing in a run may solve a CAPTCHA (spec section 10 item 98)
     # The working directory holds only the files to upload (ApplyPilot copies them to apply-workers/current),
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
-    chrome = watchdog.ChromeWatch(port, settings.apply.blocked_origins, own=(spec.resume_tab,))
-    chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
-    proc = subprocess.Popen(
-        claude_command(
-            settings,
-            mcp_path,
-            read_dirs,
-            denied=[Path(data_dir), profile],
-            extra_disallowed=extra_disallowed,
-            extra_allowed=extra_allowed,
-        ),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        env=env,
-        cwd=str(config.APPLY_WORKER_DIR),
-        start_new_session=True,
-    )
+    stop = watchdog.LIVE.begin(spec.job_id, spec.mode)  # from here a stop is heard, before the agent starts
+    try:
+        chrome = watchdog.ChromeWatch(port, settings.apply.blocked_origins, own=(spec.resume_tab,))
+        chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
+        proc = None
+        if watchdog.LIVE.launch(stop):  # a stop asked before this point keeps the agent from starting (review #5)
+            proc = subprocess.Popen(
+                claude_command(
+                    settings,
+                    mcp_path,
+                    read_dirs,
+                    denied=[Path(data_dir), profile],
+                    extra_disallowed=extra_disallowed,
+                    extra_allowed=extra_allowed,
+                ),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                cwd=str(config.APPLY_WORKER_DIR),
+                start_new_session=True,
+            )
+    except BaseException:
+        watchdog.LIVE.end(stop)
+        raise
+    if proc is None:
+        watchdog.LIVE.end(stop)
+        return ApplyOutcome(
+            "pending", "stopped", ["你停下了这一步：这个岗位的 agent 还没起来，就不起了，网站上什么都没发生"]
+        )
     limits = settings.apply.watchdog
     tree = watchdog.Tree(proc.pid)
-    stop = watchdog.LIVE.begin(spec.job_id, spec.mode)
     texts, events, pages = [], [], []
     try:
         with log_path.open("w", encoding="utf-8") as log:

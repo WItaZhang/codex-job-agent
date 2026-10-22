@@ -199,53 +199,65 @@ class Tree:
 
 
 class Live:
-    """The agent run in progress in this process: which job, its mode, when it started and last wrote anything,
-    whether it still runs, and a stop signal. The last run's job and end time stay until the next one begins. A stop
-    asked for a job whose agent has not started yet is kept, so the agent ends as soon as it starts."""
+    """The agent run in progress in this process: which job, its mode, when it started and last wrote anything, its
+    state ("starting": set up, its agent not started yet; "alive"; "ended") and a stop signal. The last run's job and
+    end time stay until the next one begins. A stop asked for a job whose agent has not been set up yet is kept for
+    it (`begin`)."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self._run: dict | None = None
-        self._armed: tuple[str, tuple] | None = None  # (job id, modes) of a stop asked before its agent started
+        self._armed: str | None = None  # the job a stop was asked for before its agent was set up
 
     def begin(self, job_id: str, mode: str) -> threading.Event:
+        """A job's agent is being set up, not started yet; its stop signal is already set when a stop was asked."""
         stop = threading.Event()
         now = time.time()
         with self._lock:
-            if self._armed is not None and self._armed[0] == job_id:
-                if mode in self._armed[1]:
-                    stop.set()
+            if self._armed == job_id:
+                stop.set()
                 self._armed = None
-            self._run = {"job_id": job_id, "mode": mode, "started": now, "last": now, "alive": True, "stop": stop}
+            self._run = {"job_id": job_id, "mode": mode, "started": now, "last": now, "state": "starting", "stop": stop}
         return stop
+
+    def launch(self, stop: threading.Event) -> bool:
+        """The agent is about to start. False when a stop came first: then it never starts, in either mode (review
+        #5); from here on an auto-submitting agent is left to finish (spec section 10 item 109)."""
+        with self._lock:
+            run = self._run
+            if run is None or run["stop"] is not stop or stop.is_set():
+                return False
+            run.update(state="alive", last=time.time())
+            return True
 
     def touch(self) -> None:
         with self._lock:
-            if self._run is not None and self._run["alive"]:
+            if self._run is not None and self._run["state"] == "alive":
                 self._run["last"] = time.time()
 
     def end(self, stop: threading.Event) -> None:
         with self._lock:
             if self._run is not None and self._run["stop"] is stop:
-                self._run.update(alive=False, last=time.time())
+                self._run.update(state="ended", last=time.time())
 
     def view(self) -> dict | None:
         with self._lock:
-            return {k: v for k, v in self._run.items() if k != "stop"} if self._run else None
+            if self._run is None:
+                return None
+            return {**{k: v for k, v in self._run.items() if k != "stop"}, "alive": self._run["state"] == "alive"}
 
-    def stop(self, modes, job_id: str | None = None) -> str | None:
-        """Ask the running agent (of `job_id`, when given) to stop when its mode is one of `modes`; returns its job id.
-        When no agent of `job_id` runs yet, the stop waits for it (`begin`) and None is returned."""
+    def stop(self, job_id: str, modes=("stop",)) -> str:
+        """Stop `job_id`'s agent. "running": it runs in a mode not in `modes` (auto-submitting) and is left to finish;
+        "stopped": it ran and is told to stop; "armed": it has not started, and now never will."""
         with self._lock:
             run = self._run
-            if run is not None and run["alive"] and job_id in (None, run["job_id"]):
-                if run["mode"] not in modes:
-                    return None
+            if run is not None and run["job_id"] == job_id and run["state"] in ("starting", "alive"):
+                if run["state"] == "alive" and run["mode"] not in modes:
+                    return "running"
                 run["stop"].set()
-                return run["job_id"]
-            if job_id is not None:
-                self._armed = (job_id, tuple(modes))
-            return None
+                return "stopped" if run["state"] == "alive" else "armed"
+            self._armed = job_id
+            return "armed"
 
     def disarm(self) -> None:
         """Forget a stop still waiting for its agent (the step it was asked in has ended)."""

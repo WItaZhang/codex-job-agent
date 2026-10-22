@@ -1787,22 +1787,22 @@ class Toolbox:
         if current is None:
             return {"stopped": True, "current": None, "message": "这一步停下了：没开始的岗位都不做了。"}
         name = f"第 {current['n']} 个（{current['company'] or current['title']}）"
-        ended = False
-        if current["via"] != "form_fill":
-            minutes = round(self.settings.apply.job_timeout_seconds / 60)
-            message = f"{name}正在自动提交，等它做完再停（最多 {minutes} 分钟），免得打断提交；没开始的都不做了。"
+        live = watchdog.LIVE.view()
+        mine = live is not None and live["job_id"] == current["job_id"] and live["started"] >= current["started"]
+        if mine and live["state"] == "ended":
+            ended, message = True, f"{name}的 agent 已经结束，收完尾就停；没开始的都不做了。"
         else:
-            live = watchdog.LIVE.view()
-            mine = live is not None and live["job_id"] == current["job_id"] and live["started"] >= current["started"]
-            if mine and not live["alive"]:
-                message = f"{name}的填表 agent 已经结束，正在读回它的标签页，读完就停；没开始的都不做了。"
+            # A stop-before-submit agent is ended now; an auto-submitting one that already runs finishes; one that
+            # has not started never starts (review #5).
+            result = watchdog.LIVE.stop(current["job_id"])
+            ended = result != "running"
+            if result == "running":
+                minutes = round(self.settings.apply.job_timeout_seconds / 60)
+                message = f"{name}正在自动提交，等它做完再停（最多 {minutes} 分钟），免得打断提交；没开始的都不做了。"
+            elif result == "stopped":
+                message = f"{name}停在提交前：已经结束它的填表 agent，它回到原来的状态；没开始的都不做了。"
             else:
-                ended = watchdog.LIVE.stop(("stop",), job_id=current["job_id"]) == current["job_id"]
-                message = (
-                    f"{name}停在提交前：已经结束它的填表 agent，它回到原来的状态；没开始的都不做了。"
-                    if ended
-                    else f"{name}的填表 agent 还没起来，一起来就结束它；没开始的都不做了。"
-                )
+                message = f"{name}的 agent 还没起来，不会再起，它回到原来的状态；没开始的都不做了。"
         job = {key: current[key] for key in ("n", "job_id", "company", "title")}
         return {"stopped": True, "current": {**job, "ended_now": ended}, "message": message}
 
@@ -2153,6 +2153,7 @@ class Toolbox:
         }
         self._apply_run = run
         work_on = {"browser": browser, "runner": runner, "sheet": sheet, "entries": entries, "ctx": ctx}
+        work_on["stopping"] = lambda: bool(run["stop"])
 
         def work():
             writer = None
@@ -2200,7 +2201,7 @@ class Toolbox:
             return dataclasses.replace(outcome, reason="submitted_by_user")
         return outcome
 
-    def _resume_one(self, item, writer, redactor, *, browser, runner, sheet, entries, ctx):
+    def _resume_one(self, item, writer, redactor, *, browser, runner, sheet, entries, ctx, stopping):
         """One held job resumed (spec section 10 item 100), its result recorded. None: its address is now open in
         several tabs, so it was not touched and stays held."""
         job_id = item["job_id"]
@@ -2220,6 +2221,9 @@ class Toolbox:
                 state = browser.tab_state(target)
             except Exception:  # noqa: BLE001 - the glance failed: the agent still checks for a submission first
                 state = None
+        if stopping():  # the user stopped the resume while the tab was looked at: no agent starts (review #5)
+            writer.set_resuming([job_id], False)
+            return apply_bridge.ApplyOutcome("pending", "stopped", ["你停下了这一步：这个岗位没有接着做，仍等你处理"])
         if state is not None and state.received:  # the user submitted it in that tab (decision 23, G-e)
             said = f"原标签页写着「{redactor.mask(state.received)}」"
             outcome = apply_bridge.ApplyOutcome("applied", "submitted_by_user", [said])
@@ -2235,7 +2239,11 @@ class Toolbox:
                 resume_url=target.get("url") if target else None,
                 resume_tab=str(target["id"]) if target else None,
             )
-            outcome = self._own_submission(self._masked(runner(spec), redactor))
+            outcome = self._masked(runner(spec), redactor)
+            if self._stopped(outcome):  # stopped before its agent started: still held, not being resumed (review #5)
+                writer.set_resuming([job_id], False)
+                return outcome
+            outcome = self._own_submission(outcome)
             note = self._note(outcome)
         else:
             outcome = self._fill_one(entries[job_id], ctx)

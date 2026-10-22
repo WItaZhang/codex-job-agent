@@ -211,8 +211,8 @@ def test_a_live_run_shows_its_activity_and_a_stop_ends_a_stop_before_submit_agen
     assert "step 3" in log.read_text(encoding="utf-8")  # each line is written out as it comes
     live = watchdog.LIVE.view()
     assert live["job_id"] == spec.job_id and live["alive"] and time.time() - live["last"] < 1
-    assert watchdog.LIVE.stop(("submit",)) is None  # an auto-submitting agent is never stopped mid-way
-    assert watchdog.LIVE.stop(("stop",)) == spec.job_id
+    assert watchdog.LIVE.stop(spec.job_id, modes=()) == "running"  # a running agent outside `modes` goes on
+    assert watchdog.LIVE.stop(spec.job_id) == "stopped"
     thread.join(5)
     outcome, took = result["o"]
     assert (outcome.status, outcome.reason) == ("pending", "stopped") and took < 8
@@ -358,6 +358,9 @@ class Blocking(FakeRunner):
             return super().__call__(spec)
         self.calls.append(spec)
         stop = watchdog.LIVE.begin(spec.job_id, spec.mode)
+        if not watchdog.LIVE.launch(stop):  # as run_application: a stop asked before the start keeps it from starting
+            watchdog.LIVE.end(stop)
+            return apply_bridge.ApplyOutcome("pending", "stopped", ["你停下了这一步"])
         self.started.set()
         try:
             while not (stop.is_set() or self.release.is_set()):
@@ -470,15 +473,24 @@ def test_stopping_when_nothing_runs_changes_nothing(box):  # S10
     assert box.stop_applying() == {"stopped": False, "message": "现在没有在跑的一步"}
 
 
-def test_a_stop_asked_just_before_the_agent_starts_ends_it_at_once():
+def test_a_stop_asked_before_an_agent_starts_keeps_it_from_starting():  # review #5
     live = watchdog.Live()
-    assert live.stop(("stop",), job_id="j02") is None  # nothing running yet: kept for j02
+    assert live.stop("j02") == "armed"  # nothing of j02 yet: kept for it
     first = live.begin("j01", "stop")
-    assert not first.is_set()
+    assert not first.is_set() and live.launch(first)
     live.end(first)
-    assert live.begin("j02", "stop").is_set()
+    second = live.begin("j02", "submit")
+    assert second.is_set() and live.launch(second) is False  # an auto-submitting one too: it never starts
+    live.end(second)
+    third = live.begin("j03", "submit")  # set up, not started yet
+    assert live.stop("j03") == "armed" and live.launch(third) is False
+    live.end(third)
+    fourth = live.begin("j04", "submit")
+    assert live.launch(fourth) and live.stop("j04") == "running"  # started: it finishes (item 109)
+    live.end(fourth)
+    live.stop("j05")
     live.disarm()
-    assert not live.begin("j02", "stop").is_set()
+    assert not live.begin("j05", "stop").is_set()
 
 
 # --- S12-S17, S25: after a tool server stopped, and other sessions ------------------------------------------------
@@ -1103,3 +1115,92 @@ def test_a_step_whose_thread_cannot_open_the_database_ends_failed(box, monkeypat
     fresh = box.prepare_apply_batch(DAY)
     box.start_applying(fresh["batch_id"], fresh["summary"])
     assert box.store.applications()["j00"]["status"] == "waiting"
+
+
+FAKE_SUBMITS = (
+    HEAD
+    + """
+sys.stdin.read()
+open(os.environ["FAKE_PIDS"], "w").write(json.dumps({"agent": os.getpid()}))
+act()
+say({"type": "result", "result": "Submitted.\\nRESULT:APPLIED"})
+"""
+)
+
+
+def test_a_stop_before_an_auto_submit_agent_starts_keeps_it_from_starting(box, tmp_path, monkeypatch):  # review #5
+    batch = batch_of(box)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    rest = box.apply_status()["next"]
+    fake_claude(tmp_path, monkeypatch, FAKE_SUBMITS)
+    monkeypatch.setenv("FAKE_PIDS", str(tmp_path / "pids.json"))
+    fast, profile = quick(box.settings), box._applicant().profile
+    setup, go = threading.Event(), threading.Event()
+    real_check = watchdog.ChromeWatch.check
+
+    def check(self):
+        if not setup.is_set():  # run_application's first look at the Chrome, before the agent starts
+            setup.set()
+            go.wait(10)
+        return real_check(self)
+
+    monkeypatch.setattr(watchdog.ChromeWatch, "check", check)
+
+    class Runner(FakeRunner):
+        def __call__(self, spec):
+            if spec.job_id == "j05":
+                self.calls.append(spec)
+                return apply_bridge.run_application(spec, box.data_dir, fast, profile, 9)
+            return super().__call__(spec)
+
+    box.apply_runner, box.apply_in_background = Runner(), True
+    box.start_applying(rest["batch_id"], rest["summary"])
+    assert setup.wait(10)
+    stopped = box.stop_applying()
+    assert stopped["current"]["job_id"] == "j05" and stopped["current"]["ended_now"] is True
+    assert "不会再起" in stopped["message"]
+    go.set()
+    status = finished(box)
+    assert not (tmp_path / "pids.json").exists()  # the agent never started
+    applications = box.store.applications()
+    assert applications["j05"]["status"] == "pending" and applications["j06"]["status"] == "pending"
+    assert status["status"] == "stopped"
+    assert not [a for a in box.store.apply_attempts() if a["job_id"] == "j05"]
+
+
+def test_a_stop_during_the_glance_before_a_resume_keeps_the_job_held(box):  # review #5
+    from intent_job_agent.form_fill.models import PageState
+
+    batch = batch_of(box)
+    acme = {"id": "N7", "url": "https://careers.acme.test/login"}
+
+    class Holds(FakeRunner):
+        def __call__(self, spec):
+            outcome = super().__call__(spec)
+            return dataclasses.replace(outcome, tab=acme) if outcome.status == "held" else outcome
+
+    box.apply_runner = Holds({"j06": ("held", "login_issue", ["careers.acme.test: sign in to continue"])})
+    box.start_applying(batch["batch_id"], batch["summary"])
+    box.start_applying(batch["batch_id"], box.apply_status()["next"]["summary"])
+    looking, go = threading.Event(), threading.Event()
+    fake = box.form_fill_runner
+    fake.tabs.append({"id": acme["id"], "type": "page", "url": acme["url"]})
+
+    def slow_glance(target):  # the look at the held tab before the agent starts (up to 120 seconds)
+        looking.set()
+        go.wait(10)
+        return PageState(actions=("Continue",))
+
+    fake.tab_state = slow_glance
+    runner = FakeRunner()
+    box.apply_runner = runner
+    plan = box.prepare_resume(["j06"])
+    box.apply_in_background = True
+    box.resume_applying(plan["job_ids"], plan["summary"])
+    assert looking.wait(10)
+    assert box.stop_applying()["current"]["ended_now"] is True
+    go.set()
+    status = finished(box)
+    hold = box.store.hold("j06")
+    assert runner.calls == [] and status["status"] == "stopped"  # no agent was started for it
+    assert hold is not None and hold["resuming"] is False and box.store.applications()["j06"]["status"] == "held"
