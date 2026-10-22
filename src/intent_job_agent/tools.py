@@ -1317,19 +1317,27 @@ class Toolbox:
             personal = [inputs.redactor.mask(origin) for origin in found]
             ff_jobs = JobList(jobs=[entries[j] for j in step if j in filled])
             form_fill.begin_feasibility(ctx, list_path, ff_jobs, personal, checked=checked)
-        data["phases"][phase] = "running"
-        self.store.begin_activity(self._owner(), "step", batch=(batch_id, phase, data.pop("day"), data))
-        self.store.record_decision(
-            None,
-            "apply",
-            {
-                "batch_id": batch_id,
-                "phase": phase,
-                "job_ids": [s.job_id for s in specs],
-                "form_fill": [j for j in step if j in filled],
-                "approved_via": APPROVED_VIA,
-            },
+        runner = self.apply_runner or apply_bridge.ChromeRunner(
+            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
         )
+        data["phases"][phase] = "running"
+        owner = self._owner()
+        self.store.begin_activity(owner, "step", batch=(batch_id, phase, data.pop("day"), data))
+        try:
+            self.store.record_decision(
+                None,
+                "apply",
+                {
+                    "batch_id": batch_id,
+                    "phase": phase,
+                    "job_ids": [s.job_id for s in specs],
+                    "form_fill": [j for j in step if j in filled],
+                    "approved_via": APPROVED_VIA,
+                },
+            )
+        except Exception:
+            self._undo_start(owner, batch_id, phase)
+            raise
         run = {
             "batch_id": batch_id,
             "phase": phase,
@@ -1339,6 +1347,7 @@ class Toolbox:
             "summary": None,
             "stopped": None,  # a job that may have been submitted (item 90)
             "stop": None,  # when the user asked to stop (item 109)
+            "lock": threading.Lock(),  # closing it happens once (review #2)
             "jobs": [
                 {
                     **job,
@@ -1352,9 +1361,6 @@ class Toolbox:
             ],
         }
         self._apply_run = run
-        runner = self.apply_runner or apply_bridge.ChromeRunner(
-            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
-        )
 
         def work():
             # Each result is recorded as soon as it is known, through this thread's own connection, so a
@@ -1397,11 +1403,7 @@ class Toolbox:
             finally:
                 self._ended(run, writer)
 
-        if self.apply_in_background:
-            threading.Thread(target=work, name="intent-agent-apply", daemon=True).start()
-        else:
-            work()
-            self._sync_apply_results()
+        self._launch(run, work, "intent-agent-apply")
         result = {
             "batch_id": batch_id,
             "phase": phase,
@@ -1532,26 +1534,60 @@ class Toolbox:
         )
 
     def _sync_apply_results(self) -> None:
-        """Close the batch step once its run has ended - done, stopped by the user or broken (results are already
-        recorded by the run). A resume has no batch step of its own: the first step's verdict is read when asked
-        (_settle)."""
-        run = self._apply_run
-        if run is None or run["status"] == "running" or run.get("closed"):
+        """Close this server's step or resume if it has ended and its thread could not close it itself."""
+        if self._apply_run is not None:
+            self._close_run(self._apply_run, self.store)
+
+    def _close_run(self, run: dict, store: Store) -> None:
+        """Close an ended step or resume once, from whichever thread gets there first: its own at its end, or the next
+        tool call when that one could not (review #2). The batch step is closed - done, stopped by the user or broken;
+        results are already recorded - and this server's apply_running row goes with it, in one transaction. A resume
+        has no batch step of its own: the first step's verdict is read when asked (_settle)."""
+        with run["lock"]:
+            if run.get("closed") or run["status"] == "running":
+                return
+            with store.exclusive():
+                if run["phase"] != "resume":
+                    data = store.apply_batch(run["batch_id"])
+                    outcomes = [item["outcome"] for item in run["jobs"] if item["outcome"]]
+                    apply_fill.close_step(
+                        data,
+                        run["phase"],
+                        broke=run["status"] == "failed",
+                        worked=any(apply_fill.worked(outcome.status) for outcome in outcomes),
+                        held=[
+                            item["job_id"]
+                            for item in run["jobs"]
+                            if item["outcome"] and item["outcome"].status == "held"
+                        ],
+                        maybe=run.get("stopped"),
+                    )
+                    store.save_apply_batch(run["batch_id"], data.pop("day"), data)
+                store.end_activity(self._owner())
+            run["closed"] = True
+
+    def _launch(self, run: dict, work, name: str) -> None:
+        """Run a step's or a resume's work in its own thread (or here, in tests). A thread that cannot start leaves
+        the run failed, never running (spec section 10 item 107)."""
+        if not self.apply_in_background:
+            work()
+            self._sync_apply_results()
             return
-        if run["phase"] != "resume":
-            data = self.store.apply_batch(run["batch_id"])
-            outcomes = [item["outcome"] for item in run["jobs"] if item["outcome"]]
-            apply_fill.close_step(
-                data,
-                run["phase"],
-                broke=run["status"] == "failed",
-                worked=any(apply_fill.worked(outcome.status) for outcome in outcomes),
-                held=[item["job_id"] for item in run["jobs"] if item["outcome"] and item["outcome"].status == "held"],
-                maybe=run.get("stopped"),
-            )
-            self.store.save_apply_batch(run["batch_id"], data.pop("day"), data)
-        self.store.end_activity(self._owner())
-        run["closed"] = True
+        try:
+            threading.Thread(target=work, name=name, daemon=True).start()
+        except RuntimeError as error:
+            run["status"], run["error"] = "failed", f"{type(error).__name__}: {error}"[:300]
+            self._sync_apply_results()
+            raise InvariantError(f"The apply thread could not start: {error}") from None
+
+    def _undo_start(self, owner: tuple[int, str], batch_id: str | None, phase: str | None) -> None:
+        """A start that broke before its thread ran: the step is proposed again and the row goes (review #2)."""
+        with self.store.exclusive():
+            if batch_id is not None:
+                data = self.store.apply_batch(batch_id)
+                data["phases"][phase] = "proposed"
+                self.store.save_apply_batch(batch_id, data.pop("day"), data)
+            self.store.end_activity(owner)
 
     def _owner(self) -> tuple[int, str]:
         """This tool server's pid and start time (spec section 10 item 111). Without them nothing may start or close
@@ -1709,7 +1745,9 @@ class Toolbox:
             run["status"], run["error"] = "failed", run["error"] or "the apply thread stopped unexpectedly"
         watchdog.LIVE.disarm()
         try:
-            writer.activity_job(self._owner(), None, None, None)
+            self._close_run(run, writer)  # closes the step and frees the slot without waiting for a call (review #2)
+        except Exception:  # noqa: BLE001 - the next tool call closes it (_sync_apply_results)
+            pass
         finally:
             writer.db.close()
             self._notify(run)
@@ -1736,6 +1774,7 @@ class Toolbox:
         module fills it (it stops before submit), is ended now and goes back where it was, with no attempt recorded;
         one being auto-submitted finishes first, so a submission is never cut off halfway. Poll apply_status until
         it is no longer running."""
+        self._recover()  # a step that ended, or one a stopped server left, is closed first (review #2)
         run = self._apply_run
         if not _running(run):
             return {"stopped": False, "message": "现在没有在跑的一步"}
@@ -2077,8 +2116,16 @@ class Toolbox:
         if refill:
             ctx = self._fill_context(applicant, inputs)
             form_fill.begin_feasibility(ctx, list_path, JobList(jobs=[entries[j] for j in refill]))
-        self.store.begin_activity(self._owner(), "resume")
-        self.store.record_decision(None, "resume", {"job_ids": list(job_ids), "approved_via": APPROVED_VIA})
+        runner = self.apply_runner or apply_bridge.ChromeRunner(
+            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
+        )
+        owner = self._owner()
+        self.store.begin_activity(owner, "resume")
+        try:
+            self.store.record_decision(None, "resume", {"job_ids": list(job_ids), "approved_via": APPROVED_VIA})
+        except Exception:
+            self._undo_start(owner, None, None)
+            raise
         run = {
             "batch_id": None,
             "phase": "resume",
@@ -2088,6 +2135,7 @@ class Toolbox:
             "summary": None,
             "stopped": None,  # a job that may have been submitted (item 90)
             "stop": None,  # when the user asked to stop (item 109)
+            "lock": threading.Lock(),  # closing it happens once (review #2)
             "jobs": [
                 {
                     **{key: item[key] for key in ("n", "job_id", "batch_id", "title", "company", "mode", "via")},
@@ -2100,9 +2148,6 @@ class Toolbox:
             ],
         }
         self._apply_run = run
-        runner = self.apply_runner or apply_bridge.ChromeRunner(
-            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
-        )
         work_on = {"browser": browser, "runner": runner, "sheet": sheet, "entries": entries, "ctx": ctx}
 
         def work():
@@ -2133,11 +2178,7 @@ class Toolbox:
             finally:
                 self._ended(run, writer)
 
-        if self.apply_in_background:
-            threading.Thread(target=work, name="intent-agent-resume", daemon=True).start()
-        else:
-            work()
-            self._sync_apply_results()
+        self._launch(run, work, "intent-agent-resume")
         return {
             "phase": "resume",
             "status": run["status"],

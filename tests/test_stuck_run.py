@@ -670,11 +670,11 @@ def test_a_row_of_this_server_whose_run_never_started_does_not_block_the_next_st
     with pytest.raises(RuntimeError):
         box.start_applying(batch["batch_id"], batch["summary"])
     monkeypatch.undo()
-    assert box.store.activity() is not None  # left behind by this server
+    assert box.store.activity() is None  # undone at once (review #2): the step never ran
+    assert box.store.apply_batch(batch["batch_id"])["phases"]["review"] == "proposed"
     status = box.apply_status()
-    assert box.store.activity() is None and status["next"] is None and status["status"] == "idle"
-    fresh = box.prepare_apply_batch(DAY)  # the first step's jobs are pending again: a new batch can take them
-    box.start_applying(fresh["batch_id"], fresh["summary"])
+    assert status["status"] == "idle" and status["next"]["phase"] == "review"
+    box.start_applying(batch["batch_id"], status["next"]["summary"])
     assert box.store.applications()["j00"]["status"] == "waiting"
 
 
@@ -1050,3 +1050,30 @@ def test_a_closing_never_removes_another_server_s_row(box):  # review #3
     finally:
         other.kill()
         other.wait()
+
+
+def test_a_step_that_ended_in_the_background_frees_the_slot_by_itself(box):  # review #2
+    batch = batch_of(box)
+    other, owner = live_server()  # session A's tool server, alive
+    try:
+        box._me = owner
+        box.apply_runner, box.apply_in_background = FakeRunner(), True
+        box.start_applying(batch["batch_id"], batch["summary"])
+        deadline = time.monotonic() + 10
+        while box.store.activity() is not None and time.monotonic() < deadline:  # A makes no further call
+            time.sleep(0.05)
+        assert box.store.activity() is None and box._apply_run["closed"] is True
+        assert box.store.apply_batch(batch["batch_id"])["phases"] == {"review": "done", "rest": "proposed"}
+        b = restarted(box)  # session B, opened after the notification
+        status = b.apply_status()
+        assert "other_session" not in status and status["next"]["phase"] == "rest"
+        b.start_applying(batch["batch_id"], status["next"]["summary"])
+        assert b.store.applications()["j05"]["status"] == "applied"
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_stopping_closes_what_a_stopped_server_left_first(box):  # review #2
+    box.store.begin_activity(dead_server(), "resume")
+    assert box.stop_applying()["stopped"] is False and box.store.activity() is None
