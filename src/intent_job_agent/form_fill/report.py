@@ -28,6 +28,7 @@ REASONS = {
     "gate": "门槛",
     "needs_answer": "缺标准答案",
     "stuck": "卡住",
+    "stopped": "你停下了",  # /apply's stop (spec section 10 item 109)
     "system_error": "程序没跑起来",
     "page_error": "页面出错",
     "expired": "已下架",
@@ -39,6 +40,7 @@ REASONS = {
 }
 AGENT_REASONS = {
     "timeout": "stuck",
+    "stalled": "stuck",  # no output for too long: ended by code (spec section 10 item 107)
     "no_result_line": "stuck",
     "system_error": "system_error",
     "login_issue": "login_failed",  # could not sign in nor register: not a gate (spec 5.5)
@@ -47,6 +49,9 @@ ADVICE = {  # what the user does next, by why the form was not filled (spec 5.5)
     "gate": "请你自己在标签页里过了这一关（不填 SSN、付款，不接受仲裁），再说“重跑 {job}”。",
     "needs_answer": "请补上标准答案，再在标签页里自己填，或者说“重跑 {job}”。",
     "stuck": "请在标签页里接着填，或者说“重跑 {job}”。",
+    "stopped": (  # /apply's stop (spec section 10 item 109): the job is back where it was
+        "你在这一步运行时停下了它：这个岗位没有做完、也没有提交，标签页里可能有填了一半的表。它已回到原来的状态。"
+    ),
     "system_error": "填表 agent 没起来，网站没有打开过。请检查投递用的 Chrome 和 Claude Code，再说“重跑 {job}”。",
     "page_error": "请在标签页里看看页面怎么了，好了以后说“重跑 {job}”。",
     "login_failed": "登录和注册都没成功：请你自己在标签页里登录，再说“重跑 {job}”。",

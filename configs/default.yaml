@@ -145,6 +145,11 @@ apply:                            # 投递（spec 4.10）
       - expired                   # 岗位已下架
       - timeout                   # 网络超时
   notify: true                    # 一步做完、有岗位等你处理或填好等你检查时，发一条 Mac 系统通知（spec 4.10 第 10 条）
+  watchdog:                       # 一步一定能结束（spec 4.10 第 11 条，§10 第 107、108、114 条）
+    stall_seconds: 300            # agent 多久没有任何输出就算卡住（stalled）：结束它和它启动的进程，接着做下一个
+    drain_seconds: 10             # agent 退出后，最多再等多久读完它剩下的输出
+    read_seconds: 120             # 代码读一次标签页（读回、接着做前读一眼）最长多久
+    interval_seconds: 3           # agent 运行时多久看一次它的进程和投递用的 Chrome
 form_fill:                        # 填表模块（specs/form-fill.md；切片计划见 specs/form-fill.plan.md、form-fill.slice2a.plan.md）。模型和超时沿用 apply.*
   dir: form-fill                  # 运行目录，位于 storage.data_dir 下：runs/<运行编号>/<岗位 id>/ 和 feasibility.md
   recordings_dir: recordings      # 录制目录，位于 form_fill.dir 下：recordings/<录制编号>/（spec 6.2）

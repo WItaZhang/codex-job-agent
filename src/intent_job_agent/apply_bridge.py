@@ -15,7 +15,9 @@ codes. The changes are this project's risk controls (plan, slice 6):
   CAPTCHA, an e-mail code that never came) stops the job on its page, tab kept, for the user (spec 4.10 item 10);
 - the places where on-site work is fine and the relocation answer come from `applicant.yaml`, not one city;
 - open-ended questions follow the user's rule (on the question, no piled-up experience), not "cite an achievement";
-- the full stream is logged under the data directory and summarised (other sites opened, emails sent).
+- the full stream is logged under the data directory and summarised (other sites opened, emails sent);
+- every wait has a limit: an agent that quits, falls silent or runs out of time is ended with every process it
+  started, and the user can stop a stop-before-submit run (spec 4.10 item 11, section 10 items 107, 109).
 
 Nothing here stores the applicant profile in the project database.
 """
@@ -24,17 +26,15 @@ import html
 import json
 import os
 import re
-import signal
 import subprocess
 import tempfile
-import threading
 import urllib.request
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import applypilot_bridge
+from . import applypilot_bridge, watchdog
 from .config import Settings
 from .domain import InvariantError
 from .form_fill import readback
@@ -442,7 +442,7 @@ def parse_result(output: str) -> str:
     return "failed:no_result_line"
 
 
-SYSTEM_RESULTS = ("failed:no_result_line", "failed:timeout")
+SYSTEM_RESULTS = ("failed:no_result_line", "failed:timeout", "failed:stalled")  # stalled: spec section 10 item 107
 # Gates the user passes personally: the job waits as held, its tab kept (spec 4.10 item 10, section 10 item 97).
 GATES = ("captcha", "login_issue", "sso_required", "email_verification")
 
@@ -640,65 +640,79 @@ def run_application(
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         env=env,
         cwd=str(config.APPLY_WORKER_DIR),
         start_new_session=True,
     )
-    timed_out = threading.Event()
-
-    def stop():
-        timed_out.set()
-        _kill_group(proc)
-
-    timer = threading.Timer(settings.apply.job_timeout_seconds, stop)
-    timer.start()
+    limits = settings.apply.watchdog
+    tree = watchdog.Tree(proc.pid)
+    stop = watchdog.LIVE.begin(spec.job_id, spec.mode)
     texts, events = [], []
     try:
-        proc.stdin.write(text)
-        proc.stdin.close()
         with log_path.open("w", encoding="utf-8") as log:
-            for line in proc.stdout:
+
+            def on_line(line: str) -> None:
+                watchdog.LIVE.touch()
                 log.write(mask(line) if mask else line)
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
-                    texts.append(line.strip())
-                    continue
-                if message.get("type") == "assistant":
-                    for block in message.get("message", {}).get("content", []):
-                        if block.get("type") == "text":
-                            texts.append(block.get("text", ""))
-                        elif block.get("type") == "tool_use":
-                            events.append({"name": block.get("name", ""), "input": block.get("input", {})})
-                elif message.get("type") == "result":
-                    texts.append(message.get("result", "") or "")
-        proc.wait(timeout=60)
-    finally:
-        timer.cancel()
-        if proc.poll() is None:
-            _kill_group(proc)
+                log.flush()  # the log's time is the agent's last output (spec section 10 item 107)
+                _read_line(line, texts, events)
+
+            why = watchdog.follow(
+                proc,
+                text,
+                on_line,
+                timeout=settings.apply.job_timeout_seconds,
+                stall=limits.stall_seconds,
+                drain=limits.drain_seconds,
+                interval=limits.interval_seconds,
+                stop=stop,
+                ticks=(tree.scan,),
+            )
+    finally:  # whatever ended the run: the agent and everything it started (spec section 10 item 107)
+        tree.kill(alive=proc.poll() is None)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        proc.stdout.close()
+        watchdog.LIVE.end(stop)
+    seen = audit(events, spec.url)
+    if why == "stopped":  # the user stopped the step (item 109): nothing was submitted, the job goes back
+        said = ["你停下了这一步：这个岗位没有做完，网站上没有提交任何东西"]
+        return ApplyOutcome(
+            "pending", "stopped", said, seen["other_sites"], seen["emails"], str(log_path), last_url=last_url(events)
+        )
     output = "\n".join(texts)
-    result = "failed:timeout" if timed_out.is_set() else parse_result(output)
+    result = f"failed:{why}" if why else parse_result(output)
     status, reason = outcome_status(spec.mode, result, acted=bool(events))
     said = notes(output)
     if status == "pending":  # never reached the site: keep the last thing it printed to explain why
         last = [line.strip() for line in output.splitlines() if line.strip()]
         said = [last[-1][:300]] if last else [f"exit code {proc.returncode}"]
-    seen = audit(events, spec.url)
+    if why == "stalled":
+        said.append(f"投递 agent {limits.stall_seconds:g} 秒没有任何输出，算卡住，已结束它")
     return ApplyOutcome(
         status, reason, said, seen["other_sites"], seen["emails"], str(log_path), last_url=last_url(events)
     )
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
-    """Claude Code and the MCP servers it started (its own process group)."""
+def _read_line(line: str, texts: list, events: list) -> None:
+    """One line of the agent's stream-json: its text and final result go to `texts`, its tool calls to `events`."""
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (AttributeError, ProcessLookupError, PermissionError):
-        proc.kill()
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        texts.append(line.strip())
+        return
+    if not isinstance(message, dict):
+        return
+    if message.get("type") == "assistant":
+        for block in message.get("message", {}).get("content", []):
+            if block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                events.append({"name": block.get("name", ""), "input": block.get("input", {})})
+    elif message.get("type") == "result":
+        texts.append(message.get("result", "") or "")
 
 
 class ChromeRunner:
