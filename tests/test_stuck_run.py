@@ -248,3 +248,81 @@ def test_the_process_table_and_a_tree_kill_reach_a_helper_in_another_session(tmp
     killed = tree.kill(alive=True)
     parent.wait(5)
     assert child in killed and gone(child)
+
+
+# --- S5: reading a tab has a limit ---------------------------------------------------------------------------------
+
+
+class Blank:
+    def mask(self, text):
+        return text
+
+    def mask_json(self, obj):
+        return obj
+
+
+def hangs_until_its_driver_ends(started: dict):
+    """A Playwright read on a page that never answers: it starts its driver, then waits until the driver is gone, as
+    a Playwright call fails once its driver quits."""
+
+    def read(*_args):
+        driver = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(40)", "run-driver"])
+        started["driver"] = driver
+        while driver.poll() is None:
+            time.sleep(0.05)
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    return read
+
+
+def test_a_read_back_that_never_answers_fails_in_time_and_ends_its_driver(tmp_path, monkeypatch):  # S5
+    from intent_job_agent.form_fill import readback
+
+    started = {}
+    monkeypatch.setattr(readback, "_read_live", hangs_until_its_driver_ends(started))
+    took = time.monotonic()
+    with pytest.raises(readback.ReadbackError, match="读标签页 1 秒没有回应"):
+        readback.read_final_page(9222, {"id": "T"}, tmp_path / "out", Blank(), seconds=1)
+    assert time.monotonic() - took < 5
+    assert gone(started["driver"].pid)
+
+
+def test_a_glance_that_never_answers_fails_in_time_and_ends_its_driver(monkeypatch):  # S5, resume
+    from intent_job_agent.form_fill import readback
+
+    started = {}
+    monkeypatch.setattr(readback, "_glance", hangs_until_its_driver_ends(started))
+    took = time.monotonic()
+    with pytest.raises(readback.ReadbackError, match="读标签页 1 秒没有回应"):
+        readback.tab_state(9222, {"id": "T"}, seconds=1)
+    assert time.monotonic() - took < 5
+    assert gone(started["driver"].pid)
+
+
+def test_a_driver_that_was_already_running_is_left_alone(monkeypatch):
+    from intent_job_agent.form_fill import readback
+
+    other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(40)", "run-driver"])
+    try:
+        started = {}
+        monkeypatch.setattr(readback, "_glance", hangs_until_its_driver_ends(started))
+        with pytest.raises(readback.ReadbackError):
+            readback.tab_state(9222, {"id": "T"}, seconds=1)
+        assert other.poll() is None  # not this read's
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_the_form_fill_runner_reads_with_the_configured_limit(box, monkeypatch, tmp_path):
+    from intent_job_agent.form_fill import readback
+    from intent_job_agent.form_fill.runner import FormFillRunner
+
+    seen = {}
+    monkeypatch.setattr(readback, "read_final_page", lambda *a, **k: seen.update(read=k["seconds"]))
+    monkeypatch.setattr(readback, "tab_state", lambda *a, **k: seen.update(glance=k["seconds"]))
+    runner = FormFillRunner(box.data_dir, box.settings, tmp_path / "profile.json")
+    runner.port = 9222
+    runner.read({"id": "T"}, tmp_path, Blank())
+    runner.tab_state({"id": "T"})
+    assert box.settings.apply.watchdog.read_seconds == 120 and seen == {"read": 120, "glance": 120}

@@ -983,10 +983,11 @@ class FormFillRunner:
         )
 
     def read(self, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> readback.FinalPage:
-        return readback.read_final_page(self._port(), target, out_dir, redactor, sheet)
+        seconds = self.settings.apply.watchdog.read_seconds  # spec section 10 item 108
+        return readback.read_final_page(self._port(), target, out_dir, redactor, sheet, seconds=seconds)
 
     def tab_state(self, target: dict) -> PageState:
-        return readback.tab_state(self._port(), target)
+        return readback.tab_state(self._port(), target, seconds=self.settings.apply.watchdog.read_seconds)
 
     def _port(self) -> int:
         if self.port is None:

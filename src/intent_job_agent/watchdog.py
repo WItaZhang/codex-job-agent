@@ -5,6 +5,7 @@
 - `LIVE`: the agent run in progress in this process (one applying Chrome, so one at a time), so apply_status can say
   when it last wrote anything and stop_applying can stop it.
 - `follow`: feed an agent its instructions and read its output line by line until it ends, with a limit on every wait.
+- `kill_new_drivers`: the Playwright drivers a read started, ended when the read runs out of time.
 
 Nothing here clicks, types or navigates.
 """
@@ -66,6 +67,31 @@ def _kill(pid: int) -> bool:
         return True
     except (ProcessLookupError, PermissionError):
         return False
+
+
+def children() -> set[tuple[int, str]]:
+    """This process's child processes now, as (pid, start time)."""
+    me = os.getpid()
+    try:
+        return {(p.pid, p.started) for p in processes().values() if p.ppid == me}
+    except (OSError, subprocess.SubprocessError):
+        return set()
+
+
+def kill_new_drivers(before: set[tuple[int, str]]) -> list[int]:
+    """End the Playwright drivers this process started since `before` (`children()` then), with their descendants: a
+    read stuck on a page that never answers fails once its driver is gone (spec section 10 item 108)."""
+    try:
+        table = processes()
+    except (OSError, subprocess.SubprocessError):
+        return []
+    me = os.getpid()
+    drivers = {
+        p.pid for p in table.values() if p.ppid == me and (p.pid, p.started) not in before and "run-driver" in p.command
+    }
+    for pid in list(drivers):
+        drivers |= descendants(pid, table)
+    return sorted(pid for pid in drivers if _kill(pid))
 
 
 class Tree:

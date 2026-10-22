@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
 
+from .. import watchdog
 from ..domain import InvariantError
 from .columns import mask_snapshot
 from .compare import HIDDEN as HIDDEN_TEXT
@@ -1052,31 +1053,49 @@ def _read_live(port: int, target: dict, redactor: Redactor, sheet) -> tuple:
         return raw, masked, serialize(page, hide), *_masked_screenshot(page, redactor, hide)
 
 
-def tab_state(port: int, target: dict) -> PageState:
+READ_SECONDS = 120.0  # apply.watchdog.read_seconds, which the runners pass
+
+
+def _bounded(read, seconds: float, *args):
+    """One Playwright read in its own thread (Playwright's sync API refuses to run inside the MCP server's asyncio
+    loop), for at most `seconds` (spec section 10 item 108). A page that never answers (a dialog left open, a renderer
+    that hangs) must not hold an apply step: on time out this read's own Playwright driver is ended, which fails the
+    hung call and frees its thread, and the read fails."""
+    before = watchdog.children()
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        return pool.submit(read, *args).result(timeout=seconds)
+    except TimeoutError:
+        watchdog.kill_new_drivers(before)
+        raise ReadbackError(f"读标签页 {seconds:g} 秒没有回应，已结束这次读页") from None
+    finally:
+        pool.shutdown(wait=False)
+
+
+def _glance(port: int, target: dict) -> dict:
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:  # leaving it drops the CDP connection; the browser and its tabs stay
+        return _extract(_find_page(p.chromium.connect_over_cdp(f"http://127.0.0.1:{int(port)}"), target))
+
+
+def tab_state(port: int, target: dict, seconds: float = READ_SECONDS) -> PageState:
     """Where the page in one open tab stands, read only and without saving anything: /apply glances at a held job's
     tab before resuming it, and a page saying the application was received means the user submitted it there (spec
-    section 10 item 100)."""
-
-    def read() -> dict:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:  # leaving it drops the CDP connection; the browser and its tabs stay
-            return _extract(_find_page(p.chromium.connect_over_cdp(f"http://127.0.0.1:{int(port)}"), target))
-
-    with ThreadPoolExecutor(max_workers=1) as pool:  # not inside the MCP server's asyncio loop
-        return page_state(pool.submit(read).result())
+    section 10 item 100). At most `seconds`."""
+    return page_state(_bounded(_glance, seconds, int(port), target))
 
 
-def read_final_page(port: int, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> FinalPage:
+def read_final_page(
+    port: int, target: dict, out_dir: Path, redactor: Redactor, sheet=None, seconds: float = READ_SECONDS
+) -> FinalPage:
     """Read the job tab as it is and save page.html, screenshot.png and readback.json, masked by value and by column
     (`sheet`: the answer sheet, for the fields matched to a contact entry; spec 5.6); contact values in the
     screenshot are painted black. A screenshot that cannot be blacked out is not saved; screenshot-not-saved.txt
-    says so. Disconnects without closing the browser or the page."""
+    says so. Disconnects without closing the browser or the page. At most `seconds` (spec section 10 item 108)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    # Playwright's sync API refuses to run inside an asyncio loop (the MCP server's), so it gets its own thread.
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        raw, snap, html, shot, why = pool.submit(_read_live, int(port), target, redactor, sheet or {}).result()
+    raw, snap, html, shot, why = _bounded(_read_live, seconds, int(port), target, redactor, sheet or {})
     state = page_state(raw)
     fields = tuple(f.model_copy(update={"id": f"p1.{n}"}) for n, f in enumerate(snap.fields, start=1))
     fields = tuple(f.model_copy(update={"section": "", "occurrence": 1}) for f in fields)
