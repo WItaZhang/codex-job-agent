@@ -1368,6 +1368,7 @@ class Toolbox:
             writer = None
             try:
                 writer = Store(self.store.path, self.settings)  # inside: a failure here still ends the run (review #4)
+                self._record_agents(writer)
                 for item, spec in zip(run["jobs"], specs, strict=True):
                     if run["stopped"] or run["stop"]:  # a form may have been submitted (item 90), or the user stopped
                         item["state"] = "stopped"
@@ -1567,6 +1568,17 @@ class Toolbox:
                 store.end_activity(self._owner())
             run["closed"] = True
 
+    def _record_agents(self, writer: Store) -> None:
+        """Each agent this step or resume starts goes into its apply_running row by pid and start time, so a server
+        that takes over after a restart ends it by identity, whatever its command line (review #7)."""
+        owner = self._owner()
+
+        def record(pid: int) -> None:
+            started = next(iter(watchdog.identify([pid])), (pid, None))[1]
+            writer.activity_agent(owner, pid, started)
+
+        watchdog.LIVE.listen(record)
+
     def _launch(self, run: dict, work, name: str) -> None:
         """Run a step's or a resume's work in its own thread (or here, in tests). A thread that cannot start leaves
         the run failed, never running (spec section 10 item 107)."""
@@ -1625,6 +1637,7 @@ class Toolbox:
                 if not ours and watchdog.alive(*owner):
                     return row
                 if not (ours and _running(self._apply_run)):
+                    watchdog.kill_agent(row["agent_pid"], row["agent_started"])  # by identity (review #7)
                     watchdog.kill_orphans(self._agent_marks())
                     if row["kind"] == "step":
                         self._close_interrupted(row["batch_id"], row["phase"], row)
@@ -1746,6 +1759,7 @@ class Toolbox:
         if run["status"] == "running":  # something other than an Exception stopped the thread
             run["status"], run["error"] = "failed", run["error"] or "the apply thread stopped unexpectedly"
         watchdog.LIVE.disarm()
+        watchdog.LIVE.listen(None)
         try:
             if writer is not None:
                 self._close_run(run, writer)  # closes the step and frees the slot without waiting (review #2)
@@ -2159,6 +2173,7 @@ class Toolbox:
             writer = None
             try:
                 writer = Store(self.store.path, self.settings)  # inside: a failure here still ends the run (review #4)
+                self._record_agents(writer)
                 browser.ensure_chrome()
                 for item in run["jobs"]:
                     if run["stopped"] or run["stop"]:  # a form may have been submitted (item 90), or the user stopped

@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS apply_holds (job_id TEXT PRIMARY KEY, batch_id TEXT N
                                         times INTEGER NOT NULL, resuming INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS apply_running (id INTEGER PRIMARY KEY CHECK (id = 1), owner_pid INTEGER NOT NULL,
                                           owner_started TEXT NOT NULL, kind TEXT NOT NULL, batch_id TEXT,
-                                          phase TEXT, job_id TEXT, mode TEXT, via TEXT, since TEXT NOT NULL);
+                                          phase TEXT, job_id TEXT, mode TEXT, via TEXT, agent_pid INTEGER,
+                                          agent_started TEXT, since TEXT NOT NULL);
 """
 
 
@@ -540,11 +541,20 @@ class Store:
         return dict(row) if row else None
 
     def activity_job(self, owner: tuple[int, str], job_id: str | None, mode: str | None, via: str | None) -> None:
-        """The job `owner`'s running step is on (written before it reaches its site), or none."""
+        """The job `owner`'s running step is on (written before it reaches its site), or none; its agent not yet."""
         with self._tx():
             self.db.execute(
-                "UPDATE apply_running SET job_id = ?, mode = ?, via = ? WHERE owner_pid = ? AND owner_started = ?",
+                "UPDATE apply_running SET job_id = ?, mode = ?, via = ?, agent_pid = NULL, agent_started = NULL "
+                "WHERE owner_pid = ? AND owner_started = ?",
                 (job_id, mode, via, owner[0], owner[1]),
+            )
+
+    def activity_agent(self, owner: tuple[int, str], pid: int, started: str | None) -> None:
+        """The agent `owner`'s step or resume started, by pid and start time (review #7)."""
+        with self._tx():
+            self.db.execute(
+                "UPDATE apply_running SET agent_pid = ?, agent_started = ? WHERE owner_pid = ? AND owner_started = ?",
+                (pid, started, owner[0], owner[1]),
             )
 
     def end_activity(self, owner: tuple[int, str]) -> None:

@@ -1236,3 +1236,79 @@ def test_a_read_knows_the_playwright_driver_it_started():  # review #6
         assert len(mine) == 1
         ((pid, started),) = mine
         assert "run-driver" in watchdog.processes()[pid].command and watchdog.identify([pid]) == mine
+
+
+def test_an_agent_left_behind_under_a_non_ascii_data_folder_is_found(tmp_path):  # review #7
+    mark = f"--mcp-config {tmp_path}/求职/applypilot/.mcp-apply-0.json"
+    pid = orphan(mark.split(" ", 1))
+    try:
+        if watchdog.processes()[pid].ppid != 1:
+            pytest.skip("orphans are not handed to pid 1 here")
+        assert mark in watchdog.processes()[pid].command  # the command line reads as written
+        assert pid in watchdog.kill_orphans([mark]) and gone(pid)
+    finally:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+
+
+def test_the_agent_a_stopped_server_left_is_ended_by_its_recorded_pid(box):  # review #7
+    batch = batch_of(box)
+    script = (  # an agent leading its own session, with a helper it started (an MCP server, say)
+        "import subprocess, sys, time\n"
+        "helper = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+        "print(helper.pid, flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    agent = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, text=True, start_new_session=True)
+    helper = int(agent.stdout.readline())
+    try:
+        owner = dead_server()
+        left_running(box, batch["batch_id"], "review", owner, ("j02", "review", "form_fill"))
+        ((pid, started),) = watchdog.identify([agent.pid])
+        box.store.activity_agent(owner, pid, started)
+        restarted(box).apply_status()
+        assert gone(agent.pid) and gone(helper)
+    finally:
+        agent.kill()
+        agent.wait()
+
+
+FAKE_WORKS_A_WHILE = (
+    HEAD
+    + """
+sys.stdin.read()
+open(os.environ["FAKE_PIDS"], "w").write(json.dumps({"agent": os.getpid()}))
+act()
+time.sleep(1.5)
+say({"type": "result", "result": "Filled.\\nRESULT:APPLIED"})
+"""
+)
+
+
+def test_a_step_records_which_agent_it_started(box, tmp_path, monkeypatch):  # review #7
+    batch = batch_of(box)
+    fake_claude(tmp_path, monkeypatch, FAKE_WORKS_A_WHILE)
+    monkeypatch.setenv("FAKE_PIDS", str(tmp_path / "pids.json"))
+    fast, profile = quick(box.settings), box._applicant().profile
+
+    class Runner(FakeRunner):
+        def __call__(self, spec):
+            if spec.job_id == "j00":
+                self.calls.append(spec)
+                return apply_bridge.run_application(spec, box.data_dir, fast, profile, 9)
+            return super().__call__(spec)
+
+    box.apply_runner, box.apply_in_background = Runner(), True
+    box.start_applying(batch["batch_id"], batch["summary"])
+    deadline = time.monotonic() + 10
+    while not (tmp_path / "pids.json").exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    agent = pids(tmp_path)["agent"]
+    time.sleep(0.3)
+    row = box.store.activity()
+    assert row["job_id"] == "j00" and row["agent_pid"] == agent
+    assert (agent, row["agent_started"]) in watchdog.identify([agent])
+    finished(box)
+    assert box.store.activity() is None

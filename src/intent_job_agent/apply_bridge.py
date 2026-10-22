@@ -651,6 +651,7 @@ def run_application(
                 cwd=str(config.APPLY_WORKER_DIR),
                 start_new_session=True,
             )
+            watchdog.LIVE.spawned(stop, proc.pid)  # the step records it, to end it after a restart (review #7)
     except BaseException:
         watchdog.LIVE.end(stop)
         raise

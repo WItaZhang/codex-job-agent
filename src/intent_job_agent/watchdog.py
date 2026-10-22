@@ -42,13 +42,15 @@ class Proc:
 
 def processes() -> dict[int, Proc]:
     """Every process: pid, parent, process group, start time and command line. The start time is written the same
-    way whatever the caller's locale and time zone, so two tool servers read the same process the same way. Raises
-    SubprocessError when ps fails or its list leaves out this very process: such a list says nothing (review #1)."""
+    way whatever the caller's locale and time zone, so two tool servers read the same process the same way; command
+    lines read as written, in UTF-8 (review #7). Raises SubprocessError when ps fails or its list leaves out this very
+    process: such a list says nothing (review #1)."""
+    env = {k: v for k, v in os.environ.items() if k != "LANG" and not k.startswith("LC_")}
     result = subprocess.run(
         ["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,lstart=,command="],
         capture_output=True,
         timeout=10,
-        env={**os.environ, "LC_ALL": "C", "TZ": "UTC"},
+        env={**env, "LC_TIME": "C", "LC_CTYPE": "UTF-8", "TZ": "UTC"},
     )
     if result.returncode != 0:
         raise subprocess.SubprocessError(f"ps exited with {result.returncode}")
@@ -110,6 +112,25 @@ def alive(pid: int, started: str) -> bool:
     except OSError:  # PermissionError: it exists, under another user
         return True
     return True
+
+
+def kill_agent(pid: int | None, started: str | None) -> list[int]:
+    """End an agent a stopped tool server recorded (spec section 10 item 112): its process group (it leads one) and
+    everything it started, only while that pid is still the same process (its start time)."""
+    if not pid or not started:
+        return []
+    try:
+        table = processes()
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if pid not in table or table[pid].started != started:
+        return []
+    found = descendants(pid, table) | {pid}
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    return sorted(p for p in found if _kill(p))
 
 
 def kill_orphans(marks) -> list[int]:
@@ -233,6 +254,21 @@ class Live:
         self._lock = threading.Lock()
         self._run: dict | None = None
         self._armed: str | None = None  # the job a stop was asked for before its agent was set up
+        self._listener = None  # told the pid of each agent that starts (the step's thread records it, review #7)
+
+    def listen(self, listener) -> None:
+        """`listener(pid)` is called, in the thread that starts it, for each agent that starts; None: nobody."""
+        with self._lock:
+            self._listener = listener
+
+    def spawned(self, stop: threading.Event, pid: int) -> None:
+        """The agent of the run whose stop signal is `stop` started as `pid`."""
+        with self._lock:
+            listener = self._listener if self._run is not None and self._run["stop"] is stop else None
+            if listener is not None:
+                self._run["pid"] = pid
+        if listener is not None:
+            listener(pid)
 
     def begin(self, job_id: str, mode: str) -> threading.Event:
         """A job's agent is being set up, not started yet; its stop signal is already set when a stop was asked."""
