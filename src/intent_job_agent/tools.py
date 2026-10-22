@@ -1019,15 +1019,22 @@ class Toolbox:
     def _settle(self, batch_id: str) -> dict:
         """The batch, after deciding a first step that ended with nothing but held jobs (spec section 10 item 101):
         one of them filled or submitted since, in this batch (the append-only attempt log, so a form the user later
-        skipped still counts), lets the rest start; all of them done with and none worked voids the batch."""
+        skipped still counts), lets the rest start; all of them done with and none worked voids the batch. A form of
+        the batch that may have been submitted, in a resume too, voids it and never counts as worked (item 90)."""
         data = self.store.apply_batch(batch_id)
+        attempts = [row for row in self.store.apply_attempts() if row["batch_id"] == batch_id]
+        maybe = next((row["job_id"] for row in attempts if row["reason"] == "maybe_submitted"), None)
+        if maybe and not data.get("void"):  # a resumed form may have been submitted: as in a step (item 90)
+            data.pop("review_holds", None)
+            data["void"], data["void_reason"] = True, {"why": "maybe_submitted", "job_id": maybe}
+            if data["phases"]["rest"] == "proposed":
+                data["phases"]["rest"] = "void"
+            self.store.save_apply_batch(batch_id, data.pop("day"), data)
+            return self.store.apply_batch(batch_id)
         waiting = data.get("review_holds")
         if not waiting:
             return data
-        worked = any(
-            row["batch_id"] == batch_id and row["job_id"] in waiting and apply_fill.worked(row["status"])
-            for row in self.store.apply_attempts()
-        )
+        worked = any(row["job_id"] in waiting and apply_fill.worked(row["status"]) for row in attempts)
         applications = self.store.applications()
         if worked:
             data.pop("review_holds")

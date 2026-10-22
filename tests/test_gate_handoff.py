@@ -831,3 +831,26 @@ def test_a_held_tabs_address_is_masked_before_it_is_kept(box):  # privacy: CLAUD
     assert "sam.synthetic" not in kept["tab_url"] and kept["tab_url"].startswith("https://careers.acme.test/verify")
     assert not any(secret in json.dumps(box.apply_status(), ensure_ascii=False) for secret in SECRETS)
     assert not any(secret in json.dumps(box.store.holds(), ensure_ascii=False) for secret in SECRETS)
+
+
+# --- review fixes (gate-handoff-review.md, 2026-10-21) -------------------------------------------------------------
+
+RECEIVED = PageState(actions=(), received="Thank you, your application has been received")
+
+
+def test_a_resume_that_may_have_submitted_voids_the_batch(box):  # review 1: spec section 10 item 90
+    batch = first_step_held(box)
+    box.apply_runner.outcomes = {}  # j01 goes through
+    box.form_fill_runner.states["j01"] = RECEIVED  # the refilled form says it was received
+    resumed(box, ["j01"])
+    assert box.store.applications()["j01"]["status"] == "applied"
+    data = box.store.apply_batch(batch["batch_id"])
+    box._settle(batch["batch_id"])
+    data = box.store.apply_batch(batch["batch_id"])
+    assert data["void"] is True and data["phases"]["rest"] == "void"
+    assert data["void_reason"] == {"why": "maybe_submitted", "job_id": "j01"}
+    rest = box._phase_summary(batch["batch_id"], data, "rest")
+    with pytest.raises(InvariantError):
+        box.start_applying(batch["batch_id"], rest)
+    assert not [spec for spec in box.apply_runner.calls if spec.mode == "submit"]
+    assert "可能已提交" in box.apply_status()["notice"]
