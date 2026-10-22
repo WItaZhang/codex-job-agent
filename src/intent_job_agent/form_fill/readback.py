@@ -7,6 +7,7 @@ import json
 import re
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -1039,12 +1040,10 @@ def _masked_screenshot(page, redactor: Redactor, hide=()) -> tuple[bytes | None,
         return None, type(exc).__name__
 
 
-def _read_live(port: int, target: dict, redactor: Redactor, sheet) -> tuple:
-    from playwright.sync_api import sync_playwright
-
+def _read_live(holder: dict, port: int, target: dict, redactor: Redactor, sheet) -> tuple:
     # Leaving the context stops the Playwright driver, which drops the CDP connection. browser.close() is never
     # called, so the applying Chrome and its tabs stay as they are.
-    with sync_playwright() as p:
+    with _playwright(holder) as p:
         browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
         page = _find_page(browser, target)
         raw = _extract(page)
@@ -1059,23 +1058,33 @@ READ_SECONDS = 120.0  # apply.watchdog.read_seconds, which the runners pass
 def _bounded(read, seconds: float, *args):
     """One Playwright read in its own thread (Playwright's sync API refuses to run inside the MCP server's asyncio
     loop), for at most `seconds` (spec section 10 item 108). A page that never answers (a dialog left open, a renderer
-    that hangs) must not hold an apply step: on time out this read's own Playwright driver is ended, which fails the
-    hung call and frees its thread, and the read fails."""
-    before = watchdog.children()
+    that hangs) must not hold an apply step: on time out the driver this read started (noted by _playwright in the
+    holder it gets first) is ended, which fails the hung call and frees its thread, and the read fails. No other
+    thread's driver is touched (review #6)."""
+    holder: dict = {}
     pool = ThreadPoolExecutor(max_workers=1)
     try:
-        return pool.submit(read, *args).result(timeout=seconds)
+        return pool.submit(read, holder, *args).result(timeout=seconds)
     except TimeoutError:
-        watchdog.kill_new_drivers(before)
+        watchdog.kill_drivers(holder.get("drivers", set()))
         raise ReadbackError(f"读标签页 {seconds:g} 秒没有回应，已结束这次读页") from None
     finally:
         pool.shutdown(wait=False)
 
 
-def _glance(port: int, target: dict) -> dict:
+@contextmanager
+def _playwright(holder: dict):
+    """sync_playwright(), with the driver it starts noted in `holder` for _bounded."""
     from playwright.sync_api import sync_playwright
 
-    with sync_playwright() as p:  # leaving it drops the CDP connection; the browser and its tabs stay
+    before = watchdog.children()
+    with sync_playwright() as p:
+        holder["drivers"] = watchdog.own_driver(p, before)
+        yield p
+
+
+def _glance(holder: dict, port: int, target: dict) -> dict:
+    with _playwright(holder) as p:  # leaving it drops the CDP connection; the browser and its tabs stay
         return _extract(_find_page(p.chromium.connect_over_cdp(f"http://127.0.0.1:{int(port)}"), target))
 
 

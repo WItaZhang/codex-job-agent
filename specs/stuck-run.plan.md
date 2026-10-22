@@ -67,7 +67,7 @@
   - `check()`：用 `cdp_targets(port)` 列一次标签页。第一次（agent 起来之前）记下开始前就开着的。连不上时记下第一次连不上的时间，连上了再记一次。
   - `report(events)`：纯函数式，按 1.7 的五条给出中文的几行。
 - **`cdp_targets(port)`**：读 `/json/version` 的浏览器 websocket 地址，用一个最小的 RFC 6455 客户端发一次 `Target.getTargets`，读回答（处理分片），3 秒超时。不带 Origin 头。
-- **`kill_new_drivers(before)`**：本进程在 `before` 以后启动的、命令行带 `run-driver` 的子进程（Playwright 驱动），连同它们的子孙进程一起结束。
+- **`own_driver`、`kill_drivers`**：读页时起的那个 Playwright 驱动（起的时候按进程编号和启动时间记下），超时只结束它和它的子孙进程（审查 #6）。
 - **`orphan_agents(paths)`**：父进程是 1、命令行里有 `--mcp-config <这几个路径之一>` 的进程。
 
 ### 1.2 `apply_bridge.run_application`

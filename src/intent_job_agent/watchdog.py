@@ -5,7 +5,7 @@
 - `LIVE`: the agent run in progress in this process (one applying Chrome, so one at a time), so apply_status can say
   when it last wrote anything and stop_applying can stop it.
 - `follow`: feed an agent its instructions and read its output line by line until it ends, with a limit on every wait.
-- `kill_new_drivers`: the Playwright drivers a read started, ended when the read runs out of time.
+- `own_driver`, `kill_drivers`: the Playwright driver a read started, ended when the read runs out of time.
 - `me`, `alive`, `kill_orphans`: which tool server runs a step, whether it still does, and the agents one that
   stopped left behind.
 - `ChromeWatch`: the applying Chrome's tabs while an agent works (CDP Target.getTargets, which knows which tab opened
@@ -140,20 +140,45 @@ def children() -> set[tuple[int, str]]:
         return set()
 
 
-def kill_new_drivers(before: set[tuple[int, str]]) -> list[int]:
-    """End the Playwright drivers this process started since `before` (`children()` then), with their descendants: a
-    read stuck on a page that never answers fails once its driver is gone (spec section 10 item 108)."""
+def identify(pids) -> set[tuple[int, str]]:
+    """These processes as (pid, start time), the ones that run."""
+    try:
+        table = processes()
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {(pid, table[pid].started) for pid in pids if pid in table}
+
+
+def own_driver(playwright, before: set[tuple[int, str]]) -> set[tuple[int, str]]:
+    """The driver process a sync Playwright just started, as (pid, start time): the one its connection talks to
+    (Playwright 1.56), or else the drivers this process started since `before` (`children()` then)."""
+    try:
+        return identify([int(playwright._impl_obj._connection._transport._proc.pid)])
+    except (AttributeError, TypeError, ValueError):
+        me = os.getpid()
+        try:
+            table = processes()
+        except (OSError, subprocess.SubprocessError):
+            return set()
+        return {
+            (p.pid, p.started)
+            for p in table.values()
+            if p.ppid == me and (p.pid, p.started) not in before and "run-driver" in p.command
+        }
+
+
+def kill_drivers(drivers: set[tuple[int, str]]) -> list[int]:
+    """End these Playwright drivers (pid and start time, so never another process given the same pid) with their
+    descendants: a read stuck on a page that never answers fails once its own driver is gone, and no other thread's
+    driver is touched (spec section 10 item 108; review #6)."""
     try:
         table = processes()
     except (OSError, subprocess.SubprocessError):
         return []
-    me = os.getpid()
-    drivers = {
-        p.pid for p in table.values() if p.ppid == me and (p.pid, p.started) not in before and "run-driver" in p.command
-    }
-    for pid in list(drivers):
-        drivers |= descendants(pid, table)
-    return sorted(pid for pid in drivers if _kill(pid))
+    found = {pid for pid, started in drivers if pid in table and table[pid].started == started}
+    for pid in list(found):
+        found |= descendants(pid, table)
+    return sorted(pid for pid in found if _kill(pid))
 
 
 class Tree:

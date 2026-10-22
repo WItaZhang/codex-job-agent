@@ -272,13 +272,18 @@ class Blank:
         return obj
 
 
-def hangs_until_its_driver_ends(started: dict):
-    """A Playwright read on a page that never answers: it starts its driver, then waits until the driver is gone, as
-    a Playwright call fails once its driver quits."""
+def hangs_until_its_driver_ends(started: dict, other: bool = False):
+    """A Playwright read on a page that never answers: it starts its driver and notes it, as readback._playwright
+    does, then waits until the driver is gone, as a Playwright call fails once its driver quits. `other`: meanwhile
+    another thread of the same tool server starts a driver of its own (review #6)."""
 
-    def read(*_args):
+    def read(holder, *_args):
         driver = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(40)", "run-driver"])
         started["driver"] = driver
+        holder["drivers"] = watchdog.identify([driver.pid])
+        if other:
+            time.sleep(0.2)
+            started["other"] = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(40)", "run-driver"])
         while driver.poll() is None:
             time.sleep(0.05)
         raise RuntimeError("Target page, context or browser has been closed")
@@ -1204,3 +1209,30 @@ def test_a_stop_during_the_glance_before_a_resume_keeps_the_job_held(box):  # re
     hold = box.store.hold("j06")
     assert runner.calls == [] and status["status"] == "stopped"  # no agent was started for it
     assert hold is not None and hold["resuming"] is False and box.store.applications()["j06"]["status"] == "held"
+
+
+def test_a_read_that_runs_out_of_time_ends_its_own_driver_only(monkeypatch):  # review #6
+    from intent_job_agent.form_fill import readback
+
+    started = {}
+    monkeypatch.setattr(readback, "_glance", hangs_until_its_driver_ends(started, other=True))
+    try:
+        with pytest.raises(readback.ReadbackError):
+            readback.tab_state(9222, {"id": "T"}, seconds=1)
+        assert gone(started["driver"].pid)
+        assert started["other"].poll() is None  # another thread's driver (discover_jobs, say) goes on
+    finally:
+        for proc in started.values():
+            proc.kill()
+            proc.wait()
+
+
+def test_a_read_knows_the_playwright_driver_it_started():  # review #6
+    from playwright.sync_api import sync_playwright
+
+    before = watchdog.children()
+    with sync_playwright() as p:
+        mine = watchdog.own_driver(p, before)
+        assert len(mine) == 1
+        ((pid, started),) = mine
+        assert "run-driver" in watchdog.processes()[pid].command and watchdog.identify([pid]) == mine
