@@ -326,3 +326,145 @@ def test_the_form_fill_runner_reads_with_the_configured_limit(box, monkeypatch, 
     runner.read({"id": "T"}, tmp_path, Blank())
     runner.tab_state({"id": "T"})
     assert box.settings.apply.watchdog.read_seconds == 120 and seen == {"read": 120, "glance": 120}
+
+
+# --- S6-S11: stopping a step, and when each job last did anything --------------------------------------------------
+
+DAY = "2026-10-14"
+COMPANIES = [f"Co{n}" for n in range(10)] + ["Stripe, Inc.", "Acme", "Beta"]  # 1-5 review; 11 careful; rest submit
+
+
+class Blocking(FakeRunner):
+    """FakeRunner whose run of one job waits like a live agent registered in watchdog.LIVE: a stop-before-submit run
+    ends when the step is stopped (as run_application does), an auto-submitting one when the test lets it go."""
+
+    def __init__(self, job, outcomes=None):
+        super().__init__(outcomes)
+        self.job, self.release, self.started = job, threading.Event(), threading.Event()
+
+    def __call__(self, spec):
+        if spec.job_id != self.job:
+            return super().__call__(spec)
+        self.calls.append(spec)
+        stop = watchdog.LIVE.begin(spec.job_id, spec.mode)
+        self.started.set()
+        try:
+            while not (stop.is_set() or self.release.is_set()):
+                time.sleep(0.02)
+        finally:
+            watchdog.LIVE.end(stop)
+        if stop.is_set():
+            return apply_bridge.ApplyOutcome("pending", "stopped", ["你停下了这一步"])
+        return apply_bridge.ApplyOutcome("waiting" if spec.mode == "stop" else "applied", None, [])
+
+
+def batch_of(box):
+    write_applicant(box.data_dir)
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    return box.prepare_apply_batch(DAY)
+
+
+def in_background(box, runner, batch_id, summary, resume=None):
+    box.apply_runner, box.apply_in_background = runner, True
+    if resume is None:
+        box.start_applying(batch_id, summary)
+    else:
+        box.resume_applying(resume, summary)
+    assert runner.started.wait(10)
+
+
+def finished(box) -> dict:
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        status = box.apply_status()
+        if status["status"] != "running":
+            return status
+        time.sleep(0.05)
+    raise AssertionError("the step never ended")
+
+
+def test_stopping_the_first_step_ends_the_form_in_progress_and_leaves_the_rest_pending(box):  # S6, S11
+    batch = batch_of(box)
+    in_background(box, Blocking("j02"), batch["batch_id"], batch["summary"])
+    rows = {row["job_id"]: row for row in box.apply_status()["jobs"]}
+    assert rows["j00"]["finished"] and rows["j00"]["last_activity"] == rows["j00"]["finished"]
+    running = rows["j02"]
+    assert running["state"] == "running" and running["started"] and running["finished"] is None
+    assert running["agent_alive"] is True and 0 <= running["quiet_seconds"] < 5
+    assert rows["j03"]["started"] is None and "quiet_seconds" not in rows["j03"]
+    stopped = box.stop_applying()
+    assert stopped["stopped"] is True and stopped["current"]["job_id"] == "j02" and stopped["current"]["ended_now"]
+    status = finished(box)
+    assert status["status"] == "stopped" and status["stopping"] is False
+    states = {row["job_id"]: row["state"] for row in status["jobs"]}
+    applications = box.store.applications()
+    assert [applications[j]["status"] for j in ("j00", "j01", "j02", "j03", "j04")] == [
+        "waiting",
+        "waiting",
+        "pending",
+        "pending",
+        "pending",
+    ]
+    assert [states[j] for j in ("j02", "j03", "j04")] == ["stopped", "stopped", "stopped"]
+    assert not [a for a in box.store.apply_attempts() if a["job_id"] in ("j02", "j03", "j04")]  # not an attempt
+    assert status["void"] is False and status["next"]["phase"] == "rest"  # 1 and 2 worked: "继续" still works
+    box.apply_runner, box.apply_in_background = FakeRunner(), False
+    box.start_applying(batch["batch_id"], status["next"]["summary"])
+    assert box.store.applications()["j05"]["status"] == "applied"
+
+
+def test_an_auto_submitting_job_finishes_before_the_step_stops(box):  # S7
+    batch = batch_of(box)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    rest = box.apply_status()["next"]
+    runner = Blocking("j06")
+    in_background(box, runner, rest["batch_id"], rest["summary"])
+    stopped = box.stop_applying()
+    assert stopped["current"]["job_id"] == "j06" and stopped["current"]["ended_now"] is False
+    assert "等它做完" in stopped["message"]
+    assert box.apply_status()["stopping"] is True
+    runner.release.set()
+    status = finished(box)
+    applications = box.store.applications()
+    assert applications["j06"]["status"] == "applied" and applications["j07"]["status"] == "pending"
+    assert status["status"] == "stopped" and status["next"] is None, status["error"]
+
+
+def test_a_first_step_stopped_before_anything_worked_is_void(box):  # S8
+    batch = batch_of(box)
+    in_background(box, Blocking("j00"), batch["batch_id"], batch["summary"])
+    box.stop_applying()
+    status = finished(box)
+    assert status["void"] is True and status["next"] is None
+    assert {box.store.applications()[j]["status"] for j in ("j00", "j01", "j02", "j03", "j04")} == {"pending"}
+
+
+def test_a_stopped_resume_leaves_the_job_held(box):  # S9
+    batch = batch_of(box)
+    box.apply_runner = FakeRunner({"j01": ("failed", "captcha", ["jobs.example.test: tick the human check"])})
+    box.start_applying(batch["batch_id"], batch["summary"])
+    attempts = len(box.store.apply_attempts())
+    plan = box.prepare_resume(["j01"])
+    in_background(box, Blocking("j01"), None, plan["summary"], resume=plan["job_ids"])
+    assert box.store.hold("j01")["resuming"] is True
+    assert box.stop_applying()["current"]["ended_now"] is True
+    status = finished(box)
+    hold = box.store.hold("j01")
+    assert status["status"] == "stopped" and hold is not None and hold["resuming"] is False and hold["times"] == 1
+    assert box.store.applications()["j01"]["status"] == "held" and len(box.store.apply_attempts()) == attempts
+
+
+def test_stopping_when_nothing_runs_changes_nothing(box):  # S10
+    assert box.stop_applying() == {"stopped": False, "message": "现在没有在跑的一步"}
+
+
+def test_a_stop_asked_just_before_the_agent_starts_ends_it_at_once():
+    live = watchdog.Live()
+    assert live.stop(("stop",), job_id="j02") is None  # nothing running yet: kept for j02
+    first = live.begin("j01", "stop")
+    assert not first.is_set()
+    live.end(first)
+    assert live.begin("j02", "stop").is_set()
+    live.disarm()
+    assert not live.begin("j02", "stop").is_set()
