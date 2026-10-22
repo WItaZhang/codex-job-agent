@@ -854,3 +854,29 @@ def test_a_resume_that_may_have_submitted_voids_the_batch(box):  # review 1: spe
         box.start_applying(batch["batch_id"], rest)
     assert not [spec for spec in box.apply_runner.calls if spec.mode == "submit"]
     assert "可能已提交" in box.apply_status()["notice"]
+
+
+def test_after_a_resume_that_worked_the_second_step_is_offered(box):  # review 2: decision 23 G-d, item 101
+    batch = first_step_held(box)
+    box.apply_runner.outcomes = {}  # j01 goes through this time
+    resumed(box, ["j01"])
+    assert box.store.applications()["j01"]["status"] == "waiting"
+    upcoming = box.apply_status()["next"]
+    assert (upcoming["batch_id"], upcoming["phase"]) == (batch["batch_id"], "rest")
+    box.start_applying(upcoming["batch_id"], upcoming["summary"])  # the user said "继续"
+    assert [spec.job_id for spec in box.apply_runner.calls if spec.mode == "submit"] == ["j06", "j07"]
+
+
+def test_a_resume_that_did_not_settle_the_first_step_says_what_it_waits_for(box):  # review 2
+    first_step_held(box)
+    box.apply_runner.outcomes = {"j01": ("failed", "captcha", [])}  # held again
+    resumed(box, ["j01"])
+    status = box.apply_status()
+    assert status["next"] is None and "第一步还在等 1、2、3 处理完" in status["notice"]
+
+
+def test_a_step_offers_its_next_step_with_the_batch(box):
+    jobs = add_jobs(box, COMPANIES)
+    write_letters(box, jobs)
+    batch = step(box)
+    assert box.apply_status()["next"]["batch_id"] == batch["batch_id"]

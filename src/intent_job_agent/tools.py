@@ -1558,12 +1558,19 @@ class Toolbox:
                     {"job_id": item["job_id"], "other_sites": list(outcome.other_sites), "emails": list(outcome.emails)}
                 )
         upcoming, data = None, {}
-        if run["phase"] != "resume":  # a resume has no batch step of its own
-            data = self._settle(run["batch_id"])
-            if run["status"] != "running":
-                phase = self._next_phase(data)
-                if phase:
-                    upcoming = {"phase": phase, "summary": self._phase_summary(run["batch_id"], data, phase)}
+        # A resume has no batch step of its own: its jobs' batches say what comes next (spec section 10 item 101).
+        batches = [run["batch_id"]] if run["phase"] != "resume" else [item["batch_id"] for item in run["jobs"]]
+        for batch_id in dict.fromkeys(batches):
+            settled = self._settle(batch_id)
+            data = data or settled
+            phase = self._next_phase(settled) if run["status"] != "running" else None
+            if phase and upcoming is None:
+                upcoming = {
+                    "batch_id": batch_id,
+                    "phase": phase,
+                    "summary": self._phase_summary(batch_id, settled, phase),
+                }
+                data = settled
         void = bool(data.get("void"))
         status = {
             "batch_id": run["batch_id"],
@@ -1705,6 +1712,7 @@ class Toolbox:
             item = {
                 "n": hold["n"],
                 "job_id": job_id,
+                "batch_id": hold["batch_id"],
                 "title": shown.get("title") or job.title,
                 "company": shown.get("company") or job.company,
                 "mode": hold["mode"],
@@ -1809,7 +1817,7 @@ class Toolbox:
             "stopped": None,
             "jobs": [
                 {
-                    **{key: item[key] for key in ("n", "job_id", "title", "company", "mode", "via")},
+                    **{key: item[key] for key in ("n", "job_id", "batch_id", "title", "company", "mode", "via")},
                     "state": "queued",
                     "outcome": None,
                 }

@@ -67,7 +67,7 @@ description: 每日模块④：从投递清单取一批岗位，先写求职信�
 
 ## 5. 第二步：其余的
 
-1. 用户说"继续"时，展示 `apply_status()` 返回的 next.summary 原文，确认后 `start_applying(batch_id, summary)`（再弹一次窗）。
+1. 用户说"继续"时，展示 `apply_status()` 返回的 next.summary 原文，确认后 `start_applying(next.batch_id, next.summary)`（再弹一次窗）。接着做之后也一样：第一步卡在门槛的那一批，接着做成了一个，`next` 就给出它的第二步。
 2. 同样每隔两三分钟 `apply_status()`，结束后汇报：等你处理的（第 6 节）、已投、停在提交前（公司名单里的，由填表模块填好，按第 4 节的格式列出报告）、失败及原因、checklist。
 3. 用户自己提交了停在提交前的岗位后，同样用 `mark_applications` 记成已投。
 
