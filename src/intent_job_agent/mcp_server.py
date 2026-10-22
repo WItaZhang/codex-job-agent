@@ -69,6 +69,14 @@ Applying (project skill /apply):
   with its tab kept for the user. When the user says they handled them ("好了", with numbers or without: then all
   held jobs), call prepare_resume, show its summary and problems, then resume_applying with its job_ids and summary
   exactly; the host asks the user. "N 已投" and "N 不处理了" are mark_applications applied and skipped.
+- A step always ends: an agent silent for too long is ended (reason stalled) and the next job goes on. While a step
+  runs, apply_status gives each job's started and last_activity, and quiet_seconds and agent_alive for the one in
+  progress. When the user says stop ("停下"), call stop_applying and show its message; it never submits anything.
+- Starting a step or a resume returns a reminder: tell the user not to use the applying Chrome while it runs. Show
+  apply_status's chrome_warning as returned (someone may be using that Chrome).
+- other_session: another session's tool server runs a step; start nothing here. After a restart, an idle
+  apply_status may give the latest batch's next step (next) and a notice; a job held as interrupted may have been
+  submitted: the user checks its tab first.
 - Never ask for or show passwords, an SSN, card details or keys in chat."""
 
 

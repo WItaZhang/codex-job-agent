@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
-from .. import apply_bridge
+from .. import apply_bridge, watchdog
 from ..applicant import Applicant
 from ..config import Settings
 from ..domain import InvariantError
@@ -123,6 +123,7 @@ class JobOutcome(BaseModel):
     other_sites: tuple[str, ...] = ()  # sites opened besides the job's, for /apply's checklist (spec 4.10 item 6)
     tab_id: str | None = None  # the job's tab as read back: /apply keeps it for a job held at a gate (spec item 97)
     tab_url: str | None = None
+    chrome: tuple[str, ...] = ()  # what changed in the applying Chrome that the agent did not do (spec item 114)
 
 
 @dataclass(frozen=True)
@@ -493,7 +494,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
     notes: list[str] = []
     checks: dict[str, bool | int] = {}
     seen = _Seen()
-    status, page_dir, agent, sites = "system_error", None, None, ()
+    status, page_dir, agent, sites, chrome = "system_error", None, None, (), ()
     store = recording_store(ctx, entry.url)
     try:
         port = ctx.runner.ensure_chrome()
@@ -517,6 +518,8 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         agent = ctx.redactor.mask(agent_result(outcome))
         notes.extend(outcome.notes)
         sites = tuple(ctx.redactor.mask(site) for site in outcome.other_sites)
+        chrome = tuple(ctx.redactor.mask(line) for line in outcome.chrome)
+        notes.extend(f"{watchdog.CHROME_USE}：{line}" for line in chrome)
         if outcome.status != "pending":  # pending: the agent never started (apply_bridge.outcome_status)
             seen.filled, seen.tabs_before = True, len(_pages(before))
             status, page_dir = _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store)
@@ -547,6 +550,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         other_sites=sites,
         tab_id=str(seen.target.get("id")) if seen.target else None,
         tab_url=ctx.redactor.mask(str(seen.target.get("url", ""))) if seen.target else None,
+        chrome=chrome,
     )
     meta = {
         "job_id": entry.id,
@@ -983,10 +987,11 @@ class FormFillRunner:
         )
 
     def read(self, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> readback.FinalPage:
-        return readback.read_final_page(self._port(), target, out_dir, redactor, sheet)
+        seconds = self.settings.apply.watchdog.read_seconds  # spec section 10 item 108
+        return readback.read_final_page(self._port(), target, out_dir, redactor, sheet, seconds=seconds)
 
     def tab_state(self, target: dict) -> PageState:
-        return readback.tab_state(self._port(), target)
+        return readback.tab_state(self._port(), target, seconds=self.settings.apply.watchdog.read_seconds)
 
     def _port(self) -> int:
         if self.port is None:

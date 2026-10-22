@@ -10,6 +10,7 @@
 - 6.1 的真实岗位试填冻结，等投递需要填表模块时再做；录制的触发方式（4.2、4.3）和重放以哪种做法为主（6.4）因此还没经过真实网站的验证。验证结果推翻它们时，改写本规格。
 - 接入 /apply 已做完（2026-10-20，分支 `claude/awesome-cori-87f1f9`，计划 `apply-form-fill.plan.md`，总规格决定 18–20），只用切片 1 和 2a 做到的部分。/apply 怎么调用本模块见第 9 节；接入对本模块的改动见决定 33。
 - 门槛交给用户（2026-10-20，总规格决定 22）对本模块的改动见决定 34：填表 agent 用 Gmail 读验证码，/apply 里卡在门槛的岗位记成等你处理，用户处理完后从岗位地址重填。
+- 一步卡住不结束（2026-10-21，总规格决定 24）对本模块的改动见决定 35：agent 没有输出太久就结束它，读回有时限，报告多一个原因"你停下了"。
 
 本规格写的是整个模块。按切片先做哪一部分、哪些暂时简化，见各切片的计划（决定 26）。
 
@@ -293,7 +294,8 @@ items:
   - 筛选题要本人作答：页面写明筛选题或开放题要申请人本人作答、不许用 AI 写（5.5）；
   - 已经申请过；
   - 页面出错；
-  - 卡住；
+  - 卡住（填表 agent 自己报的，或者它太久没有任何输出、被代码结束的，4.2）；
+  - 你停下了（/apply 里说"停下"，`spec.md` §10 第 109 条）；
   - 标签页丢失；
   - 程序没跑起来。
 
@@ -325,7 +327,7 @@ replay_capability: fill | check_only                       （6.3）
 verdict: maybe_submitted | ok | review_then_submit | do_not_submit | not_filled
 not_filled_reason: gate | login_failed | needs_answer | expired | wrong_job | email_only
                    | screening_requires_candidate_written_answers
-                   | already_applied | page_error | stuck | tab_lost | system_error
+                   | already_applied | page_error | stuck | stopped | tab_lost | system_error
 gate: {kind, page, todo, arbitration_first_sentence}
 child_tabs: [url]
 rounds: [{round, fix_list: [field_id], review: ok | failed}]
@@ -439,6 +441,8 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 页面显示已经申请过。
   - 卡住，由代码判定：同一页（4.3 的页标识）连续 3 次 `checkpoint("filled")` 之后，页面都没有变成新的页，`checkpoint` 就返回 stop。agent 停下，状态记 `stuck`。
   - 超时（写在配置中，默认 900 秒）。
+  - 填表 agent 连续一段时间没有任何输出（配置 `apply.watchdog.stall_seconds`，默认 300 秒）：代码结束它和它启动的全部进程，结果码 `stalled`，报告写"卡住"（`spec.md` §10 第 107 条）。
+  - 用户在 /apply 里说"停下"：代码马上结束它，报告写"你停下了"，这个岗位回到原来的状态（`spec.md` §10 第 109 条）。
 - 以下两种由代码判定，不靠 agent：
   - `tab_lost`：岗位的标签页（含它打开的子标签页）都不见了，或者 CDP 断开。这个岗位记为没填完。做下一个岗位前先重新连 Chrome；连不上，就把剩下的岗位都记为 `tab_lost`。
   - `system_error`：填表 agent 没有起来、一次工具调用都没有，或者运行器出错。判断方法和 spec §10 第 67 条相同。
@@ -446,6 +450,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 ### 4.3 读回（代码）
 
 - 代码经 CDP 连上投递用的 Chrome，和填表 agent 用同一个浏览器。页面由代码自己读，不经过填表 agent。
+- 读一次最多 `apply.watchdog.read_seconds`（默认 120 秒）。页面不回应（例如留着一个对话框）时，到时限就结束这次读页的 Playwright 驱动，算读回失败（`spec.md` §10 第 108 条）。
 - 哪些标签页是这个岗位的：
   - 运行开始前就开着的，一律不是。
   - 填表 agent 第一次调用 `checkpoint` 之前：这次运行新开的、页面跳转到了岗位地址那个网站（同一个 host）的标签页。
@@ -1045,6 +1050,7 @@ data/local/form-fill/
   - 修正轮数（2）；
   - 填表模型和 `reviewer_model`；
   - 单个岗位的超时、`fix_timeout_seconds`；
+  - `apply.watchdog`：多久没有输出算卡住、agent 退出后最多再读多久、读一次标签页的上限、看进程和 Chrome 的间隔（`spec.md` §10 第 107、108 条）；
   - `checkpoint` 的时限、判定卡住的次数（3）、后台补录读页的间隔（1 秒）；
   - `allowed_tools`、`disallowed_tools`；
   - 提交按钮词表；

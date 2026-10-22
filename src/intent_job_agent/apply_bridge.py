@@ -15,7 +15,9 @@ codes. The changes are this project's risk controls (plan, slice 6):
   CAPTCHA, an e-mail code that never came) stops the job on its page, tab kept, for the user (spec 4.10 item 10);
 - the places where on-site work is fine and the relocation answer come from `applicant.yaml`, not one city;
 - open-ended questions follow the user's rule (on the question, no piled-up experience), not "cite an achievement";
-- the full stream is logged under the data directory and summarised (other sites opened, emails sent).
+- the full stream is logged under the data directory and summarised (other sites opened, emails sent);
+- every wait has a limit: an agent that quits, falls silent or runs out of time is ended with every process it
+  started, and the user can stop a stop-before-submit run (spec 4.10 item 11, section 10 items 107, 109).
 
 Nothing here stores the applicant profile in the project database.
 """
@@ -24,17 +26,15 @@ import html
 import json
 import os
 import re
-import signal
 import subprocess
 import tempfile
-import threading
 import urllib.request
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import applypilot_bridge
+from . import applypilot_bridge, watchdog
 from .config import Settings
 from .domain import InvariantError
 from .form_fill import readback
@@ -73,6 +73,7 @@ class ApplyOutcome:
     log: str | None = None
     tab: dict | None = None  # a held job's tab: its CDP id and address (spec section 10 item 97)
     last_url: str | None = None  # the last address the agent opened, to tell its tab apart
+    chrome: list[str] = field(default_factory=list)  # what changed in the Chrome the agent did not do (item 114)
 
 
 # --- setup ------------------------------------------------------------------------------------------------
@@ -442,7 +443,7 @@ def parse_result(output: str) -> str:
     return "failed:no_result_line"
 
 
-SYSTEM_RESULTS = ("failed:no_result_line", "failed:timeout")
+SYSTEM_RESULTS = ("failed:no_result_line", "failed:timeout", "failed:stalled")  # stalled: spec section 10 item 107
 # Gates the user passes personally: the job waits as held, its tab kept (spec 4.10 item 10, section 10 item 97).
 GATES = ("captcha", "login_issue", "sso_required", "email_verification")
 
@@ -628,77 +629,121 @@ def run_application(
     env.pop("CAPSOLVER_API_KEY", None)  # nothing in a run may solve a CAPTCHA (spec section 10 item 98)
     # The working directory holds only the files to upload (ApplyPilot copies them to apply-workers/current),
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
-    proc = subprocess.Popen(
-        claude_command(
-            settings,
-            mcp_path,
-            read_dirs,
-            denied=[Path(data_dir), profile],
-            extra_disallowed=extra_disallowed,
-            extra_allowed=extra_allowed,
-        ),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        cwd=str(config.APPLY_WORKER_DIR),
-        start_new_session=True,
-    )
-    timed_out = threading.Event()
-
-    def stop():
-        timed_out.set()
-        _kill_group(proc)
-
-    timer = threading.Timer(settings.apply.job_timeout_seconds, stop)
-    timer.start()
-    texts, events = [], []
+    stop = watchdog.LIVE.begin(spec.job_id, spec.mode)  # from here a stop is heard, before the agent starts
     try:
-        proc.stdin.write(text)
-        proc.stdin.close()
+        chrome = watchdog.ChromeWatch(
+            port,
+            settings.apply.blocked_origins,
+            own=(spec.resume_tab,),
+            down_after=settings.apply.watchdog.down_after,
+        )
+        chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
+        proc = None
+        if watchdog.LIVE.launch(stop):  # a stop asked before this point keeps the agent from starting (review #5)
+            proc = subprocess.Popen(
+                claude_command(
+                    settings,
+                    mcp_path,
+                    read_dirs,
+                    denied=[Path(data_dir), profile],
+                    extra_disallowed=extra_disallowed,
+                    extra_allowed=extra_allowed,
+                ),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                cwd=str(config.APPLY_WORKER_DIR),
+                start_new_session=True,
+            )
+            watchdog.LIVE.spawned(stop, proc.pid)  # the step records it, to end it after a restart (review #7)
+    except BaseException:
+        watchdog.LIVE.end(stop)
+        raise
+    if proc is None:
+        watchdog.LIVE.end(stop)
+        return ApplyOutcome(
+            "pending", "stopped", ["你停下了这一步：这个岗位的 agent 还没起来，就不起了，网站上什么都没发生"]
+        )
+    limits = settings.apply.watchdog
+    tree = watchdog.Tree(proc.pid)
+    texts, events, pages = [], [], []
+    try:
         with log_path.open("w", encoding="utf-8") as log:
-            for line in proc.stdout:
+
+            def on_line(line: str) -> None:
+                watchdog.LIVE.touch()
                 log.write(mask(line) if mask else line)
-                try:
-                    message = json.loads(line)
-                except json.JSONDecodeError:
-                    texts.append(line.strip())
-                    continue
-                if message.get("type") == "assistant":
-                    for block in message.get("message", {}).get("content", []):
-                        if block.get("type") == "text":
-                            texts.append(block.get("text", ""))
-                        elif block.get("type") == "tool_use":
-                            events.append({"name": block.get("name", ""), "input": block.get("input", {})})
-                elif message.get("type") == "result":
-                    texts.append(message.get("result", "") or "")
-        proc.wait(timeout=60)
-    finally:
-        timer.cancel()
-        if proc.poll() is None:
-            _kill_group(proc)
+                log.flush()  # the log's time is the agent's last output (spec section 10 item 107)
+                _read_line(line, texts, events, pages)
+
+            why = watchdog.follow(
+                proc,
+                text,
+                on_line,
+                timeout=settings.apply.job_timeout_seconds,
+                stall=limits.stall_seconds,
+                drain=limits.drain_seconds,
+                interval=limits.interval_seconds,
+                stop=stop,
+                ticks=(tree.scan, chrome.check),
+            )
+        chrome.check()  # how the agent left the tabs
+    finally:  # whatever ended the run: the agent and everything it started (spec section 10 item 107)
+        tree.kill(alive=proc.poll() is None)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        proc.stdout.close()
+        watchdog.LIVE.end(stop)
+    seen = audit(events, spec.url)
+    used = chrome.report(events, pages)
+    if why == "stopped":  # the user stopped the step (item 109): nothing was submitted, the job goes back
+        said = ["你停下了这一步：这个岗位没有做完，网站上没有提交任何东西"]
+        return ApplyOutcome(
+            "pending", "stopped", said, seen["other_sites"], seen["emails"], str(log_path), None, last_url(events), used
+        )
     output = "\n".join(texts)
-    result = "failed:timeout" if timed_out.is_set() else parse_result(output)
+    result = f"failed:{why}" if why else parse_result(output)
     status, reason = outcome_status(spec.mode, result, acted=bool(events))
     said = notes(output)
     if status == "pending":  # never reached the site: keep the last thing it printed to explain why
         last = [line.strip() for line in output.splitlines() if line.strip()]
         said = [last[-1][:300]] if last else [f"exit code {proc.returncode}"]
-    seen = audit(events, spec.url)
+    if why == "stalled":
+        said.append(f"投递 agent {limits.stall_seconds:g} 秒没有任何输出，算卡住，已结束它")
     return ApplyOutcome(
-        status, reason, said, seen["other_sites"], seen["emails"], str(log_path), last_url=last_url(events)
+        status, reason, said, seen["other_sites"], seen["emails"], str(log_path), None, last_url(events), used
     )
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
-    """Claude Code and the MCP servers it started (its own process group)."""
+def _read_line(line: str, texts: list, events: list, pages: list) -> None:
+    """One line of the agent's stream-json: its text and final result go to `texts`, its tool calls to `events`, the
+    Page URLs its browser answered with to `pages`."""
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (AttributeError, ProcessLookupError, PermissionError):
-        proc.kill()
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        texts.append(line.strip())
+        return
+    if not isinstance(message, dict):
+        return
+    if message.get("type") == "assistant":
+        for block in message.get("message", {}).get("content", []):
+            if block.get("type") == "text":
+                texts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                events.append({"name": block.get("name", ""), "input": block.get("input", {})})
+    elif message.get("type") == "result":
+        texts.append(message.get("result", "") or "")
+    elif message.get("type") == "user":
+        for block in (message.get("message") or {}).get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "tool_result":
+                content = block.get("content")
+                items = content if isinstance(content, list) else [{"text": content}]
+                for item in items:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        pages.extend(watchdog.PAGE_URL.findall(item["text"]))
 
 
 class ChromeRunner:

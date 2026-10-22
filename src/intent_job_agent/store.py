@@ -3,6 +3,7 @@
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -55,6 +56,10 @@ CREATE TABLE IF NOT EXISTS apply_holds (job_id TEXT PRIMARY KEY, batch_id TEXT N
                                         n INTEGER, mode TEXT NOT NULL, via TEXT NOT NULL, reason TEXT NOT NULL,
                                         note TEXT, tab_id TEXT, tab_url TEXT, held_at TEXT NOT NULL,
                                         times INTEGER NOT NULL, resuming INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS apply_running (id INTEGER PRIMARY KEY CHECK (id = 1), owner_pid INTEGER NOT NULL,
+                                          owner_started TEXT NOT NULL, kind TEXT NOT NULL, batch_id TEXT,
+                                          phase TEXT, job_id TEXT, mode TEXT, via TEXT, agent_pid INTEGER,
+                                          agent_started TEXT, since TEXT NOT NULL);
 """
 
 
@@ -85,17 +90,53 @@ class Store:
         # Callers serialize access (the MCP server holds a lock); the SDK may call from worker threads.
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
+        self._depth = 0  # > 0 inside exclusive(): writes join that transaction
         self.db.executescript(_SCHEMA)
         columns = {row["name"] for row in self.db.execute("PRAGMA table_info(applications)")}
         if "note" not in columns:  # databases created before slice 6
-            with self.db:
+            with self._tx():
                 self.db.execute("ALTER TABLE applications ADD COLUMN note TEXT")
+
+    # --- transactions --------------------------------------------------------------
+
+    @contextmanager
+    def _tx(self):
+        """A write transaction of its own, or, inside exclusive(), part of that one."""
+        if self._depth:
+            yield
+            return
+        with self.db:
+            yield
+
+    @contextmanager
+    def exclusive(self):
+        """One write transaction taken at once (BEGIN IMMEDIATE): what is read inside it cannot change under it from
+        another connection - another session's tool server, or a step's own thread - until it ends. The writes made
+        inside it join it (review #3)."""
+        if self._depth:
+            self._depth += 1
+            try:
+                yield
+            finally:
+                self._depth -= 1
+            return
+        self.db.commit()  # nothing may be pending outside a transaction of ours
+        self.db.execute("BEGIN IMMEDIATE")
+        self._depth = 1
+        try:
+            yield
+        except BaseException:
+            self._depth = 0
+            self.db.rollback()
+            raise
+        self._depth = 0
+        self.db.commit()
 
     # --- jobs and labels (never touch the intent) ---------------------------------
 
     def add_job(self, job: Job) -> None:
         """Store a new job, or rewrite a stored one in place: it keeps its place in storing order (spec §10 item 82)."""
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT INTO jobs (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
                 (job.id, job.model_dump_json()),
@@ -136,7 +177,7 @@ class Store:
                 f"Job {job_id} has tags a misread correction set (spec section 10 item 83); fix them the same way"
             )
         job = self.job(job_id).model_copy(update={"tags": tags})
-        with self.db:
+        with self._tx():
             self.db.execute("UPDATE jobs SET data = ? WHERE id = ?", (job.model_dump_json(), job_id))
             self.db.execute("INSERT OR REPLACE INTO tagged (job_id, tagged_at) VALUES (?, ?)", (job_id, _now()))
             # Tagged now, so the dimensions that need backfill for older jobs are already covered.
@@ -164,7 +205,7 @@ class Store:
         labelled = self.db.execute(
             "SELECT 1 FROM labels WHERE json_extract(data, '$.job_id') = ?", (job_id,)
         ).fetchone()
-        with self.db:
+        with self._tx():
             if added:
                 row = self.db.execute("SELECT 1 FROM tag_overrides WHERE job_id = ?", (job_id,)).fetchone()
                 if row:
@@ -191,7 +232,7 @@ class Store:
 
     def log_fetch(self, kind: str) -> None:
         """Jobs were fetched or imported today (the user's local date)."""
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT INTO fetch_log (day, kind, at) VALUES (?, ?, ?)", (date.today().isoformat(), kind, _now())
             )
@@ -215,7 +256,7 @@ class Store:
         if job_id in self.shown_job_ids():
             raise InvariantError(f"Job {job_id} was already shown; fix its tags through a misread correction")
         job = self.job(job_id).model_copy(update={"tags": []})
-        with self.db:
+        with self._tx():
             self.db.execute("UPDATE jobs SET data = ? WHERE id = ?", (job.model_dump_json(), job_id))
             self.db.execute("DELETE FROM tagged WHERE job_id = ?", (job_id,))
             self.db.execute("DELETE FROM backfills WHERE job_id = ?", (job_id,))
@@ -230,14 +271,14 @@ class Store:
         return dict(row) if row else None
 
     def mark_external(self, url: str, job_id: str | None, status: str) -> None:
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT OR REPLACE INTO external_rows (url, job_id, status) VALUES (?, ?, ?)", (url, job_id, status)
             )
 
     def record_board_snapshot(self, source: str, board: str, job_ids: list[str]) -> None:
         """The complete set of postings a successful fetch saw; only successful fetches are recorded."""
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT INTO board_snapshots (source, board, job_ids, fetched_at) VALUES (?, ?, ?, ?)",
                 (source, board, json.dumps(sorted(job_ids)), _now()),
@@ -255,7 +296,7 @@ class Store:
         return row is not None and job.id in json.loads(row["job_ids"])
 
     def save_selection(self, day: str, items: list[tuple[str, str]]) -> None:
-        with self.db:
+        with self._tx():
             if self.db.execute("SELECT 1 FROM selections WHERE day = ?", (day,)).fetchone():
                 raise InvariantError(f"Jobs for {day} were already selected")
             self.db.executemany(
@@ -294,7 +335,7 @@ class Store:
         payload = {"job_id": job_id, "tags": tags, "label_id": label_id}
         if from_job:
             payload |= {"from_job": from_job, "labelled": int(labelled)}
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT OR REPLACE INTO tag_overrides (job_id, tags, decided_at) VALUES (?, ?, ?)",
                 (job_id, json.dumps(tags), _now()),
@@ -303,7 +344,7 @@ class Store:
 
     def add_label(self, label: Label) -> None:
         self.job(label.job_id)
-        with self.db:
+        with self._tx():
             self.db.execute("INSERT INTO labels (id, data) VALUES (?, ?)", (label.id, label.model_dump_json()))
 
     def _label(self, row) -> Label:
@@ -320,11 +361,11 @@ class Store:
 
     def add_support(self, label_id: str, refs: list[str]) -> None:
         """A consistent label recorded as support for entries; not an intent change."""
-        with self.db:
+        with self._tx():
             self.db.executemany("INSERT INTO support (label_id, ref) VALUES (?, ?)", [(label_id, r) for r in refs])
 
     def add_dimension_request(self, text: str, label_id: str | None) -> None:
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT INTO dimension_requests (text, label_id, created_at) VALUES (?, ?, ?)", (text, label_id, _now())
             )
@@ -345,7 +386,7 @@ class Store:
 
     def list_applications(self, job_ids: list[str], day: str) -> None:
         """Jobs entering the list for the first time start as pending; jobs listed before keep their status."""
-        with self.db:
+        with self._tx():
             self.db.executemany(
                 "INSERT OR IGNORE INTO applications (job_id, status, first_listed, updated_at) "
                 "VALUES (?, 'pending', ?, ?)",
@@ -365,7 +406,7 @@ class Store:
         now = _now()
         changed = [job_id for job_id in dict.fromkeys(job_ids) if listed[job_id]["status"] != status]
         holds = {job_id: self.hold(job_id) for job_id in changed}
-        with self.db:
+        with self._tx():
             self.db.executemany(
                 "UPDATE applications SET status = ?, updated_at = ?, note = NULL WHERE job_id = ?",
                 [(status, now, job_id) for job_id in job_ids],
@@ -393,7 +434,7 @@ class Store:
         if hold is not None and set(hold) != set(HOLD_FIELDS):
             raise InvariantError(f"A hold has exactly these fields: {list(HOLD_FIELDS)}")
         now = _now()
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "UPDATE applications SET status = ?, note = ?, updated_at = ? WHERE job_id = ?",
                 (status, note, now, job_id),
@@ -420,7 +461,7 @@ class Store:
     def set_resuming(self, job_ids: list[str], on: bool) -> None:
         """Mark held jobs as being resumed, before their run starts (item 102): a mark left behind by a stopped
         server tells the next resume to check the tab first."""
-        with self.db:
+        with self._tx():
             self.db.executemany(
                 "UPDATE apply_holds SET resuming = ? WHERE job_id = ?", [(int(on), job_id) for job_id in job_ids]
             )
@@ -442,7 +483,7 @@ class Store:
     def save_cover_letter(self, job_id: str, resume_id: str) -> None:
         """Which resume a saved letter was written from. The files' location is derived from the job id, so no
         path is stored (the project can move; older rows' path columns are ignored)."""
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT OR REPLACE INTO cover_letters (job_id, resume_id, txt_path, pdf_path, created_at) "
                 "VALUES (?, ?, '', '', ?)",
@@ -454,11 +495,72 @@ class Store:
         return dict(row) if row else None
 
     def save_apply_batch(self, batch_id: str, day: str, data: dict) -> None:
-        with self.db:
+        with self._tx():
+            self._save_batch(batch_id, day, data)
+
+    def _save_batch(self, batch_id: str, day: str, data: dict) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO apply_batches (id, day, data, created_at) VALUES (?, ?, ?, ?)",
+            (batch_id, day, json.dumps(data, ensure_ascii=False), _now()),
+        )
+
+    def latest_apply_batch(self) -> str | None:
+        """The batch saved last."""
+        row = self.db.execute("SELECT id FROM apply_batches ORDER BY rowid DESC LIMIT 1").fetchone()
+        return row["id"] if row else None
+
+    def running_phases(self) -> list[tuple[str, str]]:
+        """(batch, step) of every batch step the database holds as running."""
+        rows = self.db.execute(
+            "SELECT id, json_extract(data, '$.phases.review') AS review, json_extract(data, '$.phases.rest') AS rest "
+            "FROM apply_batches WHERE review = 'running' OR rest = 'running' ORDER BY rowid"
+        )
+        return [(row["id"], phase) for row in rows for phase in ("review", "rest") if row[phase] == "running"]
+
+    # --- the apply step or resume in progress (spec section 10 item 111) ---------------------------------
+
+    def begin_activity(self, owner: tuple[int, str], kind: str, batch: tuple | None = None) -> None:
+        """A step or a resume starts: which tool server runs it (pid and start time) and, for a step, `batch` -
+        (batch id, step, day, data) - saved in the same transaction. One at a time per database: another one still
+        recorded is refused."""
+        batch_id, phase = (batch[0], batch[1]) if batch else (None, None)
+        try:
+            with self._tx():
+                self.db.execute(
+                    "INSERT INTO apply_running (id, owner_pid, owner_started, kind, batch_id, phase, since) "
+                    "VALUES (1, ?, ?, ?, ?, ?, ?)",
+                    (owner[0], owner[1], kind, batch_id, phase, _now()),
+                )
+                if batch:
+                    self._save_batch(batch_id, batch[2], batch[3])
+        except sqlite3.IntegrityError:
+            raise InvariantError("Another apply step or resume is still running") from None
+
+    def activity(self) -> dict | None:
+        row = self.db.execute("SELECT * FROM apply_running WHERE id = 1").fetchone()
+        return dict(row) if row else None
+
+    def activity_job(self, owner: tuple[int, str], job_id: str | None, mode: str | None, via: str | None) -> None:
+        """The job `owner`'s running step is on (written before it reaches its site), or none; its agent not yet."""
+        with self._tx():
             self.db.execute(
-                "INSERT OR REPLACE INTO apply_batches (id, day, data, created_at) VALUES (?, ?, ?, ?)",
-                (batch_id, day, json.dumps(data, ensure_ascii=False), _now()),
+                "UPDATE apply_running SET job_id = ?, mode = ?, via = ?, agent_pid = NULL, agent_started = NULL "
+                "WHERE owner_pid = ? AND owner_started = ?",
+                (job_id, mode, via, owner[0], owner[1]),
             )
+
+    def activity_agent(self, owner: tuple[int, str], pid: int, started: str | None) -> None:
+        """The agent `owner`'s step or resume started, by pid and start time (review #7)."""
+        with self._tx():
+            self.db.execute(
+                "UPDATE apply_running SET agent_pid = ?, agent_started = ? WHERE owner_pid = ? AND owner_started = ?",
+                (pid, started, owner[0], owner[1]),
+            )
+
+    def end_activity(self, owner: tuple[int, str]) -> None:
+        """`owner`'s step or resume is closed: only its own row goes (review #3)."""
+        with self._tx():
+            self.db.execute("DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ?", (owner[0], owner[1]))
 
     def apply_batch(self, batch_id: str) -> dict:
         row = self.db.execute("SELECT day, data FROM apply_batches WHERE id = ?", (batch_id,)).fetchone()
@@ -469,7 +571,7 @@ class Store:
     # --- intent: initialize once, then change only through accepted proposals ---------
 
     def initialize(self, intent: IntentModel, vocab: Vocabulary) -> IntentModel:
-        with self.db:
+        with self._tx():
             if self.db.execute("SELECT 1 FROM intent_versions").fetchone():
                 raise InvariantError("The intent is already initialized; later changes need a user decision")
             intent = intent.model_copy(update={"version": 1})
@@ -502,7 +604,7 @@ class Store:
     # --- analyses, proposals and decisions --------------------------------------------
 
     def save_analysis(self, analysis: Analysis) -> None:
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "INSERT OR REPLACE INTO analyses (id, data) VALUES (?, ?)", (analysis.id, analysis.model_dump_json())
             )
@@ -534,7 +636,7 @@ class Store:
         """Record a choice that does not change the intent ("no_change", "feedback")."""
         if kind == "accept":
             raise InvariantError("Accepting a proposal goes through apply_decision")
-        with self.db:
+        with self._tx():
             if kind in ("no_change", "feedback"):  # options offered so far are no longer pending
                 self.db.execute(
                     "UPDATE proposals SET status = 'closed' WHERE analysis_id = ? AND status = 'pending'",
@@ -543,7 +645,7 @@ class Store:
             return self._decision(analysis_id, kind, None, payload)
 
     def close_pending(self, analysis_id: str) -> None:
-        with self.db:
+        with self._tx():
             self.db.execute(
                 "UPDATE proposals SET status = 'closed' WHERE analysis_id = ? AND status = 'pending'", (analysis_id,)
             )
@@ -571,7 +673,7 @@ class Store:
         after = after.model_copy(update={"version": current + 1})
         result, _ = replay(evaluate(before, self, self.settings), after, self, self.settings)
 
-        with self.db:
+        with self._tx():
             decision_id = self._decision(
                 proposal.analysis_id,
                 "accept",

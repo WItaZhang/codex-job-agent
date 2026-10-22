@@ -34,6 +34,7 @@ GATE_TEXT = {
     "sso_required": "单点登录",
     "captcha": "验证码",
     "email_verification": "邮箱验证码",
+    "interrupted": "工具服务中途停了，可能已经交过",  # not a gate: held for the user to look (item 113)
 }
 STEP_NAMES = {"review": "第一步", "rest": "第二步", "resume": "接着做"}  # in the notification (item 99)
 LABELS = {
@@ -111,6 +112,8 @@ def application_result(report: JobReport) -> Result:
     agent, conclusion = report.agent_result, report.conclusion
     if conclusion == "maybe_submitted":  # before anything else: a page said "received", so never pending again
         return Result("applied", "maybe_submitted")
+    if agent == "stopped":  # the user stopped the step (spec section 10 item 109): the job goes back where it was
+        return Result("pending", "stopped")
     if report.status == "system_error" or agent == "system_error":  # nothing reached the site (spec item 67)
         return Result("pending", "system_error")
     if conclusion in ("check_then_submit", "do_not_submit"):
@@ -128,6 +131,24 @@ def application_result(report: JobReport) -> Result:
     if agent and agent != "dry_run":
         return Result("failed", agent)
     return Result("failed", report.not_filled_reason or conclusion)
+
+
+def close_step(data: dict, phase: str, *, broke: bool, worked: bool, held: list[str], maybe: str | None) -> dict:
+    """A batch's step that has ended - done, stopped, broken or cut short by a tool server that stopped (spec section
+    10 items 68, 90, 101, 109, 112) - written into the batch's data. `broke`: the run itself failed; `worked`: a job
+    of the step was filled or submitted; `held`: its jobs held at a gate; `maybe`: a job that may have been submitted.
+    A first step with nothing that worked waits for its held jobs, or else voids the batch; a possible submission
+    voids it either way."""
+    data["phases"][phase] = "done"
+    if phase == "review" and not broke and not (maybe or worked) and held:
+        data["review_holds"] = held  # not void yet: decided once the held jobs are dealt with (item 101)
+    elif maybe or (phase == "review" and (broke or not worked)):
+        if data["phases"]["rest"] == "proposed":
+            data["phases"]["rest"] = "void"
+        data["void"] = True
+        if maybe:
+            data["void_reason"] = {"why": "maybe_submitted", "job_id": maybe}
+    return data
 
 
 def note(reason: str, conclusion: str, run_id: str, notes) -> str:

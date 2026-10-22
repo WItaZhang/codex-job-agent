@@ -85,6 +85,16 @@ class ApplyDone(_Section):
     allowed: list[str]  # failure categories that are fine (apply_fill.CATEGORIES)
 
 
+class ApplyWatchdog(_Section):
+    """Every wait of an apply step has a limit (spec section 10 items 107, 108, 114)."""
+
+    stall_seconds: float = Field(gt=0)  # an agent silent this long is stalled: it and its processes are ended
+    drain_seconds: float = Field(gt=0)  # after the agent quits, how long its last output may still take
+    read_seconds: float = Field(gt=0)  # one read of a tab by code (read back, the glance before a resume)
+    interval_seconds: float = Field(gt=0)  # how often the agent's processes and the applying Chrome are looked at
+    down_after: int = Field(gt=0)  # looks in a row without an answer before the applying Chrome counts as gone
+
+
 class Apply(_Section):
     applicant_dir: str
     batch_size: int = Field(gt=0)
@@ -104,6 +114,7 @@ class Apply(_Section):
     chrome_profile_strip: list[str]
     done: ApplyDone
     notify: bool  # a macOS notification when a step ends and jobs wait for the user (spec 4.10 item 10)
+    watchdog: ApplyWatchdog
 
 
 class FormFill(_Section):
