@@ -42,23 +42,26 @@ class Proc:
 
 def processes() -> dict[int, Proc]:
     """Every process: pid, parent, process group, start time and command line. The start time is written the same
-    way whatever the caller's locale and time zone, so two tool servers read the same process the same way."""
-    out = subprocess.run(
+    way whatever the caller's locale and time zone, so two tool servers read the same process the same way. Raises
+    SubprocessError when ps fails or its list leaves out this very process: such a list says nothing (review #1)."""
+    result = subprocess.run(
         ["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,lstart=,command="],
         capture_output=True,
-        text=True,
-        errors="replace",
         timeout=10,
         env={**os.environ, "LC_ALL": "C", "TZ": "UTC"},
-    ).stdout
+    )
+    if result.returncode != 0:
+        raise subprocess.SubprocessError(f"ps exited with {result.returncode}")
     table = {}
-    for line in out.splitlines():
+    for line in result.stdout.decode("utf-8", errors="replace").split("\n"):
         parts = line.split(maxsplit=3)
         if len(parts) < 4 or not all(part.isdigit() for part in parts[:3]):
             continue
         rest = parts[3]  # lstart is always 24 characters ("Tue Oct 21 18:37:30 2026"), then the command
         pid, ppid, pgid = (int(part) for part in parts[:3])
         table[pid] = Proc(pid, ppid, pgid, rest[:24], rest[24:].strip())
+    if os.getpid() not in table:
+        raise subprocess.SubprocessError("ps did not list this process")
     return table
 
 
@@ -84,18 +87,29 @@ def _kill(pid: int) -> bool:
 
 
 def me() -> tuple[int, str]:
-    """This process: its pid and start time (a tool server, as the apply_running table names it)."""
+    """This process: its pid and start time (a tool server, as the apply_running table names it). Raises
+    SubprocessError when ps cannot tell."""
     pid = os.getpid()
     return pid, processes()[pid].started
 
 
 def alive(pid: int, started: str) -> bool:
-    """Whether the process with this pid and start time still runs."""
+    """Whether the process with this pid and start time still runs. Only a process list that could be read, or then
+    the system itself, can say it is gone; when ps fails, or the list leaves the pid out while the system still has
+    it, the process counts as alive (review #1)."""
     try:
         proc = processes().get(int(pid))
     except (OSError, subprocess.SubprocessError):
         return True  # cannot tell: never treat a live tool server as gone
-    return proc is not None and proc.started == started
+    if proc is not None:
+        return proc.started == started  # the same pid with another start time is another process
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # PermissionError: it exists, under another user
+        return True
+    return True
 
 
 def kill_orphans(marks) -> list[int]:

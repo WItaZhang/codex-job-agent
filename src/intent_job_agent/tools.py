@@ -1554,8 +1554,15 @@ class Toolbox:
         run["closed"] = True
 
     def _owner(self) -> tuple[int, str]:
+        """This tool server's pid and start time (spec section 10 item 111). Without them nothing may start or close
+        an apply step: a server that cannot tell itself from another could close a live one's step (review #1)."""
         if self._me is None:
-            self._me = watchdog.me()
+            try:
+                self._me = watchdog.me()
+            except (OSError, subprocess.SubprocessError) as error:
+                raise InvariantError(
+                    f"读不到进程表（ps：{error}），分不清哪个会话在投递：先不开始，也不收尾别的会话的一步"
+                ) from None
         return self._me
 
     def _agent_marks(self) -> list[str]:
@@ -1569,8 +1576,12 @@ class Toolbox:
         session's live tool server runs, if any: that one is left alone. A row of this tool server whose run no
         longer runs (it broke before its thread started) is closed the same way."""
         self._sync_apply_results()  # a run of this tool server that has ended is closed by itself first
+        try:
+            me = self._owner()
+        except InvariantError:  # cannot tell this server from another: leave everything as it is (review #1)
+            return None
         row = self.store.activity()
-        ours = row is not None and (row["owner_pid"], row["owner_started"]) == self._owner()
+        ours = row is not None and (row["owner_pid"], row["owner_started"]) == me
         if row is not None and not (ours and _running(self._apply_run)):
             if not ours and watchdog.alive(row["owner_pid"], row["owner_started"]):
                 return row
@@ -1638,6 +1649,7 @@ class Toolbox:
         self.store.save_apply_batch(batch_id, data.pop("day"), data)
 
     def _refuse_other_session(self) -> None:
+        self._owner()  # a server that cannot tell who it is starts nothing (review #1)
         other = self._recover()
         if other is not None:
             raise InvariantError(self._other_view(other)["message"] + "；等它做完，或者在那个会话里说“停下”")

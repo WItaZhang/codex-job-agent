@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from intent_job_agent import apply_bridge, watchdog
+from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill import report as form_fill_report
 from intent_job_agent.store import Store
 from intent_job_agent.tools import Toolbox
@@ -939,3 +940,59 @@ def test_stopping_is_a_prepare_tool_that_no_scheduled_run_gets():  # spec 5.1, s
 
     assert TOOL_TIERS["stop_applying"] == "prepare"
     assert "stop_applying" not in COMMIT_TOOLS | SCHEDULED_TOOLS
+
+
+# --- the progress session's pre-merge review (stuck-run-review.md) --------------------------------------------------
+
+
+def failing_ps(monkeypatch):
+    """ps exits with an error and prints nothing (review #1)."""
+    real = watchdog.subprocess.run
+
+    def run(args, **kwargs):
+        if args and args[0] == "ps":
+            return subprocess.CompletedProcess(args, 1, stdout=b"", stderr=b"ps: sysctl failed")
+        return real(args, **kwargs)
+
+    monkeypatch.setattr(watchdog.subprocess, "run", run)
+
+
+def test_a_ps_that_fails_never_makes_a_live_session_look_gone(box, monkeypatch):  # review #1
+    batch = batch_of(box)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    other, owner = live_server()
+    try:
+        left_running(box, batch["batch_id"], "rest", owner, ("j06", "submit", "applypilot"))
+        b = restarted(box)
+        b._owner()  # B knew who it is before ps failed
+        failing_ps(monkeypatch)
+        with pytest.raises(subprocess.SubprocessError):
+            watchdog.processes()
+        assert watchdog.alive(*owner) is True and watchdog.kill_orphans(["--mcp-config /x"]) == []
+        status = b.apply_status()
+        assert status["other_session"]["batch_id"] == batch["batch_id"]  # still A's
+        assert b.store.activity()["owner_pid"] == owner[0]
+        assert b.store.applications()["j06"]["status"] == "pending"
+        assert b.store.apply_batch(batch["batch_id"])["phases"]["rest"] == "running"
+        fresh = restarted(box)  # a server that cannot tell who it is: it leaves everything alone
+        assert fresh.apply_status()["status"] == "idle" and fresh.store.activity() is not None
+        with pytest.raises(InvariantError, match="ps"):
+            fresh.start_applying(batch["batch_id"], "x")
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_a_tool_server_is_gone_only_when_a_real_process_list_or_the_system_says_so(monkeypatch):  # review #1
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        started = watchdog.processes()[proc.pid].started
+        assert watchdog.alive(proc.pid, started) is True
+        assert watchdog.alive(proc.pid, LONG_AGO) is False  # the pid now belongs to another process
+        assert watchdog.alive(dead_server()[0], LONG_AGO) is False
+        real = watchdog.processes
+        monkeypatch.setattr(watchdog, "processes", lambda: {k: v for k, v in real().items() if k != proc.pid})
+        assert watchdog.alive(proc.pid, started) is True  # left out of the list, yet the system has it
+    finally:
+        proc.kill()
+        proc.wait()
