@@ -230,6 +230,15 @@ def test_stalled_and_stopped_read_as_stuck_and_stopped_in_the_form_fill_report()
     assert form_fill_report.REASONS["stopped"] == "你停下了"
 
 
+def test_a_process_reads_the_same_whatever_the_caller_s_locale_and_time_zone(monkeypatch):
+    mine = watchdog.processes()[os.getpid()]
+    monkeypatch.setenv("LANG", "zh_CN.UTF-8")
+    monkeypatch.setenv("LC_ALL", "zh_CN.UTF-8")
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    assert watchdog.processes()[os.getpid()] == mine
+    assert watchdog.alive(*watchdog.me())
+
+
 def test_the_process_table_and_a_tree_kill_reach_a_helper_in_another_session(tmp_path):
     script = tmp_path / "parent.py"
     script.write_text(

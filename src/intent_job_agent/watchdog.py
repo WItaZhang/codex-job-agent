@@ -41,13 +41,15 @@ class Proc:
 
 
 def processes() -> dict[int, Proc]:
-    """Every process: pid, parent, process group, start time and command line."""
+    """Every process: pid, parent, process group, start time and command line. The start time is written the same
+    way whatever the caller's locale and time zone, so two tool servers read the same process the same way."""
     out = subprocess.run(
         ["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,lstart=,command="],
         capture_output=True,
         text=True,
         errors="replace",
         timeout=10,
+        env={**os.environ, "LC_ALL": "C", "TZ": "UTC"},
     ).stdout
     table = {}
     for line in out.splitlines():
