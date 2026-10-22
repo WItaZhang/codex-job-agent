@@ -930,3 +930,23 @@ def test_already_applied_outside_a_resume_is_still_not_a_new_submission(box):  #
 )
 def test_a_company_name_cannot_disguise_the_notification(name, shown):  # review 5: spec section 10 item 99
     assert notify.clean(name) == shown
+
+
+class WatchingRunner(GateRunner):
+    """Notes, when each job is run, which held jobs are marked as being resumed."""
+
+    def __init__(self, box, outcomes=None):
+        super().__init__(outcomes)
+        self.box, self.marked = box, {}
+
+    def __call__(self, spec):
+        self.marked[spec.job_id] = sorted(h["job_id"] for h in self.box.store.holds() if h["resuming"])
+        return super().__call__(spec)
+
+
+def test_each_job_is_marked_as_being_resumed_only_when_its_turn_comes(box):  # review 6: spec section 10 item 102
+    held_three(box)
+    box.apply_runner = WatchingRunner(box)
+    resumed(box, ["j06", "j07"])
+    assert box.apply_runner.marked == {"j06": ["j06"], "j07": ["j07"]}
+    assert [(h["job_id"], h["resuming"]) for h in box.store.holds()] == [("j01", False)]  # not resumed: untouched

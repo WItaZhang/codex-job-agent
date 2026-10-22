@@ -1814,7 +1814,6 @@ class Toolbox:
             ctx = self._fill_context(applicant, inputs)
             form_fill.begin_feasibility(ctx, list_path, JobList(jobs=[entries[j] for j in refill]))
         self.store.record_decision(None, "resume", {"job_ids": list(job_ids), "approved_via": APPROVED_VIA})
-        self.store.set_resuming(list(job_ids), True)  # before anything reaches a site (spec section 10 item 102)
         run = {
             "batch_id": None,
             "phase": "resume",
@@ -1847,6 +1846,9 @@ class Toolbox:
                         item["state"] = "stopped"
                         continue
                     item["state"] = "running"
+                    # marked before this job reaches its site, not before (spec section 10 item 102): a server that
+                    # stops now flags only this job as maybe submitted
+                    writer.set_resuming([item["job_id"]], True)
                     outcome = self._resume_one(item, writer, inputs.redactor, **work_on)
                     item["outcome"], item["state"] = outcome, ("done" if outcome else "skipped")
                     if outcome and outcome.reason == "maybe_submitted":
@@ -1860,7 +1862,6 @@ class Toolbox:
                 run["error"] = inputs.redactor.mask(message)[:300]
                 run["status"] = "failed"
             finally:
-                writer.set_resuming([i["job_id"] for i in run["jobs"] if i["state"] in ("queued", "stopped")], False)
                 writer.db.close()
                 self._notify(run)
 
