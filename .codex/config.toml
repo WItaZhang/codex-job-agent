@@ -7,7 +7,7 @@ approvals_reviewer = "user"
 command = "sh"
 args = ["-c", 'cd "$(git rev-parse --show-toplevel)" && exec uv run --locked intent-job-agent-mcp --config configs/default.yaml']
 
-# These six operations must ask the user on every call.
+# These seven operations must ask the user on every call.
 [mcp_servers.intent-agent.tools.correct_tags]
 approval_mode = "prompt"
 
@@ -18,6 +18,9 @@ approval_mode = "prompt"
 approval_mode = "prompt"
 
 [mcp_servers.intent-agent.tools.record_labels]
+approval_mode = "prompt"
+
+[mcp_servers.intent-agent.tools.resume_applying]
 approval_mode = "prompt"
 
 [mcp_servers.intent-agent.tools.start_applying]

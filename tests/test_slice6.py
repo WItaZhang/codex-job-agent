@@ -491,7 +491,7 @@ def test_the_copied_chrome_profile_loses_passwords_cards_and_autofill(tmp_path):
         ("done\nRESULT:APPLIED", "submit", ("applied", None)),
         ("filled, dry run\nRESULT:APPLIED", "stop", ("waiting", None)),
         ("RESULT:EXPIRED", "submit", ("failed", "expired")),
-        ("RESULT:CAPTCHA", "stop", ("failed", "captcha")),
+        ("RESULT:CAPTCHA", "stop", ("held", "captcha")),  # a gate waits for the user (decision 22)
         ("NOTE: clause\nRESULT:FAILED:arbitration", "submit", ("failed", "arbitration")),
         ("RESULT:FAILED:ssn_required**", "submit", ("failed", "ssn_required")),
         ("NOTE: shows applied on 2026-10-01\nRESULT:FAILED:already_applied", "submit", ("applied", "already_applied")),
@@ -782,7 +782,7 @@ def test_a_review_step_without_any_success_voids_the_batch(box):
     jobs = add_jobs(box, COMPANIES)
     write_letters(box, jobs)
     errors = {job: ("pending", "system_error", ["Error: cannot start"]) for job in jobs[:3]}
-    sites = {job: ("failed", "captcha", []) for job in jobs[3:5]}
+    sites = {job: ("failed", "expired", []) for job in jobs[3:5]}  # not gates: those wait (decision 22)
     box.apply_runner = FakeRunner({**errors, **sites})
     batch = box.prepare_apply_batch(DAY)
     box.start_applying(batch["batch_id"], batch["summary"])

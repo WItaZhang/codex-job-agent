@@ -1,0 +1,93 @@
+# SYNTHETIC samples for handing gates to the user (specs/gate-handoff.samples.md, decisions 22 and 23).
+# Every company, id, value and date here is made up.
+
+# G1: a form-fill report at a gate -> held; other stops stay failed (G2); "maybe submitted" still comes first.
+mapping:
+  - {id: captcha, report: {conclusion: not_filled, status: gate, agent_result: captcha, not_filled_reason: gate},
+     expect: {status: held, reason: captcha}}
+  - {id: email, report: {conclusion: not_filled, status: gate, agent_result: email_verification,
+                         not_filled_reason: gate},
+     expect: {status: held, reason: email_verification}}
+  - {id: sso, report: {conclusion: not_filled, status: gate, agent_result: sso_required, not_filled_reason: gate},
+     expect: {status: held, reason: sso_required}}
+  - {id: login, report: {conclusion: not_filled, status: filled, agent_result: login_issue,
+                         not_filled_reason: login_failed},
+     expect: {status: held, reason: login_issue}}
+  - {id: arbitration, report: {conclusion: not_filled, status: gate, agent_result: arbitration,
+                               not_filled_reason: gate},
+     expect: {status: failed, reason: arbitration}}
+  - {id: ssn, report: {conclusion: not_filled, status: gate, agent_result: ssn_required, not_filled_reason: gate},
+     expect: {status: failed, reason: ssn_required}}
+  - {id: camera, report: {conclusion: not_filled, status: gate, agent_result: unsafe_verification,
+                          not_filled_reason: gate},
+     expect: {status: failed, reason: unsafe_verification}}
+  - {id: received_first, report: {conclusion: maybe_submitted, status: gate, agent_result: captcha},
+     expect: {status: applied, reason: maybe_submitted}}
+
+# G1, G2: ApplyPilot's result for one run -> the apply-list status, in both modes.
+applypilot:
+  - {result: captcha, expect: [held, captcha]}
+  - {result: login_issue, expect: [held, login_issue]}
+  - {result: "failed:sso_required", expect: [held, sso_required]}
+  - {result: "failed:email_verification", expect: [held, email_verification]}
+  - {result: "failed:arbitration", expect: [failed, arbitration]}
+  - {result: "failed:payment_required", expect: [failed, payment_required]}
+  - {result: "failed:screening_requires_candidate_written_answers",
+     expect: [failed, screening_requires_candidate_written_answers]}
+  - {result: expired, expect: [failed, expired]}
+
+# G6: what waits for the user when a step ends -> the notification (title, body), or none.
+notices:
+  - id: a
+    step: 第二步
+    held: [[7, Zeta Pay, login_issue], [8, Eta Cloud, captcha], [12, Theta Labs, sso_required]]
+    waiting: 2
+    expect: ["投递：3 个等你处理，2 个填好等你检查", "2 个要登录、1 个验证码：7 Zeta Pay、8 Eta Cloud、12 Theta Labs"]
+  - id: b
+    step: 第一步
+    held: []
+    waiting: 5
+    expect: ["投递：5 个填好等你检查", "第一步做完"]
+  - id: c
+    step: 第二步
+    held: []
+    waiting: 0
+    expect: null
+  - id: d
+    step: 接着做
+    held: [[8, Eta Cloud, captcha]]
+    waiting: 0
+    expect: ["投递：1 个等你处理", "1 个验证码：8 Eta Cloud"]
+  - id: email_and_many
+    step: 第二步
+    held: [[7, A, captcha], [8, B, captcha], [9, C, email_verification], [10, D, login_issue], [11, E, captcha],
+           [12, F, captcha], [13, G, captcha], [14, H, sso_required]]
+    waiting: 0
+    expect: ["投递：8 个等你处理", "2 个要登录、5 个验证码、1 个邮箱验证码：7 A、8 B、9 C、10 D、11 E 等 8 个"]
+
+# G18: one week of attempts (Monday 2026-10-19 to Sunday 10-25), read in UTC, in the order they were written.
+stats:
+  week: "2026-10-19"
+  attempts:
+    - {job_id: g_kappa, via: applypilot, status: held, reason: captcha, at: "2026-10-18T15:00:00+00:00"}  # week before
+    - {job_id: g_zeta, via: applypilot, status: held, reason: login_issue, at: "2026-10-20T15:00:00+00:00"}
+    - {job_id: g_eta, via: applypilot, status: held, reason: captcha, at: "2026-10-20T15:10:00+00:00"}
+    - {job_id: g_mu, via: applypilot, status: held, reason: email_verification, at: "2026-10-20T15:20:00+00:00"}
+    - {job_id: g_beta, via: form_fill, status: held, reason: captcha, at: "2026-10-20T15:30:00+00:00"}
+    - {job_id: g_zeta, via: applypilot, status: applied, reason: null, at: "2026-10-21T15:00:00+00:00"}
+    - {job_id: g_eta, via: applypilot, status: held, reason: captcha, at: "2026-10-21T15:10:00+00:00"}
+    - {job_id: g_mu, via: user, status: failed, reason: email_verification, at: "2026-10-21T15:20:00+00:00"}
+    - {job_id: g_beta, via: form_fill, status: waiting, reason: check_then_submit, at: "2026-10-21T15:30:00+00:00"}
+    - {job_id: g_eta, via: applypilot, status: failed, reason: captcha, at: "2026-10-22T15:10:00+00:00"}
+    - {job_id: g_beta, via: user, status: applied, reason: null, at: "2026-10-22T15:30:00+00:00"}
+    - {job_id: g_kappa, via: applypilot, status: applied, reason: submitted_by_user, at: "2026-10-23T15:00:00+00:00"}
+  expect:
+    submitted: 3
+    failed: 2
+    success_rate: 0.6
+    allowed: {login: 1, captcha: 1}
+    to_fix: {}
+    not_counted: {waiting: 1, held: 5, maybe_submitted: 0, already_applied: 0, pending: 0, user_skipped: 0,
+                  user_pending: 0}
+    met: false
+    line: "2026-10-19 – 10-25：提交 3 份，失败 2 份，成功率 60%（3/5）。没达标：要 200 份、80%。失败里允许的 2 份：登录 1、验证码 1。不算进去：停在提交前 1 次、等你处理 5 次。"

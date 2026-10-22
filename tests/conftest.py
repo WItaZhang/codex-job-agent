@@ -40,7 +40,10 @@ BASE_VOCAB = {
 
 
 def settings() -> Settings:
-    return Settings.load(ROOT / "configs/default.yaml")
+    """The shipped configuration, except that tests never show a macOS notification: a test that checks one passes
+    its own notifier (spec section 10 item 99)."""
+    loaded = Settings.load(ROOT / "configs/default.yaml")
+    return loaded.model_copy(update={"apply": loaded.apply.model_copy(update={"notify": False})})
 
 
 class World:

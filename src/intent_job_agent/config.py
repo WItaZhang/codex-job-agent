@@ -103,6 +103,7 @@ class Apply(_Section):
     disallowed_tools: list[str]
     chrome_profile_strip: list[str]
     done: ApplyDone
+    notify: bool  # a macOS notification when a step ends and jobs wait for the user (spec 4.10 item 10)
 
 
 class FormFill(_Section):

@@ -72,6 +72,7 @@ def test_commit_tier_is_what_spec_5_1_lists():
         "correct_tags",
         "initialize_intent",
         "start_applying",
+        "resume_applying",  # resuming jobs held at a gate (spec 4.10 item 10)
         "start_form_fill",
     }
 

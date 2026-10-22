@@ -64,6 +64,8 @@ class FormFillFake:
 
     def __init__(self, box, fields=FIELDS, state=FINAL, states=None, no_tab=(), personal=(), unreadable=()):
         self.box, self.fields, self.state = box, tuple(fields), state
+        self.tab_states: dict[str, PageState] = {}  # what a glance at an open tab shows, by tab id (resume, G12)
+        self.glances: list[str] = []
         self.states, self.no_tab, self.unreadable = states or {}, set(no_tab), set(unreadable)
         self.tabs = [{"id": f"P{n}", "type": "page", "url": url} for n, url in enumerate(personal)]
         self.tabs.append({"id": "T1", "type": "page", "url": "https://jobs.example.test/checking"})
@@ -96,6 +98,10 @@ class FormFillFake:
             self.tabs.append({"id": f"N{len(self.fills)}-{spec.job_id}", "type": "page", "url": url})  # a new id
         notes, sites, emails = list(outcome.notes), list(outcome.other_sites), list(outcome.emails)
         return apply_bridge.ApplyOutcome(outcome.status, outcome.reason, notes, sites, emails, str(log))
+
+    def tab_state(self, target) -> PageState:
+        self.glances.append(target["id"])
+        return self.tab_states.get(target["id"], PageState(actions=("Continue",)))
 
     def read(self, target, out_dir, redactor, sheet=None):
         self.reads.append(target)

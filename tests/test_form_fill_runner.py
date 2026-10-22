@@ -263,6 +263,7 @@ def test_form_fill_settings():
         "mcp__playwright__browser_close",
         "mcp__playwright__browser_network_request",
         "mcp__playwright__browser_network_requests",
+        "mcp__gmail__send_email",  # Gmail to read a code only, never to send (spec section 10 item 105)
     ]
 
 
@@ -365,7 +366,7 @@ def test_a_run_fills_reads_back_and_writes_the_feasibility_table(ff):
     assert first.resume_pdf.name == "ml.pdf" and second.resume_pdf.name == "infra.pdf"
     assert not second.letter_txt.exists() and "cover letter" in options2["extra_prompt"].lower()
     assert first.relocation == RELOCATION
-    assert options["gmail"] is False
+    assert options["gmail"] is True  # search and read only: send_email is refused (spec section 10 item 105)
     assert options["extra_disallowed"] == tuple(box.settings.form_fill.disallowed_tools)
     assert options["log_path"] == folder / "acme-ml-01" / "log.jsonl"
     assert "sam.synthetic" not in options["mask"]("sam.synthetic@example.test")
