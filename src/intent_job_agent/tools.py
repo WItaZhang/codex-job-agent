@@ -1712,14 +1712,16 @@ class Toolbox:
     def _other_view(row: dict) -> dict:
         """Another session's tool server runs a step or a resume (spec section 10 item 111)."""
         since = datetime.fromisoformat(row["since"]).astimezone().strftime("%H:%M")
-        what = "接着做" if row["kind"] == "resume" else f"{row['batch_id']} 的{apply_fill.STEP_NAMES[row['phase']]}"
+        what = "接着做"
+        if row["kind"] != "resume":
+            what = f"批次 {row['batch_id']} 的{apply_fill.STEP_NAMES[row['phase']]}"
         return {
             "kind": row["kind"],
             "batch_id": row["batch_id"],
             "phase": row["phase"],
             "job_id": row["job_id"],
             "since": row["since"],
-            "message": f"另一个会话的工具服务正在跑投递的{what}（从 {since} 起）",
+            "message": f"另一个会话的工具服务正在跑投递：{what}（从 {since} 起）",
         }
 
     def _pending_step(self, batch_id: str, data: dict) -> dict | None:
