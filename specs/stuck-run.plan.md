@@ -132,9 +132,9 @@
 
 - `ChromeWatch.report(events)` 的五条（只写主机名；调用方再打码）：
   1. 连不上：`投递用的 Chrome 从 HH:MM:SS 起连不上了（被关掉、崩溃，或调试端口没有响应）`，又连上了加一句。
-  2. 多出的新标签页：这次运行新开的、没有 opener 的标签页个数，减去 agent 的 `browser_tabs`（`new`）和 `browser_tab_new` 次数，大于 0 时：`运行中多了 N 个不是 agent 开的新标签页（主机名）`。主机名取 agent 没去过的那几个。
-  3. 被关掉的：这次运行新开的、没有 opener 的标签页里不见了的个数，减去 agent 的关标签页次数（`browser_tabs` 的 `close`、`browser_tab_close`、`browser_close`），大于 0 时：`这次运行开的标签页有 N 个被关掉了，不是 agent 关的`。
-  4. 开始前就开着的：被关掉的、换了地址的个数和主机名。
+  2. 多出的新标签页：这次运行新开的、没有 opener、打开过网页（不只是空白页）的标签页个数，减去 agent 的 `browser_tabs`（`new`）和 `browser_tab_new` 次数，大于 0 时：`运行中多了 N 个不是 agent 开的新标签页（主机名）`。主机名取 agent 没去过的那几个。
+  3. 被关掉的：同样的标签页里不见了的个数，减去 agent 的关标签页次数（`browser_tabs` 的 `close`、`browser_tab_close`、`browser_close`），大于 0 时：`这次运行开的标签页有 N 个被关掉了，不是 agent 关的`。
+  4. 开始前就开着的：被关掉的、换了地址的个数和主机名。接着做时 agent 回去用的原标签页（`resume_tab`）不算。
   5. 打不开的网站：这次运行新开的标签页（有没有 opener 都算）去过 `apply.blocked_origins` 或学校系统（`edu`）的网站。
 - 两条路都在 `ApplyOutcome.chrome` 里带回来：
   - 自动提交：`_masked` 打码后放进备注和 `apply_status` 每行的 `chrome_use`。

@@ -419,10 +419,12 @@ def _tab_action(event: dict) -> str | None:
 class ChromeWatch:
     """The applying Chrome's tabs while one agent works, listed every few seconds (`check`), never touched: the tabs
     open before it started, every tab seen since with the tab that opened it and the addresses it showed, and when
-    Chrome stopped answering. `report` tells what changed that the agent's own tool calls do not explain."""
+    Chrome stopped answering. `report` tells what changed that the agent's own tool calls do not explain. `own`: tabs
+    open before the run that the agent works in (a resumed job's held tab, spec section 10 item 100)."""
 
-    def __init__(self, port: int, blocked_origins, targets=cdp_targets, clock=time.time):
+    def __init__(self, port: int, blocked_origins, targets=cdp_targets, clock=time.time, own=()):
         self.port, self._targets, self._clock = port, targets, clock
+        self.own = {tab_id for tab_id in own if tab_id}
         self.blocked = {(urlsplit(o).hostname or "").lower().removeprefix("www.") for o in blocked_origins} - {""}
         self.before: dict[str, str] | None = None  # the tabs open before the agent started, and their addresses
         self.tabs: dict[str, dict] = {}  # every tab seen: its opener and the addresses it showed
@@ -469,7 +471,12 @@ class ChromeWatch:
         actions = [_tab_action(event) for event in events]
         visited = {_host((e.get("input") or {}).get("url", "")) for e in events} | {_host(url) for url in pages}
         new = {tab_id: entry for tab_id, entry in self.tabs.items() if tab_id not in self.before}
-        bare = {tab_id: entry for tab_id, entry in new.items() if not entry["opener"]}
+        # Opened without an opener and used: a blank tab nobody used (Playwright may open one) says nothing.
+        bare = {
+            tab_id: entry
+            for tab_id, entry in new.items()
+            if not entry["opener"] and any(url not in ("", "about:blank") for url in entry["urls"])
+        }
         extra = len(bare) - actions.count("new")
         if extra > 0:
             hosts = sorted({h for e in bare.values() for h in map(_host, e["urls"]) if h and h not in visited})
@@ -477,10 +484,11 @@ class ChromeWatch:
         gone = len([tab_id for tab_id in bare if tab_id not in self.present]) - actions.count("close")
         if gone > 0:
             lines.append(f"这次运行开的标签页有 {gone} 个被关掉了，不是 agent 关的")
-        shut = [tab_id for tab_id in self.before if tab_id not in self.present]
+        old = {tab_id: url for tab_id, url in self.before.items() if tab_id not in self.own}
+        shut = [tab_id for tab_id in old if tab_id not in self.present]
         moved = {
             tab_id: [u for u in self.tabs[tab_id]["urls"] if not _same(u, url)]
-            for tab_id, url in self.before.items()
+            for tab_id, url in old.items()
             if tab_id in self.present
         }
         moved = {tab_id: urls for tab_id, urls in moved.items() if urls}

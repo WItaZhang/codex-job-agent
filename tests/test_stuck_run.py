@@ -698,8 +698,9 @@ def scripted(*lists):
     return targets
 
 
-def watched(*lists, events=(), pages=(), clock=None):
-    watch = watchdog.ChromeWatch(9222, BLOCKED, targets=scripted(*lists), **({"clock": clock} if clock else {}))
+def watched(*lists, events=(), pages=(), clock=None, own=()):
+    options = {"clock": clock} if clock else {}
+    watch = watchdog.ChromeWatch(9222, BLOCKED, targets=scripted(*lists), own=own, **options)
     for _ in lists:
         watch.check()
     return watch.report(list(events), list(pages))
@@ -767,6 +768,24 @@ def test_popups_and_the_agent_s_own_tabs_are_not_reported():  # S23
         [T1, T2, job],  # the popup closed itself
         [T1, T2],  # the agent closed its own tab at the end
         events=[NEW, NAV, call("browser_tabs", action="close")],
+    )
+    assert lines == []
+
+
+def test_a_blank_tab_nobody_used_is_not_reported():  # one Playwright MCP may open by itself
+    job = tab("N1", "https://jobs.acme.test/1")
+    lines = watched([T1, T2], [T1, T2, tab("B1", "about:blank"), job], [T1, T2, job], events=[NEW, NAV])
+    assert lines == []
+
+
+def test_a_resumed_job_s_own_held_tab_may_change_and_close():  # spec section 10 item 100
+    held = tab("H1", "https://careers.acme.test/login")
+    lines = watched(
+        [T1, held],
+        [T1, tab("H1", "https://careers.acme.test/apply/step2")],
+        [T1],  # the agent submitted and closed it
+        events=[call("browser_tabs", action="close")],
+        own=("H1",),
     )
     assert lines == []
 

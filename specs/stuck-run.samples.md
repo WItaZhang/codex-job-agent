@@ -169,6 +169,8 @@
 - 网站自己弹出的新标签页（有 opener，例如点 Apply 跳到招聘系统、"用 LinkedIn 申请"的弹窗），弹窗自己关掉。
 - agent 自己开的新标签页（`browser_tabs` 的 new）。
 - 自动提交的 agent 做完关掉自己的标签页（`browser_tabs` 的 close）。
+- 一直停在空白页、没人用的新标签页（Playwright 可能自己开一个）。
+- 接着做时 agent 回到原标签页（开始前就开着），在里面接着填、交完关掉。
 
 ## 六、提醒
 

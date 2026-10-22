@@ -629,7 +629,7 @@ def run_application(
     env.pop("CAPSOLVER_API_KEY", None)  # nothing in a run may solve a CAPTCHA (spec section 10 item 98)
     # The working directory holds only the files to upload (ApplyPilot copies them to apply-workers/current),
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
-    chrome = watchdog.ChromeWatch(port, settings.apply.blocked_origins)
+    chrome = watchdog.ChromeWatch(port, settings.apply.blocked_origins, own=(spec.resume_tab,))
     chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
     proc = subprocess.Popen(
         claude_command(
