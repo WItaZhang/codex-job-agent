@@ -1077,3 +1077,29 @@ def test_a_step_that_ended_in_the_background_frees_the_slot_by_itself(box):  # r
 def test_stopping_closes_what_a_stopped_server_left_first(box):  # review #2
     box.store.begin_activity(dead_server(), "resume")
     assert box.stop_applying()["stopped"] is False and box.store.activity() is None
+
+
+def test_a_step_whose_thread_cannot_open_the_database_ends_failed(box, monkeypatch):  # review #4
+    import sqlite3
+
+    from intent_job_agent import tools
+
+    batch = batch_of(box)
+    real = tools.Store
+
+    def store(path, settings):
+        if threading.current_thread().name == "intent-agent-apply":
+            raise sqlite3.OperationalError("unable to open database file")
+        return real(path, settings)
+
+    monkeypatch.setattr(tools, "Store", store)
+    box.apply_runner, box.apply_in_background = FakeRunner(), True
+    box.start_applying(batch["batch_id"], batch["summary"])
+    status = finished(box)
+    assert status["status"] == "failed" and "unable to open database file" in status["error"]
+    assert box.store.activity() is None  # closed by that call, since the thread could not
+    monkeypatch.undo()
+    box.apply_in_background = False
+    fresh = box.prepare_apply_batch(DAY)
+    box.start_applying(fresh["batch_id"], fresh["summary"])
+    assert box.store.applications()["j00"]["status"] == "waiting"

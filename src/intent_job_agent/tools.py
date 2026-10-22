@@ -1365,8 +1365,9 @@ class Toolbox:
         def work():
             # Each result is recorded as soon as it is known, through this thread's own connection, so a
             # submitted application is never left "pending" (and applied to again) if the server stops.
-            writer = Store(self.store.path, self.settings)
+            writer = None
             try:
+                writer = Store(self.store.path, self.settings)  # inside: a failure here still ends the run (review #4)
                 for item, spec in zip(run["jobs"], specs, strict=True):
                     if run["stopped"] or run["stop"]:  # a form may have been submitted (item 90), or the user stopped
                         item["state"] = "stopped"
@@ -1738,18 +1739,21 @@ class Toolbox:
         """A job the user's stop ended before it was done (spec section 10 item 109): it goes back where it was."""
         return outcome is not None and outcome.status == "pending" and outcome.reason == "stopped"
 
-    def _ended(self, run: dict, writer: Store) -> None:
+    def _ended(self, run: dict, writer: Store | None) -> None:
         """The end of a step's or a resume's thread, however it ended: never left running (spec section 10 item
-        107), a stop still waiting for an agent forgotten, and the one notification (item 99)."""
+        107), a stop still waiting for an agent forgotten, and the one notification (item 99). Without its own
+        connection (`writer` could not be opened), the next tool call closes the run (review #4)."""
         if run["status"] == "running":  # something other than an Exception stopped the thread
             run["status"], run["error"] = "failed", run["error"] or "the apply thread stopped unexpectedly"
         watchdog.LIVE.disarm()
         try:
-            self._close_run(run, writer)  # closes the step and frees the slot without waiting for a call (review #2)
+            if writer is not None:
+                self._close_run(run, writer)  # closes the step and frees the slot without waiting (review #2)
         except Exception:  # noqa: BLE001 - the next tool call closes it (_sync_apply_results)
             pass
         finally:
-            writer.db.close()
+            if writer is not None:
+                writer.db.close()
             self._notify(run)
 
     @staticmethod
@@ -2151,8 +2155,9 @@ class Toolbox:
         work_on = {"browser": browser, "runner": runner, "sheet": sheet, "entries": entries, "ctx": ctx}
 
         def work():
-            writer = Store(self.store.path, self.settings)
+            writer = None
             try:
+                writer = Store(self.store.path, self.settings)  # inside: a failure here still ends the run (review #4)
                 browser.ensure_chrome()
                 for item in run["jobs"]:
                     if run["stopped"] or run["stop"]:  # a form may have been submitted (item 90), or the user stopped
