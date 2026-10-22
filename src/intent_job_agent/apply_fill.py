@@ -34,6 +34,7 @@ GATE_TEXT = {
     "sso_required": "单点登录",
     "captcha": "验证码",
     "email_verification": "邮箱验证码",
+    "interrupted": "工具服务中途停了，可能已经交过",  # not a gate: held for the user to look (item 113)
 }
 STEP_NAMES = {"review": "第一步", "rest": "第二步", "resume": "接着做"}  # in the notification (item 99)
 LABELS = {

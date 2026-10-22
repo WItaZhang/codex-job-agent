@@ -468,3 +468,200 @@ def test_a_stop_asked_just_before_the_agent_starts_ends_it_at_once():
     assert live.begin("j02", "stop").is_set()
     live.disarm()
     assert not live.begin("j02", "stop").is_set()
+
+
+# --- S12-S17, S25: after a tool server stopped, and other sessions ------------------------------------------------
+
+LONG_AGO = "Mon Jan  1 00:00:00 2024"
+
+
+def dead_server() -> tuple[int, str]:
+    """A tool server that is gone: the pid of a process that has ended."""
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid, LONG_AGO
+
+
+def live_server():
+    """Another session's tool server that still runs (a sleeping stand-in), with its real start time."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    return proc, (proc.pid, watchdog.processes()[proc.pid].started)
+
+
+def left_running(box, batch_id, phase, owner, job=None):
+    """What a tool server that stopped mid-step leaves in the database: the step running, the activity row naming
+    that server, and the job it was on."""
+    data = box.store.apply_batch(batch_id)
+    data["phases"][phase] = "running"
+    box.store.begin_activity(owner, "step", batch=(batch_id, phase, data.pop("day"), data))
+    if job:
+        box.store.activity_job(*job)
+
+
+def result(box, job_id, status, batch_id, phase, mode="review", via="form_fill", reason=None):
+    attempt = {"batch_id": batch_id, "phase": phase, "mode": mode, "via": via, "reason": reason}
+    box.store.record_application_result(job_id, status, reason, attempt=attempt)
+
+
+def restarted(box) -> Toolbox:
+    """A new tool server on the same database and data folder."""
+    again = Toolbox(box.settings, Store(box.store.path, box.settings), data_dir=box.data_dir)
+    again.apply_runner, again.form_fill_runner = FakeRunner(), FormFillFake(again)
+    again.apply_in_background, again.notifier = False, lambda title, body: None
+    return again
+
+
+def test_a_step_keeps_its_activity_row_while_it_runs_and_drops_it_when_closed(box):  # spec section 10 item 111
+    batch = batch_of(box)
+    runner = Blocking("j02")
+    in_background(box, runner, batch["batch_id"], batch["summary"])
+    row = box.store.activity()
+    assert (row["kind"], row["batch_id"], row["phase"]) == ("step", batch["batch_id"], "review")
+    assert (row["job_id"], row["mode"], row["via"]) == ("j02", "review", "form_fill")
+    assert (row["owner_pid"], row["owner_started"]) == watchdog.me()
+    box.stop_applying()
+    finished(box)
+    assert box.store.activity() is None
+
+
+def test_a_first_step_cut_short_by_a_restart_is_closed_and_its_second_step_is_offered(box):  # S12
+    batch = batch_of(box)
+    left_running(box, batch["batch_id"], "review", dead_server(), ("j02", "review", "form_fill"))
+    for job_id in ("j00", "j01"):
+        result(box, job_id, "waiting", batch["batch_id"], "review", reason="check_then_submit")
+    again = restarted(box)
+    status = again.apply_status()
+    assert status["status"] == "idle" and box.store.activity() is None
+    applications = again.store.applications()
+    assert [applications[j]["status"] for j in ("j02", "j03", "j04")] == ["pending", "pending", "pending"]
+    j02 = [(a["status"], a["reason"]) for a in again.store.apply_attempts() if a["job_id"] == "j02"]
+    assert j02 == [("pending", "interrupted")]  # it stops before submit: nothing was sent
+    assert again.store.apply_batch(batch["batch_id"])["phases"] == {"review": "done", "rest": "proposed"}
+    assert status["next"]["phase"] == "rest" and status["next"]["batch_id"] == batch["batch_id"]
+    assert "第 3 个（Co2）" in status["notice"] and "退回待投" in status["notice"]
+    again.start_applying(batch["batch_id"], status["next"]["summary"])  # the second step is not lost
+    assert again.store.applications()["j05"]["status"] == "applied"
+
+
+def test_an_auto_submitted_job_cut_short_by_a_restart_waits_for_the_user(box):  # S13, S25
+    batch = batch_of(box)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    left_running(box, batch["batch_id"], "rest", dead_server(), ("j06", "submit", "applypilot"))
+    result(box, "j05", "applied", batch["batch_id"], "rest", mode="submit", via="applypilot")
+    again = restarted(box)
+    status = again.apply_status()
+    hold = again.store.hold("j06")
+    assert again.store.applications()["j06"]["status"] == "held" and hold["reason"] == "interrupted"
+    assert (hold["phase"], hold["n"], hold["mode"], hold["tab_id"], hold["times"]) == ("rest", 7, "submit", None, 1)
+    row = next(row for row in status["held"] if row["job_id"] == "j06")
+    assert row["gate"] == "工具服务中途停了，可能已经交过" and "交上了没有" in row["todo"] and row["then"] == "自动提交"
+    assert again.store.apply_batch(batch["batch_id"])["phases"]["rest"] == "done"
+    assert again.store.applications()["j07"]["status"] == "pending" and status["next"] is None
+    assert "第 7 个（Co6）" in status["notice"] and "等你处理" in status["notice"]
+    plan = again.prepare_resume(["j06"])
+    assert "7 Co6（上次工具服务中途停了，可能已经交过，请先看标签页；从岗位地址重开）" in plan["summary"]
+    again.mark_applications(["j06"], "skipped")  # "7 不处理了"
+    week = again.apply_stats()["weeks"][0]
+    assert week["to_fix"] == {"interrupted": 1} and week["not_counted"]["held"] == 1
+
+
+def test_a_restart_with_no_job_in_progress_only_closes_the_step(box):  # S14
+    batch = batch_of(box)
+    left_running(box, batch["batch_id"], "review", dead_server())
+    result(box, "j00", "waiting", batch["batch_id"], "review", reason="check_then_submit")
+    again = restarted(box)
+    status = again.apply_status()
+    assert status["next"]["phase"] == "rest" and again.store.holds() == []
+    assert [a["job_id"] for a in again.store.apply_attempts()] == ["j00"]
+
+
+def test_a_step_left_running_before_this_slice_is_closed_too(box):  # S17
+    batch = batch_of(box)
+    data = box.store.apply_batch(batch["batch_id"])
+    data["phases"]["review"] = "running"
+    box.store.save_apply_batch(batch["batch_id"], data.pop("day"), data)
+    restarted(box).apply_status()
+    data = box.store.apply_batch(batch["batch_id"])
+    assert data["phases"] == {"review": "done", "rest": "void"} and data["void"] is True  # nothing in it worked
+
+
+def test_another_session_running_a_step_is_left_alone_and_blocks_a_second_one(box):  # S16
+    batch = batch_of(box)
+    other, owner = live_server()
+    try:
+        left_running(box, batch["batch_id"], "review", owner, ("j02", "review", "form_fill"))
+        again = restarted(box)
+        status = again.apply_status()
+        assert status["other_session"]["batch_id"] == batch["batch_id"] and status["other_session"]["phase"] == "review"
+        assert again.store.apply_batch(batch["batch_id"])["phases"]["review"] == "running"  # not closed
+        assert again.store.activity() is not None and again.store.applications()["j02"]["status"] == "pending"
+        with pytest.raises(Exception, match="另一个会话"):
+            again.start_applying(batch["batch_id"], batch["summary"])
+        with pytest.raises(Exception, match="另一个会话"):
+            again.resume_applying(["j02"], "x")
+    finally:
+        other.kill()
+        other.wait()
+
+
+def orphan(command_args) -> int:
+    """A process whose parent has quit (so its parent is the system), as an agent left behind by a stopped server."""
+    script = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)', *sys.argv[1:]],"
+        " start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        "print(child.pid)\n"
+    )
+    out = subprocess.run([sys.executable, "-c", script, *command_args], capture_output=True, text=True, check=True)
+    return int(out.stdout)
+
+
+def test_agents_a_stopped_server_left_behind_are_ended_and_nothing_else(box):  # S15
+    batch = batch_of(box)
+    stage = box.data_dir / box.settings.discovery.applypilot_dir
+    mine = orphan(["--mcp-config", str(stage / ".mcp-apply-0.json")])
+    form = orphan(["--mcp-config", str(stage / ".mcp-form-fill-0.json")])
+    elsewhere = orphan(["--mcp-config", "/elsewhere/applypilot/.mcp-apply-0.json"])
+    child = subprocess.Popen(  # a live server's agent: its parent is that server, not the system
+        [sys.executable, "-c", "import time; time.sleep(30)", "--mcp-config", str(stage / ".mcp-apply-0.json")]
+    )
+    try:
+        if watchdog.processes()[mine].ppid != 1:
+            pytest.skip("orphans are not handed to pid 1 here")
+        left_running(box, batch["batch_id"], "review", dead_server())
+        restarted(box).apply_status()
+        assert gone(mine) and gone(form)
+        assert not gone(elsewhere, within=0.3) and child.poll() is None
+    finally:
+        for pid in (elsewhere,):
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+        child.kill()
+        child.wait()
+
+
+def test_stalled_counts_as_a_failure_to_fix(box):  # S25
+    batch = batch_of(box)
+    box.apply_runner = FakeRunner({"j00": ("failed", "stalled", ["投递 agent 300 秒没有任何输出，算卡住，已结束它"])})
+    box.start_applying(batch["batch_id"], batch["summary"])
+    assert box.apply_stats()["weeks"][0]["to_fix"] == {"stalled": 1}
+
+
+def test_a_row_of_this_server_whose_run_never_started_does_not_block_the_next_step(box, monkeypatch):
+    batch = batch_of(box)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("the decision log is not writable")
+
+    monkeypatch.setattr(box.store, "record_decision", broken)
+    with pytest.raises(RuntimeError):
+        box.start_applying(batch["batch_id"], batch["summary"])
+    monkeypatch.undo()
+    assert box.store.activity() is not None  # left behind by this server
+    status = box.apply_status()
+    assert box.store.activity() is None and status["next"] is None and status["status"] == "idle"
+    fresh = box.prepare_apply_batch(DAY)  # the first step's jobs are pending again: a new batch can take them
+    box.start_applying(fresh["batch_id"], fresh["summary"])
+    assert box.store.applications()["j00"]["status"] == "waiting"

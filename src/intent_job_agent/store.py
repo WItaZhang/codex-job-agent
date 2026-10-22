@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS apply_holds (job_id TEXT PRIMARY KEY, batch_id TEXT N
                                         n INTEGER, mode TEXT NOT NULL, via TEXT NOT NULL, reason TEXT NOT NULL,
                                         note TEXT, tab_id TEXT, tab_url TEXT, held_at TEXT NOT NULL,
                                         times INTEGER NOT NULL, resuming INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS apply_running (id INTEGER PRIMARY KEY CHECK (id = 1), owner_pid INTEGER NOT NULL,
+                                          owner_started TEXT NOT NULL, kind TEXT NOT NULL, batch_id TEXT,
+                                          phase TEXT, job_id TEXT, mode TEXT, via TEXT, since TEXT NOT NULL);
 """
 
 
@@ -455,10 +458,64 @@ class Store:
 
     def save_apply_batch(self, batch_id: str, day: str, data: dict) -> None:
         with self.db:
-            self.db.execute(
-                "INSERT OR REPLACE INTO apply_batches (id, day, data, created_at) VALUES (?, ?, ?, ?)",
-                (batch_id, day, json.dumps(data, ensure_ascii=False), _now()),
-            )
+            self._save_batch(batch_id, day, data)
+
+    def _save_batch(self, batch_id: str, day: str, data: dict) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO apply_batches (id, day, data, created_at) VALUES (?, ?, ?, ?)",
+            (batch_id, day, json.dumps(data, ensure_ascii=False), _now()),
+        )
+
+    def latest_apply_batch(self) -> str | None:
+        """The batch saved last."""
+        row = self.db.execute("SELECT id FROM apply_batches ORDER BY rowid DESC LIMIT 1").fetchone()
+        return row["id"] if row else None
+
+    def running_phases(self) -> list[tuple[str, str]]:
+        """(batch, step) of every batch step the database holds as running."""
+        rows = self.db.execute(
+            "SELECT id, json_extract(data, '$.phases.review') AS review, json_extract(data, '$.phases.rest') AS rest "
+            "FROM apply_batches WHERE review = 'running' OR rest = 'running' ORDER BY rowid"
+        )
+        return [(row["id"], phase) for row in rows for phase in ("review", "rest") if row[phase] == "running"]
+
+    # --- the apply step or resume in progress (spec section 10 item 111) ---------------------------------
+
+    def begin_activity(self, owner: tuple[int, str], kind: str, batch: tuple | None = None) -> None:
+        """A step or a resume starts: which tool server runs it (pid and start time) and, for a step, `batch` -
+        (batch id, step, day, data) - saved in the same transaction. One at a time per database: another one still
+        recorded is refused."""
+        batch_id, phase = (batch[0], batch[1]) if batch else (None, None)
+        try:
+            with self.db:
+                self.db.execute(
+                    "INSERT INTO apply_running (id, owner_pid, owner_started, kind, batch_id, phase, since) "
+                    "VALUES (1, ?, ?, ?, ?, ?, ?)",
+                    (owner[0], owner[1], kind, batch_id, phase, _now()),
+                )
+                if batch:
+                    self._save_batch(batch_id, batch[2], batch[3])
+        except sqlite3.IntegrityError:
+            raise InvariantError("Another apply step or resume is still running") from None
+
+    def activity(self) -> dict | None:
+        row = self.db.execute("SELECT * FROM apply_running WHERE id = 1").fetchone()
+        return dict(row) if row else None
+
+    def activity_job(self, job_id: str | None, mode: str | None, via: str | None) -> None:
+        """The job the running step is on (written before it reaches its site), or none."""
+        with self.db:
+            self.db.execute("UPDATE apply_running SET job_id = ?, mode = ?, via = ? WHERE id = 1", (job_id, mode, via))
+
+    def end_activity(self, owner: tuple[int, str] | None = None) -> None:
+        """The step or resume is closed (of `owner` only, when given)."""
+        with self.db:
+            if owner is None:
+                self.db.execute("DELETE FROM apply_running")
+            else:
+                self.db.execute(
+                    "DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ?", (owner[0], owner[1])
+                )
 
     def apply_batch(self, batch_id: str) -> dict:
         row = self.db.execute("SELECT day, data FROM apply_batches WHERE id = ?", (batch_id,)).fetchone()

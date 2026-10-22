@@ -6,6 +6,8 @@
   when it last wrote anything and stop_applying can stop it.
 - `follow`: feed an agent its instructions and read its output line by line until it ends, with a limit on every wait.
 - `kill_new_drivers`: the Playwright drivers a read started, ended when the read runs out of time.
+- `me`, `alive`, `kill_orphans`: which tool server runs a step, whether it still does, and the agents one that
+  stopped left behind.
 
 Nothing here clicks, types or navigates.
 """
@@ -67,6 +69,40 @@ def _kill(pid: int) -> bool:
         return True
     except (ProcessLookupError, PermissionError):
         return False
+
+
+def me() -> tuple[int, str]:
+    """This process: its pid and start time (a tool server, as the apply_running table names it)."""
+    pid = os.getpid()
+    return pid, processes()[pid].started
+
+
+def alive(pid: int, started: str) -> bool:
+    """Whether the process with this pid and start time still runs."""
+    try:
+        proc = processes().get(int(pid))
+    except (OSError, subprocess.SubprocessError):
+        return True  # cannot tell: never treat a live tool server as gone
+    return proc is not None and proc.started == started
+
+
+def kill_orphans(marks) -> list[int]:
+    """End the agents a stopped tool server left behind, with everything they started (spec section 10 item 112):
+    processes whose parent is now the system (1) and whose command line holds one of `marks` (this data folder's
+    MCP configs). Another live tool server's agents have that server as their parent."""
+    try:
+        table = processes()
+    except (OSError, subprocess.SubprocessError):
+        return []
+    left = {p.pid for p in table.values() if p.ppid == 1 and any(mark in p.command for mark in marks)}
+    found = set(left)
+    for pid in left:
+        found |= descendants(pid, table)
+        try:
+            os.killpg(pid, signal.SIGKILL)  # an agent leads its own process group (start_new_session)
+        except (ProcessLookupError, PermissionError):
+            pass
+    return sorted(pid for pid in found if _kill(pid))
 
 
 def children() -> set[tuple[int, str]]:
