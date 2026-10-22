@@ -996,3 +996,57 @@ def test_a_tool_server_is_gone_only_when_a_real_process_list_or_the_system_says_
     finally:
         proc.kill()
         proc.wait()
+
+
+def test_two_sessions_recovering_at_once_never_delete_each_other_s_row(box, monkeypatch):  # review #3
+    batch = batch_of(box)
+    box.store.begin_activity(dead_server(), "resume")  # a resume a stopped server left behind
+    other, owner = live_server()
+    try:
+        b, a = restarted(box), restarted(box)
+        a._me = owner  # session A, alive
+        inside, errors = threading.Event(), []
+        real = watchdog.kill_orphans
+
+        def slow(marks):  # B ends the stopped server's agents while A recovers too and starts its own step
+            if threading.current_thread().name == "session-b":
+                inside.set()
+                time.sleep(1.0)
+            return real(marks)
+
+        def session_b():
+            try:
+                b.apply_status()
+            except Exception as error:  # noqa: BLE001 - reported below
+                errors.append(error)
+
+        monkeypatch.setattr(watchdog, "kill_orphans", slow)
+        thread = threading.Thread(target=session_b, name="session-b")
+        thread.start()
+        assert inside.wait(5)
+        a._recover()  # waits for B: one recovery at a time
+        data = a.store.apply_batch(batch["batch_id"])
+        data["phases"]["review"] = "running"
+        a.store.begin_activity(owner, "step", batch=(batch["batch_id"], "review", data.pop("day"), data))
+        a.store.activity_job(owner, "j00", "review", "form_fill")
+        thread.join(10)
+        assert errors == []
+        assert a.store.activity()["owner_pid"] == owner[0]
+        data = a.store.apply_batch(batch["batch_id"])
+        assert data["phases"]["review"] == "running" and not data.get("void")
+        assert b.apply_status()["other_session"]["batch_id"] == batch["batch_id"]  # A's step is left alone
+        assert b.store.activity()["owner_pid"] == owner[0]
+    finally:
+        other.kill()
+        other.wait()
+
+
+def test_a_closing_never_removes_another_server_s_row(box):  # review #3
+    other, owner = live_server()
+    try:
+        box.store.begin_activity(owner, "resume")
+        box.store.end_activity(dead_server())
+        assert box.store.activity()["owner_pid"] == owner[0]
+    finally:
+        other.kill()
+        other.wait()

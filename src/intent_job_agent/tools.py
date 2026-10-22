@@ -1580,27 +1580,30 @@ class Toolbox:
             me = self._owner()
         except InvariantError:  # cannot tell this server from another: leave everything as it is (review #1)
             return None
-        row = self.store.activity()
-        ours = row is not None and (row["owner_pid"], row["owner_started"]) == me
-        if row is not None and not (ours and _running(self._apply_run)):
-            if not ours and watchdog.alive(row["owner_pid"], row["owner_started"]):
-                return row
-            watchdog.kill_orphans(self._agent_marks())
-            if row["kind"] == "step":
-                self._close_interrupted(row["batch_id"], row["phase"], row)
-            self.store.end_activity()
-            row = None
-        mine = self._apply_run
-        left = [
-            (batch_id, phase)
-            for batch_id, phase in self.store.running_phases()
-            if not (mine is not None and (mine["batch_id"], mine["phase"]) == (batch_id, phase))
-            and not (row is not None and (row["batch_id"], row["phase"]) == (batch_id, phase))
-        ]
-        if left:  # running in the database, run by no tool server: left by one before the activity row existed
-            watchdog.kill_orphans(self._agent_marks())
-        for batch_id, phase in left:
-            self._close_interrupted(batch_id, phase, None)
+        with self.store.exclusive():  # one recovery at a time, across sessions (review #3)
+            row = self.store.activity()
+            if row is not None:
+                owner = (row["owner_pid"], row["owner_started"])
+                ours = owner == me
+                if not ours and watchdog.alive(*owner):
+                    return row
+                if not (ours and _running(self._apply_run)):
+                    watchdog.kill_orphans(self._agent_marks())
+                    if row["kind"] == "step":
+                        self._close_interrupted(row["batch_id"], row["phase"], row)
+                    self.store.end_activity(owner)
+            row = self.store.activity()  # what is left is a live server's (or this one's running) step
+            mine = self._apply_run if _running(self._apply_run) else None
+            left = [
+                (batch_id, phase)
+                for batch_id, phase in self.store.running_phases()
+                if not (mine is not None and (mine["batch_id"], mine["phase"]) == (batch_id, phase))
+                and not (row is not None and (row["batch_id"], row["phase"]) == (batch_id, phase))
+            ]
+            if left:  # running in the database, run by no tool server: left by one before the activity row existed
+                watchdog.kill_orphans(self._agent_marks())
+            for batch_id, phase in left:
+                self._close_interrupted(batch_id, phase, None)
         return None
 
     def _close_interrupted(self, batch_id: str, phase: str, row: dict | None) -> None:

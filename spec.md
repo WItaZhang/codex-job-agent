@@ -827,7 +827,7 @@ agent 可以发起提交，但**每次调用都必须经过宿主程序的权限
 110. **时间**：`apply_status` 的每个岗位多出 `started`、`finished`、`last_activity`（做完的是结束时间；正在做的是 agent 最后一次输出的时间，agent 已经退出、在读回时是它退出的时间）；正在做的还有 `quiet_seconds`（多少秒没有动静）和 `agent_alive`。说了停下、还在等正在做的岗位时，整步 `stopping` 为真。
 111. **谁在跑**：新表 `apply_running`，最多一行。投递的一步或一次接着做开始时写下是哪个工具服务（进程编号和启动时间）、哪一批哪一步；每个岗位开始前写上岗位、模式、走哪条路；收尾时删掉。几个会话共用同一个数据库：别的会话的工具服务（进程还活着）在跑时，`start_applying`、`resume_applying` 拒绝，`apply_status` 用 `other_session` 写明。所以两个 agent 不会同时用一个 Chrome。
      - 一个工具服务算"已经不在"，要读得到的进程表里同一个进程编号的启动时间变了，或者进程表里没有它、系统也说这个进程编号不存在。读不到进程表（`ps` 出错）时算还在；工具服务认不出自己时，不开始新的一步，也不收尾别的会话的一步（审查 #1）。
-112. **重启以后**：`apply_status`、`prepare_apply_batch`、`start_applying`、`prepare_resume`、`resume_applying` 开头先看一次。`apply_running` 里的工具服务已经不在了，或者批次的一步在数据库里是"进行中"、却没有 `apply_running`、也不是这个工具服务在跑（本切片以前留下的），就收尾：
+112. **重启以后**：`apply_status`、`prepare_apply_batch`、`start_applying`、`prepare_resume`、`resume_applying` 开头先看一次。`apply_running` 里的工具服务已经不在了，或者批次的一步在数据库里是"进行中"、却没有 `apply_running`、也不是这个工具服务在跑（本切片以前留下的），就收尾。收尾在数据库的一个写事务里做，几个会话同时调用时一个一个来；只删那个已经不在的工具服务自己的行，删完再读一次 `apply_running`，有活着的工具服务在跑的步不碰（审查 #3）：
      - 先结束上一个工具服务留下的投递 agent 和它们的子孙进程：父进程已经是系统（1）、命令行带着本数据目录的 `.mcp-apply-0.json` 或 `.mcp-form-fill-0.json`。别的会话的 agent 父进程是它的工具服务，不会被认成留下的。
      - 正在做的岗位还是待投时：自动提交的可能已经交了，记成等你处理，原因 `interrupted`（第 113 条），写一条尝试记录（held）；停在提交前的不会提交，留在待投，写一条尝试记录（pending、`interrupted`）。接着做被中断时照第 102 条，"正在接着做"的标记留着。
      - 这一步按数据库里已经记下的结果收尾，和做完的一步同样判断（第 68、90、101 条）。
