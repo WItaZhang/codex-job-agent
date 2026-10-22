@@ -880,3 +880,13 @@ def test_a_step_offers_its_next_step_with_the_batch(box):
     write_letters(box, jobs)
     batch = step(box)
     assert box.apply_status()["next"]["batch_id"] == batch["batch_id"]
+
+
+def test_a_held_form_says_to_say_done_not_to_run_it_again(box):  # review 3: spec section 10 items 91, 97
+    first_step_held(box)
+    rows = {row["job_id"]: row for row in box.apply_status()["jobs"]}
+    for job_id, gate in (("j00", "登录和注册都不成"), ("j01", "验证码"), ("j02", "单点登录")):
+        todo = rows[job_id]["todo"]
+        assert todo and gate in todo[0] and "好了" in todo[0], job_id
+        assert not any("重跑" in item for item in todo), job_id
+    assert any("重跑" in item for item in rows["j03"]["todo"]) or rows["j03"]["result"] == "failed"
