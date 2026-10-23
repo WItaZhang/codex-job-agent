@@ -22,3 +22,9 @@
 README最短路径和依赖分层、专属Chrome、授权、子agent行为边界及升级限制已更正。四技能仅维护源、补充当前用户授权范围；MCP指令同口径。skill-creator quick_validate逐个验证fetch-jobs/today/apply-list/apply全通过；不等于真实宿主行为验证。宿主仅版本已读：codex-cli0.163.0-alpha.10.2、Claude Code2.1.309，尚未启动模型交互。未读取个人宿主配置/密钥。
 
 官方核对：Claude项目stdio配置 https://code.claude.com/docs/en/mcp；Playwright按包版本安装浏览器 https://playwright.dev/python/docs/browsers；Codex配置/skills/角色沿前述官方参考。实际MCP握手、干净检出及合成全链仍待后续；本小步没有修改宿主审批白名单。
+
+## G04/G05：合成闭环与可复跑协议检查
+
+新增 tests/test_github_host_journey.py：24个合成岗位经真实旧 JobSpy 适配/Store 与 Toolbox，外部scrape返回合成表；实际标签、7+3、显式合成反馈/理解参数、proposal选择、意图版本2、JSON清单、求职信校验和普通/保护/登录门槛结果。socket.connect毒丸，fake仅测试文件；没有S2 runtime或生产解锁入口。初稿错误依次为无用NoModel导入不存在、清单路径应在files下、FormFillFake复用GateRunner的stop调用应按mode判保护，不计产品行为红。修正后单例1 passed/0.46s。
+
+scripts/check_host_checkout.py限定干净无data/local检出，实际使用两个宿主配置命令在根/子目录启动stdio，初始化仓库合成意图示例，列47工具/读意图；不调用外发业务。不把该脚本当宿主模型交互。固定提交后在独立clone实跑结果另记。
