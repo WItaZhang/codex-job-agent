@@ -49,7 +49,7 @@ S1定义事件、命令、错误、usage、取消统一封套protocol_version=1�
 
 ## 3. 错误、取消、用量及重试
 
-固定错误至少包括missing_credential、invalid_credential、unsupported_model、schema_unsupported、schema_violation、refused、incomplete、timeout、rate_limited、network、permission_denied、stale、budget_exhausted、internal。错误返回固定中文原因/相关配置项/下一步，不含key、原始响应、个人正文、任意异常路径。缺key只针对真实适配，fake无需key；不回退作者环境、宿主登录或其他账号。
+固定错误至少包括missing_credential、invalid_credential、unsupported_model、schema_unsupported、schema_violation、refused、incomplete、timeout、rate_limited、network、permission_denied、stale、budget_exhausted、not_configured、internal。错误返回固定中文原因/相关配置项/下一步，不含key、原始响应、个人正文、任意异常路径。缺key只针对真实适配，fake无需key；不回退作者环境、宿主登录或其他账号。
 
 取消是多维事实而非互斥成功标签：例如`local=stopped, transport=aborted, remote=unknown`同时成立。远端已确认取消需要provider实际确认，传输中断不是确认，远端取消也不回滚已经发生的工具副作用。重复停止幂等；模型后续结果丢弃，停止后不发新节点。纯理解节点可重新请求但费用仍可能发生；工具已launch且结果不明按既有held/interrupted/maybe_submitted核查，不回pending自动重投。未launch不能伪造已执行。stop与身份失效优先序、R1b generation/归属和恢复已提交核查继续有效。
 
@@ -118,4 +118,4 @@ R2b整体退出：以上矩阵、四项、独立制品无宿主fake完整旅程�
 
 S1不发网络请求、不新增SDK、不启动浏览器、不读取真实凭据。新runtime只实现fake执行和真实provider配置状态；旧llm/host行为不改。runtime独立配置节缺失时从包内default.yaml补全，映射递归覆盖、标量和列表整体替换、未知字段拒绝、合并后完整类型/交叉约束验证；显式null不能替代必填子节。模型模块不反向import Settings，避免循环。公共默认只在configs/default.yaml，旧workspace无需重写。
 
-预算语义：max_retries>=0，0允许首次请求但不重试；backoff_seconds>=0，0不等待；max_requests/max_input_bytes/max_output_bytes/max_depth/max_output_tokens/max_tool_calls/concurrency以及request_timeout_seconds/total_timeout_seconds必须大于0。预算耗尽不发新请求，超时是timeout，总预算耗尽为budget_exhausted。S1工具调用仅返回经封闭schema校验的提议，不执行工具；工具schema由可信代码登记且禁止权限/文件/任意执行能力。取消不依赖provider合作才生效，迟到响应仅接受合法usage，不再接受业务value；当前scope失效同理。并发/预算与请求ID唯一性在执行器内校验。
+预算语义：max_retries>=0，0允许首次请求但不重试；backoff_seconds>=0，0不等待；max_requests/max_input_bytes/max_output_bytes/max_depth/max_output_tokens/max_tool_calls/concurrency允许0，代表相应容量禁用，返回budget_exhausted且不发送请求；request_timeout_seconds/total_timeout_seconds必须大于0。默认provider=unconfigured，未配置明确失败，fake仅显式选择并标为模拟，不自动回落。执行时限取单次时限与剩余总时限的较小值，总时限允许短于单次时限。预算耗尽不发新请求，超时是timeout，总预算耗尽为budget_exhausted。S1工具调用仅返回经封闭schema校验的提议，不执行工具；工具schema由可信代码登记且禁止权限/文件/任意执行能力。取消不依赖provider合作才生效，迟到响应仅接受合法usage，不再接受业务value；当前scope失效同理。并发/预算与请求ID唯一性在执行器内校验。

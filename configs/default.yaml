@@ -178,7 +178,7 @@ llm:
 runtime:                         # public R2b S1; independent of legacy llm credentials
   protocol_version: 1
   provider:
-    name: fake
+    name: unconfigured
     model: null
     credential_ref: null
   budgets:                       # bounded defaults; per-run scope, synthetic S1 only

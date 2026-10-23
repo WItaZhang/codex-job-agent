@@ -30,7 +30,7 @@ def test_old_workspace_and_recursive_override():
     [
         {"budgets": {"typo": 1}},
         {"budgets": None},
-        {"budgets": {"max_requests": 0}},
+        {"budgets": {"max_requests": -1}},
         {"budgets": {"max_retries": -1}},
         {"provider": {"api_key_env": "SECRET"}},
         {"budgets": {"max_requests": True}},
@@ -51,3 +51,21 @@ def test_recursive_merge_replaces_lists_and_scalars_without_mutating_defaults():
     before = deepcopy(original)
     assert merge(original, {"nested": {"a": 3}, "items": []}) == {"nested": {"a": 3, "b": 2}, "items": []}
     assert original == before
+
+
+def test_zero_capacity_and_shorter_total_are_valid():
+    from intent_job_agent.runtime.config import effective_runtime
+
+    cfg = effective_runtime({"budgets": {"max_requests": 0, "max_tool_calls": 0, "total_timeout_seconds": 1.0}})
+    assert cfg.budgets.max_requests == 0
+    assert cfg.provider.name == "unconfigured"
+    assert cfg.budgets.total_timeout_seconds < cfg.budgets.request_timeout_seconds
+
+
+def test_independent_import_orders():
+    import subprocess
+    import sys
+
+    for names in [("config", "runtime.config"), ("runtime.config", "config")]:
+        code = ";".join("import intent_job_agent." + name for name in names)
+        subprocess.run([sys.executable, "-I", "-c", code], check=True, capture_output=True)

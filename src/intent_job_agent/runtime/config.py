@@ -14,23 +14,23 @@ class Model(BaseModel):
 
 
 class ProviderConfig(Model):
-    name: Literal["fake", "unconfigured"]
+    name: Literal["fake", "unconfigured", "external"]
     model: str | None
     credential_ref: str | None  # identifier only; S1 never resolves credentials
 
 
 class Budgets(Model):
-    max_requests: int = Field(gt=0)
+    max_requests: int = Field(ge=0)
     max_retries: int = Field(ge=0)  # extra attempts, not the first request
     backoff_seconds: float = Field(ge=0)
     request_timeout_seconds: float = Field(gt=0)
     total_timeout_seconds: float = Field(gt=0)
-    max_input_bytes: int = Field(gt=0)
-    max_output_bytes: int = Field(gt=0)
-    max_depth: int = Field(gt=0)
-    max_output_tokens: int = Field(gt=0)
-    max_tool_calls: int = Field(gt=0)
-    concurrency: int = Field(gt=0)
+    max_input_bytes: int = Field(ge=0)
+    max_output_bytes: int = Field(ge=0)
+    max_depth: int = Field(ge=0)
+    max_output_tokens: int = Field(ge=0)
+    max_tool_calls: int = Field(ge=0)
+    concurrency: int = Field(ge=0)
 
 
 class RuntimeConfig(Model):

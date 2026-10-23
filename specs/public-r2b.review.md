@@ -57,3 +57,15 @@
 ### S1首步反证与配置小步
 
 `/tmp/public-r2b-s1-semantic-red.log`保留5项语义失败：旧FakeClient未脚本化返回默认空对象，以及故意不合格空过滤、布尔取消、缺usage填0、模型actor/next_state可信的四个负向实现。后四项是契约反例而非现有生产漏洞证明。配置新增测试初轮2失败/7通过（尚缺新模块，独立标为接口缺失，不取代上述语义红），随后递归覆盖/旧快照/未知拒绝及资源10项通过。配置类型独立，不import Settings；默认只来自包内default.yaml，旧llm不改。计划旧状态原文已同步此次授权。
+
+### S1执行器与过滤稳定点
+
+甲方配置裁决已落实为模块决定7：默认unconfigured；external仅用于未配置凭据/未支持状态，不加载任何secret或SDK；fake显式选择并标模拟。全部容量0合法、发送0，重试0允许首次请求；剩余总时限与单次时限取min。运行入口Runtime.load持验证类型，旧llm.py未改。独立双顺序import与嵌套配置测试通过。
+
+实际节点过滤包括discovery/tagging/analysis/intent_edit/letter/form_fill，历史与tool结果同策略过滤；分析只取job_tags不传原岗位全文。真实序列化body、文件/网络毒丸、超限/未知类别、仅材料白名单、受限工具提议和旧接口兼容均覆盖。S1不执行业务工具，不携带合成提交/确认控制器。
+
+反证性质更正：semantic-red中旧FakeClient是既有行为反证，其余4项仅硬编码合同示意，不计产品链路红；contract-red 9项/provider-red 18项是新接口缺失。现有tests/test_runtime_mutations.py对同一实际Runtime调用链注入透传assemble、伪造远端取消确认、缺usage归零、跳过输出校验；`R2B_MUTATION=filter/cancel/usage/authority uv run python -m pytest -q tests/test_runtime_mutations.py`各1 failed/3 passed，精确命中对应产品断言，日志`/tmp/public-r2b-s1-mutation-*.log`。开关仅在tests，不进入产品代码；撤掉后全绿。
+
+中间38 passed的唯一warning为Pydantic Tool.schema遮蔽基类属性，已更名parameters，未过滤warnings。后续81项通过无warning。新增事件一致性校验时，Handle初始状态尚为failed无error导致53 failed/28 passed；修为真实running状态后81项通过，未放宽事件断言。迟到usage仅更新用量、不发布已取消/失效value；重试中未知用量不沿用上一轮总量，逐尝试记录保留。Event覆盖取消/失效/在途槽位/总时限短于单次，未证明远端实际取消（S5待验）。
+
+基线main d15f440的CI39958072188由甲方确认全success（四项/产品browser/package/editable，日志`/tmp/public-r2b-plan-main-ci.log`），不当作本S1全量验证。当前实现稳定点先提交交Claude独立审阅，完整四项与安装包runtime资源证据继续执行，不进入S2–S6。

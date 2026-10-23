@@ -41,6 +41,30 @@ missing = subprocess.run([str(server_cli),'--workspace',str(base / 'missing')],c
 assert missing.returncode == 2 and 'intent-job-agent init' in missing.stderr
 assert 'Traceback' not in missing.stderr and not (base / 'missing').exists()
 settings = load_workspace(a)
+# R2b S1: installed defaults remain the unique source, including old snapshots.
+from intent_job_agent.config import Settings
+from intent_job_agent.runtime.config import effective_runtime
+from intent_job_agent.runtime.provider import Runtime
+from intent_job_agent.runtime.providers.fake import ScriptedProvider
+from pydantic import BaseModel, ConfigDict
+assert effective_runtime(None).provider.name == 'unconfigured'
+old = settings.model_dump(); old.pop('runtime', None)
+assert effective_runtime(Settings.model_validate(old).runtime).provider.name == 'unconfigured'
+partial = effective_runtime({'budgets': {'max_retries': 0}})
+assert partial.budgets.max_requests == effective_runtime(None).budgets.max_requests
+class SyntheticAnswer(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    tags: list[str]
+provider = ScriptedProvider([{'value': {'tags': []}}])
+runtime = Runtime.load({'provider': {'name': 'fake'}}, provider)
+result = runtime.structured(request_id='installed', workspace='synthetic', run_id='r', revision=1,
+    node='tagging', data={'job': {'description': 'Synthetic test@example.invalid'}},
+    categories=['job'], schema=SyntheticAnswer)
+assert result.wait(2).status == 'completed'
+assert 'test@example.invalid' not in provider.bodies[0]
+assert result.drained.wait(2)
+assert runtime.configuration_status()['simulation'] is True
+
 # Only SYNTHETIC materials, no real profile needed for listing skill files.
 app = a / 'applicant'; app.mkdir()
 (app / 'synthetic.json').write_text(json.dumps({'personal':{'full_name':'Synthetic Example'}}))
