@@ -34,9 +34,21 @@ Linux 还可能需要系统库；官方提供 `uv run playwright install --with-
 
 这里使用项目提供的显式 `--config configs/default.yaml` 源码入口；不要改为 `init --workspace` 期待真实业务可用，后者目前仍是本地只读模式。
 
+### 启动故障
+
+- `uv: not found`：安装上方链接中的 uv，确认启动宿主的终端 PATH 能找到它，再重启宿主。
+- `incompatible with the project's Python requirement: >=3.13`：不要强制使用旧系统 Python；让 uv 选择符合项目要求的版本。首次下载需要网络，离线环境须预先准备。
+- `not a git repository`：ZIP 没有 git 元数据，启动脚本无法定位根目录；请从含 `pyproject.toml` 的解压根启动，推荐 git clone。ZIP 子目录启动不受支持。这个 stderr 本身不证明 MCP 已启动或失败，仍须检查实际握手。
+
+### 数据去向、下载与费用
+
+岗位发现会请求配置的招聘来源。宿主模型接收工具返回的岗位内容用于标签，以及意图、标签和反馈原因用于分析；不是每次标签都发送完整个人资料。可选发现增强会把页面/提取上下文交给你配置的模型服务。求职信使用你允许的简历和材料；投递后端把联系方式及申请所需资料交给投递用 Claude Code 模型和目标网站，启用 Gmail 时还会访问相应邮箱工具。不要将密钥或私人档案贴进普通对话；git 忽略不代表数据永不外发。
+
+`uv sync` 下载缺少的 Python/依赖，`playwright install` 下载匹配浏览器；投递启动的 `npx -y` 可能下载配置锁定的 `@playwright/mcp@0.0.83`，启用邮箱时还有 `@gongrzhe/server-gmail-autoauth-mcp@1.1.11`。宿主、可选模型服务及投递后端消耗各自订阅额度或 API 费用；投递默认模型为 `claude-opus-5-5`，见 `configs/default.yaml`，项目不承诺固定费用或免费运行。
+
 ## 在 Codex 里使用
 
-在 Codex 中打开本仓库，完成下方相同的依赖和个人文件准备，再开始新对话。先审阅并信任本项目；Codex未信任项目时不会加载项目配置，不要通过放宽全局策略绕过。项目级 `.codex/config.toml`
+在 Codex 中打开本仓库，完成下方相同的依赖和个人文件准备，再开始新对话。先审阅并信任本项目，包括 `.codex/config.toml` 的项目审批策略和工具 `approval_mode`；信任后这些设置会参与生效，但不是业务授权。Codex未信任项目时不会加载项目配置，不要通过放宽全局策略绕过。项目级 `.codex/config.toml`
 接入同一个 `intent-agent` MCP 服务。使用 `$fetch-jobs`、`$today`、`$apply-list`、`$apply`；
 `$cover-letter` 也可单独调用。若 skill 列表没有刷新，重启 Codex。
 
@@ -69,7 +81,7 @@ Codex 与 Claude Code 的项目配置仅放行指定的提交级工具，不扩�
    - 可选：`employers.yaml`（Workday 雇主，见 [示例](docs/examples/employers.example.yaml)）、`sites.yaml`（smartextract 站点）、
      `boards.yaml`（Greenhouse / Lever / Ashby / Avature，见 [示例](docs/examples/boards.example.yaml)）
    - 其他来源的岗位：参照 [docs/examples/jobs.example.json](docs/examples/jobs.example.json)，存为 `data/local/jobs.json` 后导入
-3. 在仓库目录启动 Claude Code。第一次会询问是否启用项目里的 `intent-agent` MCP 服务，选择启用。
+3. 从仓库根目录启动 Claude Code，审阅项目指令及 `.claude/settings.json` 审批设置并完成项目信任。第一次批准项目 `intent-agent` MCP 服务；`claude mcp get intent-agent` 显示 Pending approval 时，回到交互界面批准，不要放宽全局权限。
 4. 第一次：对 agent 说"用 data/local/intent.yaml 初始化我的意图"。
 5. 每天的命令（项目里的 skill）：
    - `/fetch-jobs`：抓今天能抓到的岗位，打标签。不管当天校不校准都可以跑。第一次会帮你检查岗位发现的设置
@@ -155,7 +167,7 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 
 ## 支持与验证范围
 
-当前本机开发与合成验证为 macOS arm64（Python 3.13.16、Claude Code 2.1.309、Codex CLI 0.163.0-alpha.10.2）；受控CLI读工具已测，Claude斜杠命令实际调用及两宿主角色派生仍待验证。Linux CI 覆盖合成测试、浏览器及包检查，不等于已验证所有 Linux 桌面宿主/投递安装。Windows 未验证，当前启动脚本和进程管理依赖 POSIX，暂不承诺可用。真实招聘网站、邮件、验证码和账户权限随用户环境而异。
+当前本机开发与合成验证为 macOS arm64（Python 3.13.16、Claude Code 2.1.309、Codex CLI 0.163.0-alpha.10.2）；受控CLI读工具和合成7+3已测，Claude原生Skill/两个命名角色及Codex完整定义回退已取得受控结果；原生配置发现和MCP连接另有无模型证据。执行层授权场景仍待最终验收，详见交付证据。Linux CI 覆盖合成测试、浏览器及包检查，不等于已验证所有 Linux 桌面宿主/投递安装。Windows 未验证，当前启动脚本和进程管理依赖 POSIX，暂不承诺可用。真实招聘网站、邮件、验证码和账户权限随用户环境而异。
 
 本片的固定版本、命令、通过项与尚未验证项记录在[交付证据](specs/github-host-release.review.md)。协议握手、合成流程与已登录宿主交互是不同层级，不把测试通过称为真实投递效果达标。
 

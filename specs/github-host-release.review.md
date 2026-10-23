@@ -71,7 +71,7 @@ scripts/check_host_checkout.py限定干净无data/local检出，实际使用两�
 
 两个修正启动器在/tmp/github-host-controlled-sessions.py，命令副本为对应.command.json，版本与HEAD已记录。修正时系统python3缺tomllib的一次本地脚本错误发生在宿主启动前，改用uv Python；不计产品故障或模型会话。
 
-## 交审状态和真实缺口
+## 91f6dc3当时交审状态和真实缺口（后续结果见文末）
 
 | 切片 | 产品行为 | 状态 | 提交证据 | 验证结果 | 阻塞/限制 | 下一步及估时 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -84,3 +84,58 @@ scripts/check_host_checkout.py限定干净无data/local检出，实际使用两�
 ## EN-1 / AU-1 最小收尾
 
 旧91f6dc3合成仓库真实enable-dev→release→worktree remove后，主检出Edit返回0，行为红见/tmp/github-host-en1-red.log。改用common git目录持久标记后，enable-dev和claim两条路径均保留保护；`uv run pytest -q tests/test_host_development_mode.py tests/test_host_launchers.py` 11 passed/1.68s，/tmp/github-host-en1-green.log。已有标记仍兼容，普通clone无标记不受管。授权证据仅当前会话/可用宿主历史，不新增存储。G03角色实际派生继续验收，不以先前只读定义代替。
+
+
+## 固定356fa04：EN-1后验证及G01无模型诊断
+
+四项 `uv sync --locked`、`uv run ruff check src tests`、`uv run ruff format --check src tests`、`uv run python -m pytest -q` 全部exit0，1886 passed/92.22s（/tmp/github-host-en1-four.log）。apply skill用uv环境执行skill-creator quick_validate通过；先用系统python缺yaml是验证器环境错误，不是技能失败。协调者独立11项及remove/prune反例已签收EN-1，不再扩锁。
+
+含空格独立clone固定356fa04，锁定离线依赖安装及scripts/check_host_checkout.py四次47工具握手/意图初始化通过；/tmp/github-host-en1-clean-path.txt、/tmp/github-host-en1-clone-install.log、/tmp/github-host-en1-clean-protocol.json。首次误用已启动过MCP的角色检出，脚本因已有data/local正确拒绝；未删除数据重试，而是新建干净检出。依赖缓存并非首次联网安装。
+
+/tmp/github-host-prerequisites.py与.json为独立合成PATH/目录诊断：只含sh/git的PATH运行真实启动命令，exit127 `exec: uv: not found`；强制本机系统CPython3.9.6，uv sync --locked --offline --no-python-downloads拒绝>=3.13，exit2。ZIP无git元数据，真实shell显示not a git repository；测试uv仅为cwd哨兵，从根保留根，从tests保留tests，exit0不代表MCP成功。README分别说明安装uv、选受支持Python、从根启动/推荐git clone。最初PATH也遗漏sh导致测试器FileNotFoundError，纠正后才取得uv红，不计产品红。
+
+## G02原生发现：无模型、无个人配置
+
+/tmp/github-host-native-config.py使用两个全新空CODEX_HOME/HOME，只写本次合成路径的trusted/untrusted设置，通过当前CLI生成schema所定义的app-server config/read(cwd,includeLayers)查询。/tmp/github-host-native-codex-config.json：未信任时项目层有disabledReason且有效mcp_servers={}；信任后有效stdio command/args及项目审批字段与仓库一致，来源为实际.codex/config.toml，无command/args覆盖、无模型/凭据。该证据证明原生配置发现和信任条件，不证明已登录的无覆盖业务会话。
+
+Claude原生命令 `claude --setting-sources project mcp get intent-agent`（无--mcp-config覆盖）返回Project config、正确stdio/sh命令与Pending approval；/tmp/github-host-native-claude-config.json。尚未修改用户全局信任或自动批准项目。下一最小真实入口验证应由操作者在合成检出完成项目/服务器批准，再在无MCP命令覆盖的会话调用一个合成读工具；不要把本次受控显式配置当该流程通过。README提醒同时审阅审批策略。
+
+## G03角色测试001：测试器失败，不是产品红
+
+源码356fa04、独立合成检出；/tmp/github-host-role-sessions.py及两份github-host-{claude,codex}-roles-001.{command.json,stdout,stderr,result.json}。Claude exit0/34.59s：stream-json逐工具记录Skill(today)真实加载；命名cover-letter-writer派生成功，agentId=a920a302b08696b66，只Read自身定义。job-tagger被拒：测试器disallowed全部47MCP，角色工具集合变空。不是角色产品缺陷，不计G03通过。
+
+Codex exit0/40.30s，完整定义cat成功；stderr两次真实spawn错误no rollout found，父线程01a16aa9-d977-7c72-981f-161a9dfd36f0使用--ephemeral。未返回child ID，不计回退成功。根因首先指向测试器历史fork条件，尚不能将ephemeral关联当充分因果证明。未发生业务工具调用。
+
+协调者批准002各一次修正会话：Claude保留角色工具，仍无真实材料/业务；Codex临时CODEX_HOME login status exit1未登录（/tmp/github-host-role-temp-auth.json），未复制凭据。CLI无模型debug prompt-input明确说明fork_turns，故改用fork_turns=none且完整定义传入，保持已有登录环境和隔离检出。002增加today合成推荐片段，不生成label/信件/投递。G10含糊apply→明确授权的执行链未并入，不以复述代替；最小后续方案见下。
+
+
+## 002修正角色与合成推荐片段（固定356fa04）
+
+命令、HEAD、cwd、exit和原始事件在/tmp/github-host-role-sessions-002.py及github-host-{claude,codex}-roles-002.{command.json,stdout,stderr,result.json}。没有修改产品入口或角色权限配置。两会话共用一个仅合成数据的检出；先由包外脚本通过真实Store/Toolbox建立24个synthetic.invalid岗位并打标签、记录本日已抓取，无网络、无资料。/tmp/github-host-seed-roles.py与github-host-roles-seed.json明确这是测试预置，不是宿主实际采集。
+
+- Claude exit0/33.64s：逐工具stream-json中原生Skill(today)加载；Agent分别按subagent_type=job-tagger/cover-letter-writer派生，两个async_launched及完成通知存在（内部ID在原始tool_use_result中）。tagger 0工具，writer只Read自身定义，均未处理真实岗位/材料。父实际get_fetch_status→list_open_analyses→select_today，首次固定7推荐+3探索并展示；无反馈/信件/投递。
+- Codex exit0/43.93s：无原生Skill工具，自动发现并实际cat完整today及两个角色定义；使用fork_turns=none完整定义回退，父结果报告/root/job_tagger和/root/cover_letter_writer均返回，无业务工具；stderr不再有no-rollout错误。JSONL直接记录三次合成MCP调用及7+3结果。**证据限制**：该CLI exec JSONL没有输出两次spawn参数/子返回完整payload，只有父结果报告和wait事件，不能把它说成完整独立子线程审计；对精确合成cwd做thread/list无模型查询返回空（ephemeral），未扩大查询私人历史。完整定义传入与子返回的细节据此标为宿主执行报告，不冒充独立逐参数复核。
+- Codex稍后读取同一已固定选择，get_fetch_status selected=true/tagged_open=14，不是第二个独立首次选择。两个select_today结果相同；/tmp/github-host-roles-post-store.json实际复查24jobs、7+3 selection、labels=0、applications={}、tracked diff空。
+- 001的零工具/历史fork失败属于harness红，002修正不改产品；不是修复了仓库角色实现。仍没有证明角色真实生成/保存求职信或真实网站成功。
+
+## G02追加：原生项目发现并实际连接，无模型
+
+Claude：官方MCP文档明确--settings可提供单次项目服务器批准。执行 `claude --setting-sources project --settings '{"enabledMcpjsonServers":["intent-agent"]}' mcp get intent-agent`，无--mcp-config，无command/args覆盖，exit0显示Scope: Project config (shared via .mcp.json)、Status: Connected、仓库原命令。/tmp/github-host-native-claude-connected.json。只批准当前合成检出的这一服务，不改全局配置；不是实际点击信任窗口或首次登录测试。
+
+Codex：/tmp/github-host-native-codex-connect.py创建全新无凭据CODEX_HOME/HOME，仅写当前合成项目trusted；`codex -C <clone> app-server --stdio`，按本机生成公开schema执行initialize→thread/start(cwd,read-only,ephemeral)→mcpServerStatus/list(threadId,serverName=intent-agent)。未调用turn/start，未请求模型。/tmp/github-host-native-codex-connect.json返回runtimeStatus=connected、serverInfo.name=intent-agent和47工具，命令来自原生项目层，没有MCP覆盖。结合前述config/read可信/不可信对照和已有同命令模型get_intent证据，提交G02分层裁决；不把它称为已验证所有用户宿主登录/信任界面。
+
+## G10仍需的最小实际行为验收（未移出范围）
+
+一场受控宿主测试、同一合成会话两次明确输入，不新增生产fake开关/授权库：包外临时MCP启动器构造真实Toolbox，复用tests/test_gate_handoff.py的GateRunner/FormFillFake及test_slice6.py的合成材料/letter renderer；预置普通公司和保护公司岗位、合成信件资料。所有浏览器/外部agent/邮件sink以已有假runner替换并记录调用，socket网络毒丸；除这套测试启动器外源码入口不变。宿主仍加载真实apply skill。
+
+第一输入仅/apply（新用户、无既有自动授权），核对实际prepare_apply_batch参数stop_before_submit=true、无submit模式runner调用；记录一次具体批次/非保护公司/自动提交选择。第二输入明确“自动投递刚才这份合成清单的非保护公司”，核对重新prepare返回真实summary、普通公司可进入假submit、保护公司仍stop；在同批继续一步，不能再次要求相同授权。逐工具/runner日志和持久批次状态为断言，不以模型说自己遵守为通过；用户真实输入由测试驱动给出，模型不得伪造。实际工具如缺资料须先修合成fixture，不以无资料报错替代授权测试。
+
+准备约1–2小时，运行一次受控会话和整理证据约20–40分钟；仅规划估算。由协调者裁决是否执行这一聚焦模型测试；本轮不再追加付费会话。若需要更强Codex子线程独立日志，最小方案是授权一个保留测试线程的宿主入口并仅导出该合成线程的工具事件，不复制凭据、不查询私人会话，不追加业务流程。
+
+## 当前交付状态
+
+|切片|产品行为|状态|提交证据|验证结果|阻塞/待裁决|下一步及估时|
+|---|---|---|---|---|---|---|
+|GitHub双宿主|源码启动、共用skills/roles、合成推荐、恢复报告保护、持久开发模式|代码稳定，交审；未宣称整片验收|产品356fa04，后续仅README/证据文档|四项1886/92.22s；干净clone四握手47工具；002角色/7+3；原生无模型连接|G10实际执行未测；G02分层证据及Codex子返回报告强度待独立裁决|协调者裁决最小G10方案；不推送合并|
+
+R3/R5 README已按代码补数据去向、运行时下载/费用和审批策略审阅；没有声称所有标签发送完整个人资料。当前远端尚非本分支，协调者后续负责整合推送、远端clone和CI。本次文档不改变356fa04已四项通过的产品代码；不重复全套或扩大验收为商业产品。
