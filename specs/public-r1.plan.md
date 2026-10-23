@@ -80,3 +80,7 @@ Explicit form_fill --data-dir takes precedence over workspace data root for offl
 ### 最终验收补充：CI静态发行护栏
 
 按甲方决定补最小测试：仓库仅已批准check workflow；contents:read，限定批准的checkout/setup与验证命令，不允许额外job/step/权限/发布触发。合成插入artifact、Release、Pages、PyPI及任意附加shell命令应失败。测试只读YAML、不执行步骤；这是防意外改动的契约回归，不防恶意改测试、被信任脚本的任意shell或供应链攻击。先红再实现，定向验证，不重跑无关大套、不触发重复CI。
+
+### 远端失败后的本片最小修复
+
+CI39916656829三失败已确认。先补事件屏障停止竞态（pending/无attempt）、完成结果不回退与真实崩溃仍held；已知本server run由正常收尾处理，不能仅依据status变stopped走中断恢复，不引入DB→run锁反向等待。Linux ps子进程LC_CTYPE用C.UTF-8，mac保留UTF-8，LC_TIME=C/TZ=UTC且移除继承LC_ALL，原Unicode/时间身份测试不跳过。CI在uv sync后安装`uv run playwright install --with-deps chromium`，仅既有本地合成测试；更新静态契约白名单。定向红绿、小步提交，再四项+制品；不重跑旧CI，由协调者推新HEAD。官方依据https://playwright.dev/python/docs/ci；本地锁定1.56.0 CLI help已确认install --with-deps及chromium。

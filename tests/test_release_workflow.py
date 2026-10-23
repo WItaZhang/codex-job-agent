@@ -22,6 +22,7 @@ def validate_workflow(document):
         {"uses": "actions/checkout@v4"},
         {"uses": "astral-sh/setup-uv@v6", "with": {"python-version": "3.13"}},
         {"run": "uv sync --locked"},
+        {"run": "uv run playwright install --with-deps chromium"},
         {"run": "uv run ruff check src tests"},
         {"run": "uv run ruff format --check src tests"},
         {"run": "uv run python -m pytest -q"},
@@ -59,7 +60,9 @@ def test_synthetic_publication_step_is_rejected(step):
         validate_workflow(document)
 
 
-@pytest.mark.parametrize("mutation", ["write", "job_permissions", "extra_job", "release_trigger", "missing_probe"])
+@pytest.mark.parametrize(
+    "mutation", ["write", "job_permissions", "extra_job", "release_trigger", "missing_probe", "missing_browser"]
+)
 def test_synthetic_contract_drift_is_rejected(mutation):
     document = deepcopy(workflow())
     if mutation == "write":
@@ -70,6 +73,8 @@ def test_synthetic_contract_drift_is_rejected(mutation):
         document["jobs"]["publish"] = {"steps": [{"run": "uv publish"}]}
     elif mutation == "release_trigger":
         document["on"].append("release")
+    elif mutation == "missing_browser":
+        document["jobs"]["check"]["steps"].remove({"run": "uv run playwright install --with-deps chromium"})
     else:
         document["jobs"]["check"]["steps"].pop()
     with pytest.raises(AssertionError):

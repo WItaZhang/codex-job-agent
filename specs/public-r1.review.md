@@ -1,5 +1,7 @@
 # R1 交审记录（决定28）
 
+当前验收：远端CI39916656829已failure，以下此前交审/queued/另片R1s安排均为历史证据。甲方已要求三项阻塞在本R1修复，新HEAD通过CI后才可整合，再立即R1b。原失败记录保留，最新修复验证见文末。
+
 ## 产品行为与范围
 
 R1 提供源码外初始化、包内运行资源、按用户工作区隔离的本地读取和制品回归。它是完整公众产品的第一片，不是公众可用结论或最终 CLI 产品。空目录不植入档案、意图、授权或密钥；真实抓取/模型/浏览器/邮件/投递和业务写入在新 workspace 关闭。显式普通 legacy 开发配置维持原语义，不能指向标记 workspace 解锁。
@@ -73,3 +75,21 @@ Claude `/tmp/public-r1-final-review.md` 对f62c32c最终通过，无阻塞，确
 ## 甲方最终排期决定留底
 
 CI契约提交为5aac3c3，13项新增＋48项原定向共61通过，锁已释放后本次只为文档重新claim。甲方接受停止竞态证据强度：不阻塞R1，但作为明确缺陷，在R1整合后单独最小切片R1s提前修，再立即R1b；不提前全套R6、不混进当前R1。仓库内[缺陷证据](public-stop-race.evidence.md)保存关键交错、三组结果及首次失败未完全归因的限制；原首次失败、重测及CI红绿记录全部保留。本次只文档，不改实现/测试、不重跑大套、不触发CI、不开始下一片。远端CI结果由协调者管理，未在此宣称通过。
+
+## 远端CI实际失败与本片修复（取代R1s排期）
+
+CI39916656829：**1585 passed / 21 skipped / 3 failed**，日志`/tmp/public-r1-ci-39916656829-failed.log`。三失败原样留底：
+
+1. `test_applypilot::test_enrichment_fills_in_short_descriptions`：缺chromium_headless_shell-1194，原测试的error应为None却收到Executable doesn't exist。
+2. `test_a_stop_before_an_auto_submit_agent_starts_keeps_it_from_starting`：j05 held而非pending，再次暴露既有恢复竞态。
+3. `test_an_agent_left_behind_under_a_non_ascii_data_folder_is_found`：Linux ps将“求职”显示成“??????”，无法匹配原Unicode MCP路径。
+
+甲方改为阻挡R1验证的本片修复，不先合红CI，不重跑旧run。新增事件屏障的stopped/applied两例和Linux ps环境契约先3红（`/tmp/public-r1-ci-fixes-red.log`），原断言不变。
+
+修复：_recover识别同owner且批次/phase匹配、尚未closed的内存run，交由正常_close_run清理；status刚变stopped不再单独触发崩溃恢复。没有在DB事务内获取run锁，保持既有run.lock→DB顺序；真实无run/失联仍走保守恢复。事件屏障测试覆盖停止后pending无attempt、已落库成功不回退、后续岗位pending、kill零调用、正常关闭幂等。
+
+ps仅子进程环境：Linux LC_CTYPE=C.UTF-8；macOS保持UTF-8；LC_TIME=C/TZ=UTC且去除继承LANG/LC_*。不改用户locale、不改lstart格式/身份、不做/proc重写、不跳过Unicode断言。新增真实合成sleep进程在C/C.UTF-8/无效父locale下比较Unicode命令及started稳定；Linux环境参数单测证明未泄漏LC_ALL。当前macOS实机通过，Linux实机仍待新HEAD CI，不冒称本地已证明Linux通过。
+
+CI在sync后执行`uv run playwright install --with-deps chromium`，静态契约只增加此精确命令并验证缺失时失败。锁定Playwright1.56.0的实际CLI已核对--with-deps及chromium；[官方CI说明](https://playwright.dev/python/docs/ci)要求安装浏览器/系统依赖。只供既有本地合成网页集成测试；原enrichment测试未mock，未开放新workspace浏览器业务；不采用官方示例的artifact上传。
+
+定向：stuck_run/CI契约/applypilot **105 passed / 27.02s**（追加最后两项前）；随后Unicode/locale/竞态6通过、CI契约14通过。ruff检查/格式通过。环境无可用docker/podman，本地macOS不能代替Linux CI；不改主目录，不推送，协调者推新HEAD再交Claude复核三点。完整验证与制品结果另补。

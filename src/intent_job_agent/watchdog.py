@@ -23,6 +23,7 @@ import signal
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -46,11 +47,13 @@ def processes() -> dict[int, Proc]:
     lines read as written, in UTF-8 (review #7). Raises SubprocessError when ps fails or its list leaves out this very
     process: such a list says nothing (review #1)."""
     env = {k: v for k, v in os.environ.items() if k != "LANG" and not k.startswith("LC_")}
+    # Darwin accepts UTF-8; Linux procps needs the supported C.UTF-8 locale name.
+    ctype = "C.UTF-8" if sys.platform.startswith("linux") else "UTF-8"
     result = subprocess.run(
         ["ps", "-A", "-ww", "-o", "pid=,ppid=,pgid=,lstart=,command="],
         capture_output=True,
         timeout=10,
-        env={**env, "LC_TIME": "C", "LC_CTYPE": "UTF-8", "TZ": "UTC"},
+        env={**env, "LC_TIME": "C", "LC_CTYPE": ctype, "TZ": "UTC"},
     )
     if result.returncode != 0:
         raise subprocess.SubprocessError(f"ps exited with {result.returncode}")

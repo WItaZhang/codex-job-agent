@@ -1876,7 +1876,22 @@ class Toolbox:
                 ours = owner == me
                 if not ours and watchdog.alive(*owner):
                     return row
-                if not (ours and _running(self._apply_run)):
+                run = self._apply_run
+                # A normal worker may finish after _sync_apply_results but before this transaction.
+                # Its matching in-memory run still owns cleanup, even when status is no longer running.
+                # Do not take run.lock while holding the DB transaction (_close_run orders run.lock -> DB).
+                known = (
+                    ours
+                    and run is not None
+                    and not run.get("closed")
+                    and (
+                        (row["kind"] == "resume" and run["phase"] == "resume")
+                        or (
+                            row["kind"] == "step" and (run["batch_id"], run["phase"]) == (row["batch_id"], row["phase"])
+                        )
+                    )
+                )
+                if not known:
                     watchdog.kill_agent(row["agent_pid"], row["agent_started"])  # by identity (review #7)
                     watchdog.kill_orphans(self._agent_marks())
                     if row["kind"] == "step":

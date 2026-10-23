@@ -1,6 +1,6 @@
 # 正常停止被误判为中断：缺陷与证据留底
 
-状态：甲方接受为已证实的既有恢复竞态，不阻塞R1。R1整合后单独开最小稳定性切片（R1s），只修此缺陷，再立即R1b；从R6提前，不提前整个R6，不混入当前R1。当前尚未修复。
+状态：甲方接受为已证实的既有恢复竞态。远端CI 39916656829再次失败后，已改为阻挡R1验证的本片修复；原先不阻塞/另开R1s安排被取代，不提前整个R6。以下三组探针保留修复前事实。
 
 ## 机制
 
@@ -28,8 +28,8 @@
 
 R1路径校验可能改变线程调度/频率，未测概率；_recover的新增检查在_sync之前，run_application检查在LIVE.begin之前，并非在所述临界窗口内新增扫描。新workspace真实执行/恢复入口仍拒绝，缺陷保留在显式legacy路径。不能用一次复跑绿代替修复。
 
-## 下一片边界与验收建议
+## 本片修复边界与验收
 
-只修本server正常停止收尾与恢复互相误判；保留真正owner丢失/崩溃时的保守held，不改保护公司或扩大授权。正式事件屏障回归应证明：stop-before-launch保持pending且无attempt；真实失联仍held；已提交结果不回退pending；重复close幂等，锁顺序不死锁。预计0.5–1有效工作日，作为R6预算中提前的小部分；具体独立检出由协调者另行安排。本次未实现。
+只修本server正常停止收尾与恢复互相误判；保留真正owner丢失/崩溃时的保守held，不改保护公司或扩大授权。正式事件屏障回归应证明：stop-before-launch保持pending且无attempt；真实失联仍held；已提交结果不回退pending；重复close幂等，锁顺序不死锁。预计0.5–1有效工作日，作为本次R1验证阻塞修复，不再独立安排R1s；完成证据见public-r1.review.md。
 
 原始辅助文件：`/tmp/public-r1-stop-race-analysis.md`、`/tmp/public-r1-stop-race-probe.py`、`/tmp/public-r1-stop-race-probe.json`、`/tmp/public-r1-stop-race-source-comparison.json`、`/tmp/public-r1-reviewed-pytest.log`。这些可能被清理；本文件已持久保存关键机制、结果及证据限制，不依赖/tmp才可理解结论。

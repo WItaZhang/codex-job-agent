@@ -495,4 +495,10 @@ External legacy configurations cannot address marked workspace storage (resolved
 
 #### 决定28：恢复竞态前移的交接顺序
 
+> 已被决定28「远端CI实际失败后的本片修复」取代；历史正文保留。
+
 甲方接受既有竞态的确定性复现与证据限制，不阻塞R1。R1整合后独立开R1s最小稳定性切片，只修正常收尾/恢复误判held，再立即R1b；从R6提前此项，不提前全套R6、不混入当前R1。本决定取代决定27/28中“R1b紧随R1”及将此缺陷暂留R6的排期部分，其他边界不变。关键机制和三组对照见[仓库证据](specs/public-stop-race.evidence.md)，首次全套失败记录不删。当前仅文档交接，未授权本会话自行启动下一片。
+
+#### 决定28：远端CI实际失败后的本片修复
+
+CI 39916656829实际failure（1585 passed/21 skipped/3 failed），取代此前queued认知及R1整合后另修R1s的安排。甲方要求R1建立通过的CI：本片修停止/恢复竞态、Linux非ASCII进程识别，补Playwright1.56.0对应Chromium及系统依赖；只供既有本地合成网页测试，不开放新workspace真实业务。ps使用受控子进程locale，保留C时间/UTC和Unicode，不改用户系统locale、不跳过原断言。不重跑旧run碰运气；新HEAD完整验证及制品探针后交Claude复核，协调者推送跑新CI，通过后整合再立即R1b；全套R6仍后续。
