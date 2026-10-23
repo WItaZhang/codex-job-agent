@@ -921,24 +921,26 @@ class Toolbox:
         in user_report; its text is not persisted, only its presence. Legacy user reports retain via=user."""
         if actor not in ("user", "delegated_coordinator"):
             raise InvariantError("Unknown application status actor")
-        busy = [job_id for job_id in job_ids if job_id in self._resuming()]
-        if busy:
-            raise InvariantError(f"Jobs {busy} are being resumed now; wait for apply_status")
-        same = self._same_posting(self.store.applications())
-        others = [j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids]
-        if actor == "delegated_coordinator":
-            if status != "pending":
-                raise InvariantError("Coordinator cannot report user submission or abandonment")
-            applications = self.store.applications()
-            for job_id in [*job_ids, *others]:
-                item = applications.get(job_id, {})
-                if item.get("status") in ("held", "applied") or any(
-                    code in (item.get("note") or "") for code in ("maybe_submitted", "interrupted")
-                ):
-                    raise InvariantError(
-                        "Unresolved submission or held job: inspect evidence and use resume, not retry"
-                    )
         with self.store.exclusive():
+            same = self._same_posting(self.store.applications())
+            others = [
+                j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids
+            ]
+            busy = set([*job_ids, *others]) & (self.store.resume_jobs() | set(self._resuming()))
+            if busy:
+                raise InvariantError(f"Jobs {sorted(busy)} are being resumed now; wait for apply_status")
+            if actor == "delegated_coordinator":
+                if status != "pending":
+                    raise InvariantError("Coordinator cannot report user submission or abandonment")
+                applications = self.store.applications()
+                for job_id in [*job_ids, *others]:
+                    item = applications.get(job_id, {})
+                    if item.get("status") in ("held", "applied") or any(
+                        code in (item.get("note") or "") for code in ("maybe_submitted", "interrupted")
+                    ):
+                        raise InvariantError(
+                            "Unresolved submission or held job: inspect evidence and use resume, not retry"
+                        )
             self.store.set_application_status(job_ids, status, by_user=actor == "user")
             self.store.list_applications(others, _day(None))
             self.store.set_application_status(others, status)
@@ -2461,7 +2463,7 @@ class Toolbox:
             self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
         )
         owner = self._owner()
-        self.store.begin_activity(owner, "resume")
+        self.store.begin_activity(owner, "resume", resume_jobs=list(job_ids))
         try:
             self.store.record_decision(None, "resume", {"job_ids": list(job_ids), "approved_via": APPROVED_VIA})
         except Exception:
