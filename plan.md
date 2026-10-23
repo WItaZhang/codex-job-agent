@@ -1,3 +1,5 @@
+> 历史计划，非当前使用说明。个人接入标识已去除；早期验证码服务设想已弃用，现行规则禁止破解验证码及调用破解服务。当前入口见 README。
+
 # 阶段 3：切片 1 实现计划（用户已确认；已实现，见 spec §10）
 
 > 本文件保留当时的切片计划与审阅记录，不作为当前审批流程。当前授权按 spec §5.2 / 决定 25；历史“等用户确认、弹窗、前 5 份抽查”不再是生效门槛。尚未实现的冻结功能仍不启动。
@@ -615,9 +617,9 @@ agent：（派子 agent 写 20 封求职信，代码校验，生成 PDF；不合
 | `careful_companies.yaml` | "停在提交前"的公司名单 |
 | `plugins.yaml`（可选） | 接入自己的东西：`cover_letter_skill`（skill 目录）、`resume_selection`（选简历的规则文件）、`rules`（投递时要遵守的个人规则文件） |
 
-你的接法：`plugins.yaml` 指向你本机的 qianqian-agent-kb：cover-letter skill、`resumes/README.md`（选简历规则）、`AGENTS.md`。`profile.json` 可以从知识库里的 `sources/profile/applypilot-profile-excerpts.json` 和 `profile/facts.json` 补全，由你确认后写入。
+历史设想（已弃用具体个人路径）：接入用户自行提供的简历规则和求职信skill；资料由用户自己维护，不从作者个人目录复制。
 
-另外需要：Node.js（`npx` 跑 Playwright MCP）、Chrome、Claude Code 命令行（ApplyPilot 每个岗位启动一次 `claude -p`，用你的 Claude 额度）；可选 CapSolver key 和 Gmail MCP，写进 `data/local/.env` 和 Gmail 授权，不在对话里传。
+另外需要：Node.js（`npx` 跑 Playwright MCP）、Chrome、Claude Code 命令行（ApplyPilot 每个岗位启动一次 `claude -p`，用你的 Claude 额度）；早期验证码服务设想已弃用且禁止使用；可选Gmail MCP需用户自行授权，不在对话里传凭据。
 
 ## 4. 模块
 
@@ -677,7 +679,7 @@ configs/default.yaml                   apply: 字数范围、worker 数、模型
 ## 7. 风险（你知情）
 
 - 自动提交撤不回；同一家公司投错岗位会留下记录。
-- 招聘网站可能封号；用 CapSolver 破解验证码违反多数网站的条款。
+- 招聘网站可能封号；验证码服务设想已弃用；本项目禁止破解验证码及使用破解服务。
 - 投递 agent 有你的密码和 Gmail 权限，同时在读不可信的网页；网页里的注入文本可能诱导它做别的事。
 - 每个岗位跑一次 Claude Code，几分钟一个，消耗你的 Claude 额度。
 

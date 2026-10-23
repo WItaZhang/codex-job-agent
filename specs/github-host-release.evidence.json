@@ -1,0 +1,236 @@
+{
+  "source_head": "6beef2c731dcd8bece7768f8b02af734002598ce",
+  "synthetic_only": true,
+  "g10": {
+    "rounds": [
+      {
+        "round": 1,
+        "session_id": "2032bfed-20f2-47b5-8d3d-15c7e0517cce",
+        "calls": [
+          {
+            "name": "mcp__intent-agent__apply_status",
+            "input": {}
+          },
+          {
+            "name": "mcp__intent-agent__get_apply_setup",
+            "input": {}
+          },
+          {
+            "name": "mcp__intent-agent__prepare_apply_batch",
+            "input": {
+              "stop_before_submit": true
+            }
+          }
+        ],
+        "exit": 0,
+        "seconds": 12.67
+      },
+      {
+        "round": 2,
+        "session_id": "2032bfed-20f2-47b5-8d3d-15c7e0517cce",
+        "calls": [
+          {
+            "name": "mcp__intent-agent__prepare_apply_batch",
+            "input": {}
+          },
+          {
+            "name": "mcp__intent-agent__start_applying",
+            "input": {
+              "batch_id": "batch-e1119249381d",
+              "summary": "批次 batch-e1119249381d：接着投 4 个；自动提交 3 个：Synthetic Alpha、Synthetic Beta、Synthetic Gamma；停在提交前（填表模块逐栏核对）1 个：Stripe, Inc."
+            }
+          },
+          {
+            "name": "mcp__intent-agent__apply_status",
+            "input": {}
+          },
+          {
+            "name": "mcp__intent-agent__apply_status",
+            "input": {}
+          },
+          {
+            "name": "mcp__intent-agent__apply_stats",
+            "input": {}
+          }
+        ],
+        "exit": 0,
+        "seconds": 14.51
+      }
+    ],
+    "skill_expansion_body_exact": true,
+    "runner_calls": [
+      {
+        "job_id": "j00",
+        "company": "Synthetic Alpha",
+        "mode": "submit"
+      },
+      {
+        "job_id": "j01",
+        "company": "Stripe, Inc.",
+        "mode": "stop"
+      },
+      {
+        "job_id": "j02",
+        "company": "Synthetic Beta",
+        "mode": "submit"
+      },
+      {
+        "job_id": "j03",
+        "company": "Synthetic Gamma",
+        "mode": "submit"
+      }
+    ],
+    "network_positive_controls": 2,
+    "extra_sink_calls": 0,
+    "applications": {
+      "j00": {
+        "status": "applied",
+        "first_listed": "2026-10-14",
+        "note": null
+      },
+      "j01": {
+        "status": "waiting",
+        "first_listed": "2026-10-14",
+        "note": "check_then_submit；检查后可提交；填表运行 20261023-143841-c887"
+      },
+      "j02": {
+        "status": "applied",
+        "first_listed": "2026-10-14",
+        "note": null
+      },
+      "j03": {
+        "status": "applied",
+        "first_listed": "2026-10-14",
+        "note": null
+      }
+    },
+    "attempt_count": 4,
+    "continuation": "same running rest phase, status polling releases test barrier; not a new phase authorization",
+    "claude_version": "2.1.309"
+  },
+  "g03_codex": {
+    "parent_thread_id": "01a16ab5-8147-7501-ac0d-be6404df97f5",
+    "result": {
+      "exit": 0,
+      "seconds": 32.98
+    },
+    "children": [
+      {
+        "role": "job-tagger",
+        "thread_id": "01a16ab5-b73e-7772-8ee7-a2a80b4adb27",
+        "agent_path": "/root/zero_job_tagger",
+        "parent_thread_id": "01a16ab5-8147-7501-ac0d-be6404df97f5",
+        "fork_turns": "none",
+        "source_definition_sha256": "443dde932e9bc8bdcdb1f8db23877f4d432cc8a9adba96254f09741b50c9ef9e",
+        "parent_read_exact": true,
+        "spawn_to_child_encrypted_payload_equal": true,
+        "complete_definition_in_payload": "not_independently_verifiable_encrypted",
+        "actual_final": "Role: job-tagger.\nAllowed tools: get_tagging_rules, show_job, submit_job_tags; none used in this zero-job test.\nForbidden: file edits, tool/network calls, credentials or history access, and business workflows.\nNo business was performed.",
+        "child_tool_calls": 0
+      },
+      {
+        "role": "cover-letter-writer",
+        "thread_id": "01a16ab5-dd4a-7790-adfc-d610f029470b",
+        "agent_path": "/root/zero_cover_letter_writer",
+        "parent_thread_id": "01a16ab5-8147-7501-ac0d-be6404df97f5",
+        "fork_turns": "none",
+        "source_definition_sha256": "febbc58efee37d98c0dc8adf9ef63670e687cb55e35e2d24b717f259c9073857",
+        "parent_read_exact": true,
+        "spawn_to_child_encrypted_payload_equal": true,
+        "complete_definition_in_payload": "not_independently_verifiable_encrypted",
+        "actual_final": "Role: cover-letter-writer.\nAllowed tools: Read, Glob, Grep, get_cover_letter_materials, get_cover_letter_file, get_resume, show_job, check_cover_letter, save_cover_letter; none used in this zero-job test.\nForbidden actions: applying, editing files, MCP/connector/network calls, reading credentials/profile.json/.env/global settings or history, and running business workflows.\nNo business was performed.",
+        "child_tool_calls": 0
+      }
+    ],
+    "limitation": "Complete spawn definition cannot be compared as plaintext: host persists message as encrypted_content. No decryption keys accessed. Actual spawn/child completion independently present.",
+    "cli_version": "0.163.0-alpha.10.2",
+    "acceptance": "Coordinator accepted actual fallback execution; encrypted definition plaintext comparison explicitly not verified"
+  },
+  "skills_discovery": [
+    {
+      "name": "apply",
+      "scope": "repo",
+      "enabled": true,
+      "relative_path": ".claude/skills/apply/SKILL.md"
+    },
+    {
+      "name": "apply-list",
+      "scope": "repo",
+      "enabled": true,
+      "relative_path": ".claude/skills/apply-list/SKILL.md"
+    },
+    {
+      "name": "cover-letter",
+      "scope": "repo",
+      "enabled": true,
+      "relative_path": ".claude/skills/cover-letter/SKILL.md"
+    },
+    {
+      "name": "fetch-jobs",
+      "scope": "repo",
+      "enabled": true,
+      "relative_path": ".claude/skills/fetch-jobs/SKILL.md"
+    },
+    {
+      "name": "merge",
+      "scope": "repo",
+      "enabled": true,
+      "relative_path": ".claude/skills/merge/SKILL.md"
+    },
+    {
+      "name": "today",
+      "scope": "repo",
+      "enabled": true,
+      "relative_path": ".claude/skills/today/SKILL.md"
+    }
+  ],
+  "raw_evidence": [
+    {
+      "filename": "github-g10-round-1.stdout",
+      "sha256": "f6cbd2cebd245341d4fc00f7898d90f72486c3bc9c7f6d190e9c82d6dc72276f"
+    },
+    {
+      "filename": "github-g10-round-2.stdout",
+      "sha256": "63e2e2103b02076c3f2e0f8eaa027c44afd2bc75b383a34d511de15eb9760ad3"
+    },
+    {
+      "filename": "events.jsonl",
+      "sha256": "60fa56713607b35565c52494e0e20f69215c52c695140b7eeaa72d86347d8cb6"
+    },
+    {
+      "filename": "github-g10-exact-session.jsonl",
+      "sha256": "2ee78a911869df523dad7da288ff5afa3d226112d3ee04a8707a28daeacb10ca"
+    },
+    {
+      "filename": "github-host-codex-roles-003.stdout",
+      "sha256": "75b1dbd101739f8323249b791f0cf653332b7ef58913d50ce52a1c0a0e5fd655"
+    },
+    {
+      "filename": "github-host-codex-roles-003.parent.rollout.jsonl",
+      "sha256": "df1beccb51a78a28f1596c73ed4a9ce600ad9c3520630497cb9a3448a84ffa24"
+    },
+    {
+      "filename": "github-host-codex-roles-003.exact-read.json",
+      "sha256": "cc7e101865351857774fdffdc4b4bc90caa6341fa4473e340a93eaaeb5103e71"
+    },
+    {
+      "filename": "github-host-codex-log-preflight.json",
+      "sha256": "c8118be975b90d1ba8c7f6750c9c9cb50913c13215a0705f273b1e2aab69795c"
+    }
+  ],
+  "final_checks": {
+    "source_and_tests_head": "6beef2c731dcd8bece7768f8b02af734002598ce",
+    "main": "3fe87bc1db26e997d7cbc3ae4fb934323820612e",
+    "merge_main": "Already up to date",
+    "commands": [
+      "uv sync --locked",
+      "uv run ruff check src tests",
+      "uv run ruff format --check src tests",
+      "uv run python -m pytest -q"
+    ],
+    "exit": 0,
+    "pytest_passed": 1888,
+    "pytest_seconds": 94.06,
+    "log_sha256": "b2c228a5e3dd51428e3b7abbfbb8abf9d37f0323037a651d4b1cd9debd7fd654"
+  }
+}

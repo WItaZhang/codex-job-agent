@@ -104,8 +104,9 @@ def test_project_settings_allow_delegated_commits_without_broadening_the_server(
 def test_mcp_json_registers_the_server():
     config = json.loads((ROOT / ".mcp.json").read_text(encoding="utf-8"))
     server = config["mcpServers"][SERVER_NAME]
-    assert server["command"] == "uv"
-    assert "intent-job-agent-mcp" in server["args"]
+    assert server["command"] == "sh"
+    assert "intent-job-agent-mcp" in server["args"][1]
+    assert "uv run --locked" in server["args"][1]
 
 
 def test_server_registers_tools_with_tier_annotations(box):

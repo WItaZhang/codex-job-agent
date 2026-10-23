@@ -494,7 +494,9 @@ class Toolbox:
 
     @_tool("prepare")
     def import_jobs(self, path: str) -> dict:
-        """Import a JSON array of postings from the data directory. Re-importing a posting is a no-op."""
+        """Import a JSON array from the configured data directory; re-import is a no-op. Relative paths
+        start at the MCP working directory (checkout root in shipped configs): use data/local/jobs.json,
+        not jobs.json. The resolved path must remain inside the data directory."""
         jobs = parse_jobs(inside(self.data_dir, path))
         new = [job for job in jobs if not self.store.has_job(job.id)]
         for job in new:
@@ -921,24 +923,26 @@ class Toolbox:
         in user_report; its text is not persisted, only its presence. Legacy user reports retain via=user."""
         if actor not in ("user", "delegated_coordinator"):
             raise InvariantError("Unknown application status actor")
-        busy = [job_id for job_id in job_ids if job_id in self._resuming()]
-        if busy:
-            raise InvariantError(f"Jobs {busy} are being resumed now; wait for apply_status")
-        same = self._same_posting(self.store.applications())
-        others = [j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids]
-        if actor == "delegated_coordinator":
-            if status != "pending":
-                raise InvariantError("Coordinator cannot report user submission or abandonment")
-            applications = self.store.applications()
-            for job_id in [*job_ids, *others]:
-                item = applications.get(job_id, {})
-                if item.get("status") in ("held", "applied") or any(
-                    code in (item.get("note") or "") for code in ("maybe_submitted", "interrupted")
-                ):
-                    raise InvariantError(
-                        "Unresolved submission or held job: inspect evidence and use resume, not retry"
-                    )
         with self.store.exclusive():
+            same = self._same_posting(self.store.applications())
+            others = [
+                j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids
+            ]
+            busy = set([*job_ids, *others]) & (self.store.resume_jobs() | set(self._resuming()))
+            if busy:
+                raise InvariantError(f"Jobs {sorted(busy)} are being resumed now; wait for apply_status")
+            if actor == "delegated_coordinator":
+                if status != "pending":
+                    raise InvariantError("Coordinator cannot report user submission or abandonment")
+                applications = self.store.applications()
+                for job_id in [*job_ids, *others]:
+                    item = applications.get(job_id, {})
+                    if item.get("status") in ("held", "applied") or any(
+                        code in (item.get("note") or "") for code in ("maybe_submitted", "interrupted")
+                    ):
+                        raise InvariantError(
+                            "Unresolved submission or held job: inspect evidence and use resume, not retry"
+                        )
             self.store.set_application_status(job_ids, status, by_user=actor == "user")
             self.store.list_applications(others, _day(None))
             self.store.set_application_status(others, status)
@@ -2461,7 +2465,7 @@ class Toolbox:
             self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
         )
         owner = self._owner()
-        self.store.begin_activity(owner, "resume")
+        self.store.begin_activity(owner, "resume", resume_jobs=list(job_ids))
         try:
             self.store.record_decision(None, "resume", {"job_ids": list(job_ids), "approved_via": APPROVED_VIA})
         except Exception:
@@ -2945,7 +2949,9 @@ class Toolbox:
 
     @_tool("commit")
     def initialize_intent(self, path: str) -> dict:
-        """One-time setup from a YAML file in the data directory: intent, compensation and vocabulary."""
+        """One-time setup: intent, compensation and vocabulary. Paths are relative to the MCP process working
+        directory (the checkout root in shipped host configs), e.g. data/local/intent.yaml, not intent.yaml.
+        The resolved file must be inside the configured data directory."""
         try:
             data = yaml.safe_load(inside(self.data_dir, path).read_text(encoding="utf-8"))
             comp = Compensation.model_validate(data["compensation"]) if data.get("compensation") else None

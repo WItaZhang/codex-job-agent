@@ -103,6 +103,9 @@ class Store:
         if "run_id" not in columns:
             with self._tx():
                 self.db.execute("ALTER TABLE apply_running ADD COLUMN run_id TEXT")
+        if "resume_jobs" not in columns:
+            with self._tx():
+                self.db.execute("ALTER TABLE apply_running ADD COLUMN resume_jobs TEXT")
         columns = {row["name"] for row in self.db.execute("PRAGMA table_info(apply_holds)")}
         if "generation" not in columns:
             with self._tx():
@@ -533,7 +536,13 @@ class Store:
     # --- the apply step or resume in progress (spec section 10 item 111) ---------------------------------
 
     def begin_activity(
-        self, owner: tuple[int, str], kind: str, batch: tuple | None = None, *, run_id: str | None = None
+        self,
+        owner: tuple[int, str],
+        kind: str,
+        batch: tuple | None = None,
+        *,
+        run_id: str | None = None,
+        resume_jobs: list[str] | None = None,
     ) -> None:
         """A step or a resume starts: which tool server runs it (pid and start time) and, for a step, `batch` -
         (batch id, step, day, data) - saved in the same transaction. One at a time per database: another one still
@@ -541,11 +550,23 @@ class Store:
         run_id = run_id or new_id("run")
         batch_id, phase = (batch[0], batch[1]) if batch else (None, None)
         try:
-            with self._tx():
+            with self.exclusive():
+                if resume_jobs is not None and (kind != "resume" or any(self.hold(j) is None for j in resume_jobs)):
+                    raise InvariantError("Resume selection changed; prepare_resume again")
                 self.db.execute(
-                    "INSERT INTO apply_running (id, owner_pid, owner_started, kind, batch_id, phase, since, run_id) "
-                    "VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
-                    (owner[0], owner[1], kind, batch_id, phase, _now(), run_id),
+                    "INSERT INTO apply_running "
+                    "(id, owner_pid, owner_started, kind, batch_id, phase, since, run_id, resume_jobs) "
+                    "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        owner[0],
+                        owner[1],
+                        kind,
+                        batch_id,
+                        phase,
+                        _now(),
+                        run_id,
+                        json.dumps(resume_jobs) if resume_jobs is not None else None,
+                    ),
                 )
                 if batch:
                     self._save_batch(batch_id, batch[2], batch[3])
@@ -555,6 +576,24 @@ class Store:
     def activity(self) -> dict | None:
         row = self.db.execute("SELECT * FROM apply_running WHERE id = 1").fetchone()
         return dict(row) if row else None
+
+    def resume_jobs(self) -> set[str]:
+        """Persistent report guard, including queued jobs; this does not mark them started."""
+        busy = {h["job_id"] for h in self.holds() if h["resuming"]}
+        activity = self.activity()
+        if activity and activity["kind"] == "resume":
+            raw = activity.get("resume_jobs")
+            if raw is None:  # old running activity: absence is not proof of an empty queue
+                busy.update(h["job_id"] for h in self.holds())
+            else:
+                try:
+                    jobs = json.loads(raw)
+                    if not isinstance(jobs, list) or any(type(j) is not str for j in jobs):
+                        raise ValueError
+                except (ValueError, TypeError):
+                    raise InvariantError("Resume activity is invalid; inspect apply_status") from None
+                busy.update(jobs)
+        return busy
 
     def activity_job(self, owner: tuple[int, str], job_id: str | None, mode: str | None, via: str | None) -> None:
         """The job `owner`'s running step is on (written before it reaches its site), or none; its agent not yet."""

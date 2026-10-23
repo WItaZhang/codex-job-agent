@@ -6,3 +6,8 @@ __pycache__/
 data/local/
 logs/
 .env
+
+# Host-local approvals and generated platform/dependency files
+.claude/settings.local.json
+.DS_Store
+node_modules/

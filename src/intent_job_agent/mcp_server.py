@@ -17,6 +17,8 @@ SERVER_NAME = "intent-agent"
 
 INSTRUCTIONS = """Job-intent calibration tools. The user labels a few jobs a day; you help them keep their intent
 model accurate. Rules:
+- Work only within this user's explicit delegation. The repository author's decision25 delegation does not
+  authorize other users' business actions. Existing authorization persists; obey actual host approvals.
 - Show numbered choices. The delegated coordinator may choose from existing evidence; never invent user facts.
 - record_labels requires an actual user message, never inferred feedback. Actor/reference parameters are audit
   assertions, not authentication. Delegated proposal choices record delegated_coordinator; keep proposal IDs and
@@ -57,6 +59,9 @@ Apply list (project skill /apply-list):
   the agreement line first, as returned. mark_applications records applied / skipped / back to pending; it is not
   a label and never a reason to propose an intent change.
 Applying (project skill /apply):
+- Establish this user's explicit automatic-submission scope first; an ambiguous /apply is not consent.
+  Prepare reviewable materials and use stop_before_submit=true until scope is explicit; existing explicit
+  delegation persists until revoked. Project allow/approve is tool availability, not business permission.
 - get_apply_setup first, then apply_status: list the jobs still held at a gate (`held`) before a new batch.
 - prepare_apply_batch picks the batch; cover letters are written by cover-letter-writer subagents and saved with
   save_cover_letter, which checks them.
