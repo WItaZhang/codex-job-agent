@@ -36,3 +36,47 @@ scripts/check_host_checkout.py限定干净无data/local检出，实际使用两�
 /apply新增一次范围判定：含糊调用只填，明确自动投递当前清单可直接构成授权，作者既有委托不重问。仍需实际宿主受控验证，不用静态文字称模型行为已通过。工具docstring明确从源码根写data/local路径；历史plan去个人标识并标弃用验证码服务设想；不修改历史决定正文。skill-creator apply quick_validate通过。
 
 固定2f11cbe干净含空格clone已完成uv sync --locked与scripts/check_host_checkout.py：四次真实stdio（两配置×根/子目录）47工具、合成示例初始化及读回、锁文件不变。/tmp/github-host-clean-protocol.json、.stderr和-install.log留底。安装利用本机现有Python/uv缓存，不当作全新OS/联网首次下载实证；没有真实宿主模型交互。
+
+## 固定产品代码 f2c6611：完整检查与干净检出
+
+- 产品HEAD：f2c6611c71fe3035529639ca57107a277e970053（之后只改README故障/可选工作区说明及本证据记录）。
+- 四项完整命令依次为 `uv sync --locked`、`uv run ruff check src tests`、`uv run ruff format --check src tests`、`uv run python -m pytest -q`：全部exit0，**1885 passed /93.49s**。日志 /tmp/github-host-final-four.log。未放宽断言、没有warning过滤。
+- 新的独立含空格git clone来自该HEAD，无data/local；uv sync --locked成功，随后运行 `uv run python scripts/check_host_checkout.py`，四次真实stdio均47工具，合成示例初始化/读回，uv.lock不变，子目录无错误data。证据 /tmp/github-host-final-clone-install.log、/tmp/github-host-final-protocol.json、/tmp/github-host-final-protocol.stderr；检出位置 /tmp/github-host-final-clone-path.txt。依赖与Python来自可用本机缓存，不宣称干净OS或首次联网下载。
+- 24岗位合成闭环已包括在1885中；真实网站/邮箱/投递均未执行。网络毒丸用于此闭环，不声称整个测试套件都无本地浏览器/本地HTTP。
+
+## G07独立验收与剩余故障说明
+
+协调者采纳 /tmp/github-host-resume-review.md，固定508c128：176项/42.82s、150项/3.71s及7个独立反例/2.52s通过。评审使用真实main3fe87bc代码建旧DB升级，覆盖当前/排队、同岗、停止、崩溃、报告先赢锁；与开发删列模拟迁移分开。G07已限定签收，不扩普通apply-step报告语义或通用R6。O2没有可达反例，不加防御重构。README说明apply_status核对owner与prepare_resume检查已开始未知结果，不建议删标记或重复提交。
+
+## G02/G03受控宿主会话（不是首次登录/真实业务）
+
+实际版本：macOS arm64；Codex CLI 0.163.0-alpha.10.2、Claude Code 2.1.309。每种宿主只有一个成功的模型验证会话，均使用上述独立合成检出；模型前失败保留。没有开发worker、没有角色派生、没有其他连接器/业务调用，未复制/输出个人配置或凭据。
+
+### Codex
+
+最初受控命令使用 `exec --ignore-user-config --strict-config --ephemeral --sandbox read-only`，只覆盖 `mcp_servers.intent-agent.enabled_tools=["get_intent"]`，退出1/0.02s，错误invalid transport。该测试忽略用户配置、临时检出尚未加载项目信任，部分覆盖产生无command/args的MCP表；**不能据此判定仓库原生stdio格式无效**。
+
+无模型对照：
+- /tmp/github-host-codex-config-only.json：完整仓库配置放入临时CODEX_HOME（仅公开项目内容），原生配置及附加allowlist均mcp get exit0，实际解析为stdio/sh。
+- /tmp/github-host-codex-canonical-parse.json：临时测试HOME中先有显式trusted项目记录时，debug prompt-input原项目层与allowlist均exit0。无凭据/模型调用。
+- /tmp/github-host-codex-trust-red-green.json这个早期文件名过度乐观：两项均exit1；仅把trust_level放CLI覆盖（包括规范化路径）没有解决启动阶段加载问题。路径不是已证实唯一根因，不能声称该文件是红绿。
+
+修正测试启动器：保留ignore-user-config与只读/禁apps/禁shell/禁web_search，额外从仓库配置原样传完整command及args，再加get_intent allowlist；不删MCP/技能，不写全局trust。真实会话exit0/11.89s。JSONL中有恰好一次get_intent成功、合成version1；模型自动发现fetch-jobs/today/apply-list/apply四skills，正确说明含糊/apply不授权自动提交、明确自动投递当前清单可授权。两个角色没有在可用角色定义中列出，**原生角色派生未验证**；禁shell意味着本次未读完整skill正文。原生命令红与修正命令/结果分别保留 /tmp/github-host-codex-controlled.*、/tmp/github-host-codex-controlled-fixed.*。这是完整显式配置测试，不冒称新用户首次信任流程通过。
+
+### Claude Code
+
+首轮精简env会话exit1/1.63s：未信任临时检出提示，返回Not logged in。用CLI auth status只取loggedIn/authMethod/apiProvider，不输出账户标识：正常继承环境为true/claude.ai，精简env为false/none；保留两个候选平台变量仍false。确认隔离方式丢失现有登录环境，**未证明具体单一环境变量因果**。不自动登录、不复制凭据、不改全局trust。/tmp/github-host-claude-auth-diagnostic.json、-auth-fixed.json保留。
+
+修正为继承正常CLI登录环境，仍 `--setting-sources project --strict-mcp-config --mcp-config .mcp.json --tools Read`；显式仅允许Read/get_intent，逐名禁止其他46个项目MCP工具；不加载其他MCP配置。真实会话exit0/20.33s，permission_denials为空。它读六份项目定义并返回合成version1/七意图，正确解释一次范围授权与保护公司边界。输出为最终JSON，模型声明get_intent一次，**没有逐工具trace，不能冒称独立审计到所有调用次数**。未开放Skill/Agent工具，故**Claude实际slash-command注册/调用及角色派生未验**，六文件读取不代替该证据。/tmp/github-host-claude-controlled.*与-controlled-fixed.*保留；成功会话仍提示未信任项目allow条目被忽略，测试使用显式受限CLI允许项，不冒称首次批准流程通过。
+
+两个修正启动器在/tmp/github-host-controlled-sessions.py，命令副本为对应.command.json，版本与HEAD已记录。修正时系统python3缺tomllib的一次本地脚本错误发生在宿主启动前，改用uv Python；不计产品故障或模型会话。
+
+## 交审状态和真实缺口
+
+| 切片 | 产品行为 | 状态 | 提交证据 | 验证结果 | 阻塞/限制 | 下一步及估时 |
+| --- | --- | --- | --- | --- | --- | --- |
+| GitHub源码双宿主 | 锁定启动、共用定义、新用户授权范围、开发模式、AR报告保护 | 已实现，交独立审阅 | 28f0f84/508c128/0077705/2f11cbe/f2c6611 | 1885全套；干净clone四握手；24合成岗位；两宿主受控返回 | 非新用户登录/购买；Claude slash与两宿主角色实际派生未验；真实业务未验 | 协调者审阅后决定整合，审查耗时不作承诺 |
+| 平台安装 | macOS源码/当前CLI版本 | 限定已测 | 同上 | 已有Python/依赖缓存 | 无全新OS联网安装；Linux旧CI不等于当前HEAD远端CI；Windows未测 | 如需要扩大支持，另排平台实测，不虚构通过 |
+| 投递权限 | 现有公司名单/未知公司只填、实际用户范围 | 规则与合成回归通过 | 同上 | 不改变工具白名单/平台策略 | 非R4工具层绝对提交拦截；不承诺恶意宿主隔离 | 维持既有限制 |
+
+本次没有合入S2/R2、没有推送/合并，没有新增安装器/自建宿主。1885的产品代码与交审代码相同；最终文档差异只做链接/差异检查，不重复无关全套。

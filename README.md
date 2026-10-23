@@ -143,13 +143,19 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 
 项目移除逐次询问配置和 requiresUserInteraction 标记；实际宿主强制审批、工具白名单、隐私限制仍有效。dry-run 指令和可能已提交停批检测保留，但浏览器工具没有最终提交的绝对硬拦保证。
 
+## 恢复或报告被拒绝时
+
+恢复仍在运行时，先用 `apply_status()` 查看并等待收尾，不在另一会话报告或重置同批岗位。服务异常结束后，`apply_status()` 会按已有 owner 身份核对协调记录；已开始但结果未知的岗位仍受保护。
+
+对于这种未知岗位，先 `prepare_resume(job_ids)` 查看当前门槛与页面核对计划，条件满足后由既有恢复流程先核查是否已提交。不能删数据库标记、用 pending 重置绕过核对，或把未知当未提交再次投递。即便你已在网页手动提交，也先让恢复流程核查结果；保护公司仍只填不交。
+
 ## 升级
 
 先停止抓取/投递并退出 MCP，备份自己的完整 data/local 和自定义配置，再更新源码、运行 `uv sync --locked`、重启宿主/MCP。Git 忽略个人数据不代表升级不会迁移数据库；旧版本不一定能打开新库，项目尚无完整安装器升级/回滚保证。不要同时让新旧版本操作同一数据库。备份含私人资料，由你自己保管，不上传到仓库或对话。
 
 ## 支持与验证范围
 
-当前本机开发与合成验证为 macOS arm64；Linux CI 覆盖合成测试、浏览器及包检查，不等于已验证所有 Linux 桌面宿主/投递安装。Windows 未验证，当前启动脚本和进程管理依赖 POSIX，暂不承诺可用。真实招聘网站、邮件、验证码和账户权限随用户环境而异。
+当前本机开发与合成验证为 macOS arm64（Python 3.13.16、Claude Code 2.1.309、Codex CLI 0.163.0-alpha.10.2）；受控CLI读工具已测，Claude斜杠命令实际调用及两宿主角色派生仍待验证。Linux CI 覆盖合成测试、浏览器及包检查，不等于已验证所有 Linux 桌面宿主/投递安装。Windows 未验证，当前启动脚本和进程管理依赖 POSIX，暂不承诺可用。真实招聘网站、邮件、验证码和账户权限随用户环境而异。
 
 本片的固定版本、命令、通过项与尚未验证项记录在[交付证据](specs/github-host-release.review.md)。协议握手、合成流程与已登录宿主交互是不同层级，不把测试通过称为真实投递效果达标。
 
@@ -170,19 +176,10 @@ uv run python -m pytest -q
 
 公司保护留底来自实际读取的 `careful_companies` 快照，保存在 decisions。用户明确解除时，按真实请求删除配置条目后调用 `release_careful_companies(companies, user_report, actor="user")` 并重新准备批次；仅删除配置不会解锁，旧 careful 批次仍只填。该入口记录真实用户请求，不认证身份，agent 不得自主解除。
 
-## R1 内部工作区与制品检查（不是公众发行）
+## 本地只读工作区与包检查（可选）
 
-本仓库源码公开。R1 的“内部预发布”表示成熟度，不表示仓库私有；CI只在runner中构建、安装和测试，不上传可安装wheel，不创建Release/Pages/PyPI发行物。当前使用入口是上述源码加宿主流程；这段仅说明保留的本地工作区与包检查能力，不是另一套必装步骤。
+上述源码流程使用显式 `--config configs/default.yaml`。保留的 `intent-job-agent init --workspace /absolute/path` 会创建 **local-only** 工作区：可检查本地状态，但服务端拒绝抓取、模型外发、浏览器、邮件、投递和业务写入。它不是新用户必须做的初始化步骤，也不能通过改 review_first 解锁。不要让显式 legacy 配置指向这种标记工作区。
 
-安装开发制品后，可用 `intent-job-agent init --workspace /absolute/path` 创建空工作区，再用
-`intent-job-agent-mcp --workspace /absolute/path` 启动本地只读MCP。省略workspace选择平台用户应用目录中的默认工作区，尚未初始化时会提示init。初始化不复制Chrome、不生成个人档案或授权；重复运行保留已有文件。
+CI 的 wheel/sdist 测试不是面向用户的安装器或下载发行。开发者可运行 `uv run python scripts/check_package.py` 核对包资源和离线协议；资源唯一源仍是 configs/default.yaml 与 .claude/skills/cover-letter。修改资源后用 `uv run`/`uv sync` 刷新并重启常驻进程，不使用源码父目录回落。详见[工作区契约](specs/public-release.md)。
 
-新workspace在服务端拒绝真实网络抓取、模型外发、浏览器/邮件/投递及业务写入，包括直接Toolbox调用和scheduled profile。状态查看不恢复旧进程、不连接CDP。它不是一个通过改review_first或填source=user即可开启的授权系统。
-
-源码开发者原有 `--config configs/default.yaml` 显式legacy入口保留cwd相对路径语义，已有两个宿主配置已显式传入此参数。`--config`与`--workspace`不可同传；标记工作区中只接受普通文件`settings.yaml`，不存在配置、损坏或符号链接不回退legacy；外部legacy配置及直接适配入口若指向标记workspace的存储路径或后代，也会拒绝。离线表单报告也接受`--workspace`，`--data-dir`显式覆盖保持；报告不会访问浏览器。
-
-包资源来自`configs/default.yaml`和`.claude/skills/cover-letter/`唯一源，Hatchling在构建时映射到安装包，uv继续管理依赖。`uv run python scripts/check_package.py`验证直接wheel及sdist重建wheel，使用临时合成资料、真实MCP握手和离线报告；不会发起投递。
-
-开发检出通过 `uv run` / `uv sync` 刷新打包资源：uv cache keys 跟踪默认配置及完整 cover-letter 资源树（含 references），没有已安装 wheel 猜测源码父目录的回落。修改资源后不要用 `--no-sync` 或旧的常驻进程验证；重新 `uv run` 并重启进程。`scripts/check_editable_resources.py` 在临时合成源码副本验证修改/新增/删除后的实际重建。
-
-R1 本地读允许追加实际观察到的公司保护审计快照（决定25），不写授权、反馈或投递状态。空 workspace 不植入意图；合成流程测试直接种 Store，公开初始化意图入口仍关闭。`get_apply_setup` 仅检查本地资料路径是否存在，不加载 profile/env 或探测程序。离线 form_fill 报告的显式 `--data-dir` 优先于 workspace 根目录，属于主动覆盖，不属于默认目录隔离保证。
+在专用、干净且没有 data/local 的临时 clone 中，可运行 `uv run python scripts/check_host_checkout.py` 验证两份宿主命令与合成初始化；该命令会创建合成 data/local，不应在个人日常库运行。这只验证协议，不会启动模型或访问业务网站。
