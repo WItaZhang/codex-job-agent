@@ -9,7 +9,6 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from .config import Settings
 from .domain import InvariantError
 from .store import Store
 from .tools import SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
@@ -106,7 +105,14 @@ def _guarded(fn, lock: threading.Lock):
 
 
 def build_server(box: Toolbox, profile: str = "full") -> MCPServer:
-    server = MCPServer(name=SERVER_NAME, instructions=INSTRUCTIONS)
+    instructions = INSTRUCTIONS
+    if box.settings.execution_mode == "local_only":
+        instructions = (
+            "Internal prerelease R1 workspace: local reads only. Network discovery, model calls, browser, "
+            "mail, applications and business mutations are disabled at service entrypoints pending R4/R5. "
+            "The author delegation does not authorize this workspace. No consent is implied."
+        )
+    server = MCPServer(name=SERVER_NAME, instructions=instructions)
     names = SCHEDULED_TOOLS if profile == "scheduled" else set(TOOL_TIERS)
     lock = threading.Lock()
     for name in sorted(names):
@@ -127,10 +133,17 @@ def build_server(box: Toolbox, profile: str = "full") -> MCPServer:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the intent-agent MCP server over stdio.")
-    parser.add_argument("--config", default="configs/default.yaml")
+    paths = parser.add_mutually_exclusive_group()
+    paths.add_argument("--config")
+    paths.add_argument("--workspace")
     parser.add_argument("--profile", choices=["full", "scheduled"], default="full")
     args = parser.parse_args()
-    settings = Settings.load(args.config)
+    from .workspace import resolve_settings
+
+    try:
+        settings = resolve_settings(config=args.config, workspace=args.workspace)
+    except (InvariantError, OSError, ValueError) as error:
+        parser.exit(2, f"{error}\n")
     store = Store(Path(settings.storage.db_path), settings)
     build_server(Toolbox(settings, store), args.profile).run("stdio")
 

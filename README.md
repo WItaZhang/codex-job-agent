@@ -136,3 +136,16 @@ uv run python -m pytest -q
 ```
 
 公司保护留底来自实际读取的 `careful_companies` 快照，保存在 decisions。用户明确解除时，按真实请求删除配置条目后调用 `release_careful_companies(companies, user_report, actor="user")` 并重新准备批次；仅删除配置不会解锁，旧 careful 批次仍只填。该入口记录真实用户请求，不认证身份，agent 不得自主解除。
+
+## R1 内部工作区与制品检查（不是公众发行）
+
+本仓库源码公开。R1 的“内部预发布”表示成熟度，不表示仓库私有；CI只在runner中构建、安装和测试，不上传可安装wheel，不创建Release/Pages/PyPI发行物。完整公众目标仍须UI、独立授权、运行时和可靠提交边界等后续验收。
+
+安装开发制品后，可用 `intent-job-agent init --workspace /absolute/path` 创建空工作区，再用
+`intent-job-agent-mcp --workspace /absolute/path` 启动本地只读MCP。省略workspace选择平台用户应用目录中的默认工作区，尚未初始化时会提示init。初始化不复制Chrome、不生成个人档案或授权；重复运行保留已有文件。
+
+新workspace在服务端拒绝真实网络抓取、模型外发、浏览器/邮件/投递及业务写入，包括直接Toolbox调用和scheduled profile。状态查看不恢复旧进程、不连接CDP。它不是一个通过改review_first或填source=user即可开启的授权系统。
+
+源码开发者原有 `--config configs/default.yaml` 显式legacy入口保留cwd相对路径语义，已有两个宿主配置已显式传入此参数。`--config`与`--workspace`不可同传；标记工作区中只接受普通文件`settings.yaml`，不存在配置、损坏或符号链接不回退legacy。离线表单报告也接受`--workspace`，`--data-dir`显式覆盖保持；报告不会访问浏览器。
+
+包资源来自`configs/default.yaml`和`.claude/skills/cover-letter/`唯一源，Hatchling在构建时映射到安装包，uv继续管理依赖。`uv run python scripts/check_package.py`验证直接wheel及sdist重建wheel，使用临时合成资料、真实MCP握手和离线报告；不会发起投递。

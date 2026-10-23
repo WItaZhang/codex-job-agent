@@ -82,6 +82,7 @@ class ApplyOutcome:
 def configure(data_dir: Path, settings: Settings, profile: Path | None = None) -> None:
     """Point the vendored modules at the user's files (as discovery does) and at the apply working dirs. Paths
     become absolute here: Claude Code runs in another working directory (spec section 10 item 66)."""
+    settings.require_external("browser/application execution")
     from .vendor.applypilot import config
 
     data_dir = Path(data_dir).resolve()
@@ -577,6 +578,7 @@ def cdp_alive(port: int) -> bool:
 def ensure_chrome(settings: Settings, worker_id: int = 0) -> int:
     """Reuse the worker Chrome if it is running (its tabs may hold forms the user is checking); otherwise copy
     the profile as ApplyPilot does, strip it, and start Chrome."""
+    settings.require_external("ensure_chrome")
     from .vendor.applypilot.apply import chrome
 
     port = chrome.BASE_CDP_PORT + worker_id
@@ -609,6 +611,7 @@ def run_application(
     added after the prompt, no Gmail server (written to its own MCP config file, so /apply's stays as it is), more
     refused tools, its own servers (the checkpoint service) and their allowed tools. Without them the run is
     /apply's, unchanged."""
+    settings.require_external("run_application")
     from .vendor.applypilot import config
 
     data_dir, profile = Path(data_dir).resolve(), Path(profile).resolve()
@@ -755,6 +758,7 @@ class ChromeRunner:
         self.port: int | None = None
 
     def __call__(self, spec: ApplySpec) -> ApplyOutcome:
+        self.settings.require_external("__call__")
         try:
             configure(self.data_dir, self.settings, self.profile)
             if self.port is None or not cdp_alive(self.port):
@@ -771,6 +775,7 @@ class ChromeRunner:
         return replace(outcome, tab=self._held_tab(spec, before, outcome))
 
     def _tabs(self) -> list[dict] | None:
+        self.settings.require_external("_tabs")
         try:
             return readback.list_targets(self.port)
         except Exception:  # noqa: BLE001 - no tab list: a held job is resumed from its address

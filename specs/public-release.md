@@ -121,3 +121,5 @@ R1b仍紧随R1，不新增并行片：本轮不运行真实浏览器/投递，R1
 | .github/workflows/ 下制品CI（拟新增）、README、相关规格/决定 | 四项检查与实际wheel安装探针、明确开发者入口及剩余发布门槛 |
 
 退出条件：八组回归、四项检查和实际wheel CI验证；交审记录说明支持环境与未测平台，不宣称独立OS安装器完成。提交后等待独立评审再整合，R1b随后优先实施。
+
+R1实施契约与入口清单见[public-r1.plan.md](public-r1.plan.md)，具体取舍记录于总决定28。新workspace模式沿Settings传至直接Toolbox/适配器，local-only不等于用户授权；显式legacy配置仅兼容既有开发调用。资源唯一源通过构建映射进入安装包，并验证sdist往返。

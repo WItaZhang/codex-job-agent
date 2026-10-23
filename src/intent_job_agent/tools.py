@@ -19,6 +19,7 @@ import subprocess
 import threading
 import time
 from datetime import date, datetime, timedelta
+from functools import wraps
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -58,6 +59,7 @@ from .llm import NoModelClient
 from .pretag import pretag
 from .prompts import ReasonMapping
 from .proposals import Analysis, LabelInput
+from .resources import letter_skill
 from .scoring import score_job
 from .selection import rank_postings, select_daily
 from .store import Store, new_id
@@ -82,10 +84,39 @@ class _FormFilled:
     chrome: tuple[str, ...] = ()  # what changed in the applying Chrome that the agent did not do (item 114)
 
 
+LOCAL_READ_TOOLS = frozenset(
+    {
+        "get_intent",
+        "get_today",
+        "show_job",
+        "get_tagging_rules",
+        "get_fetch_status",
+        "get_discovery_setup",
+        "list_open_analyses",
+        "get_analysis",
+        "get_apply_setup",
+        "get_cover_letter_materials",
+        "get_cover_letter_file",
+        "get_resume",
+        "check_cover_letter",
+        "apply_stats",
+        "apply_status",
+        "form_fill_status",
+    }
+)
+
+
 def _tool(tier: str):
     def register(fn):
         TOOL_TIERS[fn.__name__] = tier
-        return fn
+
+        @wraps(fn)
+        def call(self, *args, **kwargs):
+            if fn.__name__ not in LOCAL_READ_TOOLS:
+                self.settings.require_external(fn.__name__)
+            return fn(self, *args, **kwargs)
+
+        return call
 
     return register
 
@@ -167,7 +198,8 @@ BACKFILL_RULES = {
 
 
 APPLY_COLUMNS = ("n", "job_id", "new", "wanted", "title", "company", "location", "url", "also", "why")
-DEFAULT_LETTER_SKILL = Path(__file__).resolve().parents[2] / ".claude" / "skills" / "cover-letter"
+
+DEFAULT_LETTER_SKILL = letter_skill()
 
 
 def _day(day: str | None) -> str:
@@ -264,6 +296,13 @@ class Toolbox:
         data_dir: Path | None = None,
         http_client: httpx.Client | None = None,
     ):
+        if settings.execution_mode == "local_only":
+            from .workspace import validate_paths
+
+            root = Path(settings.storage.data_dir).resolve()
+            validate_paths(root, settings)
+            if store.path != Path(settings.storage.db_path) or (data_dir and Path(data_dir).resolve() != root):
+                raise InvariantError("Local-only workspace/store paths disagree")
         self.settings = settings
         self.store = store
         # Configured paths stay relative (portable); at run time they are absolute (spec section 10 item 66).
@@ -436,6 +475,8 @@ class Toolbox:
     def get_discovery_setup(self) -> dict:
         """What job discovery is configured with: search file, employer/site lists, LLM provider, proxy.
         Never returns keys."""
+        if self.settings.execution_mode == "local_only":
+            return {"execution_mode": "local_only", "network_enabled": False, "data_dir": str(self.data_dir)}
         return applypilot_bridge.setup_status(self.data_dir, self.settings)
 
     @_tool("read")
@@ -623,6 +664,7 @@ class Toolbox:
         return {key: run[key] for key in ("status", "sources", "enrich", "error", "synced")}
 
     def _fetch(self, provider: str, board: str, company: str) -> list[Job]:
+        self.settings.require_external("board network")
         try:
             if provider == "avature":
                 return avature.list_site(
@@ -914,7 +956,13 @@ class Toolbox:
     # --- applying (spec 4.10) ---------------------------------------------------------------------
 
     def _applicant(self) -> applicant_files.Applicant:
+        if self.settings.execution_mode == "local_only":
+            from .workspace import _inside, validate_applicant
+
+            _inside(self.data_dir, str(self.data_dir / self.settings.apply.applicant_dir / applicant_files.FILE))
         applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        if self.settings.execution_mode == "local_only":
+            validate_applicant(self.data_dir, applicant)
         # Guards also run in background workers: do not share the tool connection's write transaction.
         observer = Store(self.store.path, self.settings)
         try:
@@ -978,6 +1026,12 @@ class Toolbox:
     def get_apply_setup(self) -> dict:
         """Whether applying is set up: the applicant files (never their contents), resumes, what is plugged in,
         and the programs a run needs on this machine. Contact details are never returned."""
+        if self.settings.execution_mode == "local_only":
+            return {
+                "ready": False,
+                "execution_mode": "local_only",
+                "missing": ["Business execution disabled pending R4/R5"],
+            }
         folder = applicant_files.folder(self.data_dir, self.settings.apply.applicant_dir)
         programs = {name: shutil.which(name) is not None for name in ("claude", "npx")}
         programs["chrome"] = _chrome_found()
@@ -1046,6 +1100,11 @@ class Toolbox:
         """Every file a cover-letter writer may read, by id. Nothing outside this list can be read."""
         skill = applicant.cover_letter_skill or DEFAULT_LETTER_SKILL
         files = {f"skill/{path.relative_to(skill)}": path for path in sorted(skill.rglob("*.md"))}
+        if self.settings.execution_mode == "local_only" and applicant.cover_letter_skill:
+            from .workspace import _inside
+
+            for path in files.values():
+                _inside(self.data_dir, str(path))
         files |= {f"context/{n}": path for n, path in enumerate(applicant.cover_letter_context, 1)}
         if applicant.resume_selection:
             files["resume_selection"] = applicant.resume_selection
@@ -1794,6 +1853,7 @@ class Toolbox:
         agents are ended and its step is closed from what the database holds. Returns the step or resume another
         session's live tool server runs, if any: that one is left alone. A row of this tool server whose run no
         longer runs (it broke before its thread started) is closed the same way."""
+        self.settings.require_external("recovery")
         self._sync_apply_results()  # a run of this tool server that has ended is closed by itself first
         try:
             me = self._owner()
@@ -2008,6 +2068,8 @@ class Toolbox:
         is the one-line verdict) and its report; the step has the form-fill run's summary.md. Includes a checklist
         of other sites opened and emails sent, and, once the step is done, the next step's summary for
         start_applying."""
+        if self.settings.execution_mode == "local_only":
+            return {"status": "idle", "execution_mode": "local_only", "held": self._held_view(), "next": None}
         other = self._recover()  # closes this server's ended run first (_sync_apply_results)
         run = self._apply_run
         if run is None:

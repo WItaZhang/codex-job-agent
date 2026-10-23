@@ -144,6 +144,8 @@ class Storage(_Section):
 
 
 class Settings(_Section):
+    execution_mode: Literal["legacy", "local_only"] = "legacy"
+
     scoring: Scoring
     daily: Daily
     analysis: Analysis
@@ -159,4 +161,34 @@ class Settings(_Section):
 
     @classmethod
     def load(cls, path: str | Path) -> "Settings":
-        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
+        from .workspace import MARKER, load_workspace
+
+        original = Path(path).expanduser().absolute()
+        parent = original.parent.resolve()
+        if (parent / MARKER).exists() or (parent / MARKER).is_symlink():
+            from .domain import InvariantError
+
+            if original.name != "settings.yaml" or original.is_symlink():
+                raise InvariantError("Marked workspace requires a regular canonical settings.yaml")
+            return load_workspace(parent)
+        path = original.resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Configuration does not exist: {path}")
+        if (path.parent / MARKER).exists():
+            if path.name != "settings.yaml":
+                from .domain import InvariantError
+
+                raise InvariantError("Marked workspace requires its canonical settings.yaml")
+            return load_workspace(path.parent)
+        settings = cls.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+        if settings.execution_mode == "local_only":
+            from .domain import InvariantError
+
+            raise InvariantError("Local-only configuration requires an initialized workspace")
+        return settings
+
+    def require_external(self, operation: str) -> None:
+        from .domain import InvariantError
+
+        if self.execution_mode == "local_only":
+            raise InvariantError(f"R1 local-only workspace: {operation} is disabled pending R4/R5")

@@ -52,6 +52,8 @@ def llm_provider() -> str | None:
 
 def setup_status(data_dir: Path, settings: Settings) -> dict:
     """What discovery will use, without revealing any secret."""
+    if settings.execution_mode == "local_only":
+        return {"execution_mode": "local_only", "network_enabled": False, "data_dir": str(data_dir)}
     from .vendor.applypilot import config
 
     data_dir = Path(data_dir)
@@ -74,6 +76,7 @@ def setup_status(data_dir: Path, settings: Settings) -> dict:
 def configure(data_dir: Path, settings: Settings) -> Path:
     """Point the vendored modules at the user's files: searches.yaml, optional sites.yaml and
     employers.yaml (ApplyPilot's bundled lists otherwise), .env for LLM keys, and the working DB."""
+    settings.require_external("vendor discovery configuration")
     from .vendor.applypilot import config, database
     from .vendor.applypilot.discovery import jobspy, smartextract, workday
     from .vendor.applypilot.enrichment import detail
@@ -176,6 +179,7 @@ def workday_location(info: dict) -> str:
 
 def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
     """Run the chosen sources, then enrichment. A failing source is reported; the others still run."""
+    settings.require_external("job discovery")
     configure(data_dir, settings)
     from .vendor.applypilot import config
 
@@ -268,6 +272,7 @@ def parse_salary(text: str | None) -> Salary | None:
 def sync(store: Store, data_dir: Path, settings: Settings) -> dict:
     """Import new postings from ApplyPilot's working DB; refresh text of jobs not yet tagged or shown, and the
     location of jobs not shown, corrected or acted on (Workday's detail lists every place)."""
+    settings.require_external("discovery synchronization")
     path = staging_dir(data_dir, settings) / "applypilot.db"
     counts = {"new": 0, "updated": 0, "relocated": 0, "retagged": 0, "relinked": 0, "excluded_titles": 0}
     if not path.is_file():

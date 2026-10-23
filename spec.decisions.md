@@ -470,3 +470,11 @@
 - L1：不读个人日志，不采用复核中未核实数字。tracked成本/usage/benchmark清单未见可公开基线，公众费用仍未知；未来若有可公开脱敏历史证据仅作非公众基线。
 
 R1增加确定性拒绝边界调整为3–4日，R2b为6–10日，R5增加证据工作调整为10–18日；全路线45–77有效工作日，不含许可/外部等待及真实业务观察。此轮只文档修订，保留71b0768的1561测试记录，按甲方决定只做后续文档一致性检查，交Claude复核B1–B3/M1–M3后再整合。
+
+## 决定 28（2026-10-22）：R1包外初始化、资源闭包与本地工作区
+
+依据决定27已批准八组验收，实施计划见[public-r1.plan.md](specs/public-r1.plan.md)。新workspace仅初始化/本地读/合成测试；Settings携带local_only模式到直接Toolbox及真实适配入口，拒绝公开岗位抓取、模型外发、浏览器/npx、邮件和投递/恢复；不靠MCP隐藏或review_first，不设计consent系统。状态查询不得触发恢复杀进程或CDP，求职信PDF的Chrome副作用同样受限。显式旧config保留cwd语义，标记工作区不可经--config降级。
+
+构建选Hatchling显式资源映射，uv继续管理依赖；YAML与.claude/skills/cover-letter保留唯一源（含references），wheel包资源与sdist重建wheel均验收，无源码补路径。初始化幂等、无个人资料/意图/凭据/授权，错误不覆盖不回退。CI产物仅内部预发布，远端由协调者推送后验证。无真实网络业务/浏览器/投递，不读或复制个人数据；R1b仍下一独立片。
+
+决定28收敛：PUBLIC仓库不等于内部产物可发行；CI禁止upload-artifact/Release/Pages/PyPI，制品只留runner临时目录。显式config保留原路径上下文，标记工作区的非canonical或符号链接config/marker一律拒绝，不静默忽略参数。新workspace所有业务mutation（含release_careful_companies）仍拒绝。静态审阅的进程全局开关建议不采纳，使用逐Settings策略，真实sink零调用测试和legacy同进程对照验证隔离；raw无Settings的OS/vendor函数不宣称为Python沙箱。
