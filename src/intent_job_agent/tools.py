@@ -2172,8 +2172,10 @@ class Toolbox:
     def apply_stats(self, week: str | None = None) -> dict:
         """The done standard's numbers (spec section 9) from the attempt log: for one week (Monday to Sunday, local
         time; `week` is its Monday, YYYY-MM-DD) or, without `week`, this week and last week. Submitted, failed
-        (allowed reasons and those to fix, by count), the success rate, what is not counted, and whether the week
-        met the standard. `line` is a one-line summary to show as returned."""
+        (allowed reasons and those to fix, by count), success rate and excluded attempts. `met` means only the
+        quantity/rate thresholds. `assessment` separately reports fixable failures and full B acceptance as
+        not_met or unverified; user time and two-week acceptance evidence are not collected/verified here.
+        Even two numeric passing weeks do not prove B acceptance. Show `line` as returned."""
         if week is not None:
             weeks = [apply_fill.week_start(week)]
         else:

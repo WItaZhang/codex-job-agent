@@ -221,7 +221,8 @@ def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: 
     ApplyPilot's submissions (not already_applied), the user's own after checking a form or passing a gate, and a
     form the user submitted in a held job's tab (submitted_by_user). Not submitted: the failed attempts, allowed or
     to fix, including a held job the user gave up (the user's own failed attempt, decision 22). Held jobs and
-    everything else are listed apart."""
+    everything else are listed apart. `met` keeps its numeric-only meaning; assessment never infers full B
+    acceptance from uncollected user time or unevaluated consecutive-week evidence (decision 26)."""
     end = week + datetime.timedelta(days=6)
     submitted, allowed, to_fix = 0, {}, {}
     apart = dict.fromkeys(
@@ -262,6 +263,13 @@ def week_stats(attempts, week: datetime.date, tz: datetime.tzinfo | None, done: 
         "to_fix": to_fix,
         "not_counted": apart,
         "met": met,
+        "assessment": {
+            "quantity_met": submitted >= done.weekly_target,
+            "success_rate_met": rate >= done.success_rate if rate is not None else None,
+            "no_to_fix_failures": not to_fix,
+            "b_acceptance": "unverified" if met and not to_fix else "not_met",
+            "missing_evidence": ["daily_user_time", "two_consecutive_weeks"],
+        },
         "target": done.weekly_target,
         "rate_target": done.success_rate,
     }
@@ -284,11 +292,26 @@ def _line(n: dict) -> str:
     span = f"{n['week']} – {n['end'][5:]}"
     goal = f"要 {n['target']} 份、{round(n['rate_target'] * 100)}%"
     if n["success_rate"] is None:
-        head = f"{span}：还没有提交或失败的尝试。没达标：{goal}。"
+        head = f"{span}：还没有提交或失败的尝试，数据不足。数值门槛没达标：{goal}。"
     else:
         rate = f"{round(n['success_rate'] * 100)}%（{n['submitted']}/{n['submitted'] + n['failed']}）"
-        verdict = "达标" if n["met"] else f"没达标：{goal}"
+        verdict = "数量/成功率门槛达到（仅数值）" if n["met"] else f"数值门槛没达标：{goal}"
         head = f"{span}：提交 {n['submitted']} 份，失败 {n['failed']} 份，成功率 {rate}。{verdict}。"
+    assessment = n["assessment"]
+    blockers = []
+    if not assessment["quantity_met"]:
+        blockers.append("数量门槛未达到")
+    if assessment["success_rate_met"] is False:
+        blockers.append("成功率门槛未达到")
+    elif assessment["success_rate_met"] is None:
+        blockers.append("成功率证据不足")
+    if not assessment["no_to_fix_failures"]:
+        blockers.append("仍有待修复失败")
+    if blockers:
+        head += "本周完整 B 验收条件未满足：" + "、".join(blockers) + "。"
+    else:
+        head += "完整 B 验收未证实。"
+    head += "人工时间未采集，连续两周完整验收证据未核验，不能据此宣称 B 验收通过。"
     failures = []
     if n["allowed"]:
         listed = "、".join(f"{LABELS[k]} {v}" for k, v in n["allowed"].items())
