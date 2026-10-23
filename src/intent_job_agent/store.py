@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS apply_running (id INTEGER PRIMARY KEY CHECK (id = 1),
 APPLICATION_STATUSES = ("pending", "applied", "skipped")  # what the user sets
 ATTEMPT_FIELDS = ("job_id", "batch_id", "phase", "mode", "via", "status", "reason", "run_id", "at")
 # A job held at a gate (spec section 10 item 97): where it stopped, its tab, which hold this is (1 or 2).
-HOLD_FIELDS = ("batch_id", "phase", "n", "mode", "via", "reason", "note", "tab_id", "tab_url", "times")
+HOLD_FIELDS = ("batch_id", "phase", "n", "mode", "via", "reason", "note", "tab_id", "tab_url", "times", "generation")
 # What the user's own attempt row says when the user decides a held job (spec section 10 item 104).
 HELD_BY_USER = {"applied": "applied", "skipped": "failed", "pending": "pending"}
 # What an application run reports: waiting = stopped before submit; held = stopped at a gate for the user (spec
@@ -98,6 +98,15 @@ class Store:
         if "note" not in columns:  # databases created before slice 6
             with self._tx():
                 self.db.execute("ALTER TABLE applications ADD COLUMN note TEXT")
+
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(apply_running)")}
+        if "run_id" not in columns:
+            with self._tx():
+                self.db.execute("ALTER TABLE apply_running ADD COLUMN run_id TEXT")
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(apply_holds)")}
+        if "generation" not in columns:
+            with self._tx():
+                self.db.execute("ALTER TABLE apply_holds ADD COLUMN generation TEXT")
 
     # --- transactions --------------------------------------------------------------
 
@@ -433,6 +442,8 @@ class Store:
             raise InvariantError(f"Run status must be one of {list(RUN_STATUSES)}, not {status!r}")
         if (status == "held") != (hold is not None):
             raise InvariantError("A held result, and only a held result, comes with its hold")
+        if hold is not None:
+            hold = {"generation": None, **hold}  # legacy records never authorize old-tab adoption
         if hold is not None and set(hold) != set(HOLD_FIELDS):
             raise InvariantError(f"A hold has exactly these fields: {list(HOLD_FIELDS)}")
         now = _now()
@@ -521,17 +532,20 @@ class Store:
 
     # --- the apply step or resume in progress (spec section 10 item 111) ---------------------------------
 
-    def begin_activity(self, owner: tuple[int, str], kind: str, batch: tuple | None = None) -> None:
+    def begin_activity(
+        self, owner: tuple[int, str], kind: str, batch: tuple | None = None, *, run_id: str | None = None
+    ) -> None:
         """A step or a resume starts: which tool server runs it (pid and start time) and, for a step, `batch` -
         (batch id, step, day, data) - saved in the same transaction. One at a time per database: another one still
         recorded is refused."""
+        run_id = run_id or new_id("run")
         batch_id, phase = (batch[0], batch[1]) if batch else (None, None)
         try:
             with self._tx():
                 self.db.execute(
-                    "INSERT INTO apply_running (id, owner_pid, owner_started, kind, batch_id, phase, since) "
-                    "VALUES (1, ?, ?, ?, ?, ?, ?)",
-                    (owner[0], owner[1], kind, batch_id, phase, _now()),
+                    "INSERT INTO apply_running (id, owner_pid, owner_started, kind, batch_id, phase, since, run_id) "
+                    "VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+                    (owner[0], owner[1], kind, batch_id, phase, _now(), run_id),
                 )
                 if batch:
                     self._save_batch(batch_id, batch[2], batch[3])

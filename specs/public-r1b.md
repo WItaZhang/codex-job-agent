@@ -12,11 +12,13 @@ R1b只修浏览器实例归属、空专属profile、必要跨会话互斥及身�
 
 ## 2. 归属证据与接口
 
-绑定至少含canonical工作区/data root、专属profile真实路径、generation、browser PID+稳定started、精确browser WebSocket端点及控制owner(pid+started)。每次启动使用动态端口0和非默认空profile；只从本次启动profile的DevToolsActivePort读取完整WS路径，不扫描/探活固定端口。拒绝过期/损坏/软链/越界记录，不覆盖不明文件，不按端口kill。
+绑定至少含协调kind和唯一runid（step另保留batch/phase）、canonical工作区/data root、专属profile真实路径、generation、browser PID+稳定started、精确browser WebSocket端点及控制owner(pid+started)。首次创建空的非默认专属profile，之后同工作区持久复用并保留登录；generation只标识浏览器实例。每次启动使用动态端口0；只从本次启动profile的DevToolsActivePort读取完整WS路径，不扫描/探活固定端口。拒绝过期/损坏/软链/越界记录，不覆盖不明文件，不按端口kill。
 
 S1证据按二进制/模式分别记录（见[证据](public-r1b.review.md)），不能把headless Chromium外推为系统Google Chrome有头模式；其他平台待验证。系统Google Chrome155有头、无enable-automation的macOS26.5.1探针已通过；该环境不要求强制lsof。必需证据组合为：本profile的端点记录＋精确WS实例＋OS进程PID/started及profile启动参数＋连接后的SystemInfo.getProcessInfo browser PID核验。GUID仅防实例串接，CDP自报不是恶意同用户进程认证；不宣称抵御完全控制本用户文件/进程的攻击者。若锁定MCP0.0.83/Python Playwright1.56.0不支持这些能力，报告具体限制，不能退HTTP裸端口；探针成功才去除lsof强制条件。
 
 不要求CDP Browser.getBrowserCommandLine，不为归属验证引入--enable-automation。OS命令行中的专属profile仍是必需核验项。不承诺navigator.webdriver为false或规避网站检测；动态端口/自动化本身的可观察行为如实说明。
+
+所有入口以调用方Settings或子进程独立配置的期望root/db比对，不能信binding自报；session用临时文件+原子replace，损坏诊断失败关闭、不自动覆盖。管理锁等待有配置上限，锁内重读owner；同profile重启仅在已证明本工作区自有且无活实例后处理陈旧ActivePort，不触碰旧复制目录。只读RPC限SystemInfo/Target元数据，同一连接先验PID再取targets。
 
 所有新连接/重连都使用准确WS，并在连上后再次核验PID/start/profile；断开则绑定失效，不按原端口重新发现。长连接无法在agent每次工具调用前插入校验：ChromeWatch旁路及checkpoint负责发现身份变化；不把轮询称为每次调用硬拦截。身份失效触发第4节结果与受控停止，不吞成普通ChromeDown后继续。
 

@@ -21,3 +21,7 @@ S2只做小型管理锁＋已有apply_running owner，不做lease/心跳；独�
 甲方采纳A(a)：本profile端点记录+精确WS+OS PID/started/profile命令行+连接后SystemInfo browserPID；删除必需CDP命令行核验及enable-automation。已有headless Chromium探针保留但限于原模式；另跑系统Google Chrome有头模式的空profile本地探针，记录平台/OS/binary/headless/启动参数及Python/MCP正确错误GUID对照。不得宣称无webdriver标志或规避检测。尚未验证平台不外推。
 
 B：独立填表不依赖领域数据，唯一例外是apply_running协调行与管理锁。kind=form_fill+runid与self._form_fill_run匹配；正常运行和收尾不误kill，真失联只清自己的进程及协调行，不走_close_interrupted，不写application/attempt/hold。other_session区分填表。三组事件屏障及nonowner元数据无attach/evaluate回归入计划。本次仍只规格/探针，交甲方/Claude窄复核后才产品实现。
+
+## 4：绑定早审E1–E7（总决定29）
+
+甲方采纳ab1063d早审：首次空专属profile后持久复用登录，generation为实例，不是每次丢资料；澄清原“每次空”歧义。只读SQLite协调查询不构造Store；绑定kind+唯一runid，比较调用方独立期望root/db；原子session、损坏不覆盖、有界管理锁内重读owner；同连接验PID再读白名单元数据。补真实边界fake与最终disconnect浏览器仍活/Linux包装PID实证，Windows不回落。

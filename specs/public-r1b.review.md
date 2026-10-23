@@ -46,3 +46,7 @@ B已同步form-fill原文及R1b规格/计划/决定：不依赖领域数据，�
 ### 实现小步1：入口行为红与绑定基础
 
 新接口test_browser_binding先因模块缺失collection error（1 error）；这仅是接口不存在证据。现有入口独立test_browser_entry_boundary有效行为红为3 failed：ensure_chrome返回foreign固定9222；setup_worker_profile命中复制毒丸；open_tabs返回foreign标签。前两次测试夹具误用settings参数/修改冻结Storage导致失败，修正后才取得上述行为红，不混作产品证据。迁移ensure_chrome和open_tabs后，与5项绑定基础测试共8 passed。现阶段只完成基础，其他消费者/协调/四格仍待后续小步；不能宣称全入口已经封堵。
+
+### 基础早审E1–E7修正
+
+ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防Store构造；E2固定owned profile保留登录，实例generation更新；E3唯一协调runid；E4调用方expected root/db；E5原子replace/坏记录不覆盖；E6配置有界锁且锁内重读owner；E7白名单且同连接SystemInfo→Target。管理反例先6 failed（行为/缺接口），完成后基础+管理14 passed，包括合成cookie重启保留、跨workspace、旧run、真实文件锁超时、原子写和fake连接。仍需全消费者贯穿与最终真实fixture，未把基础通过等同片验收。

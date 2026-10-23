@@ -514,3 +514,5 @@ S1条件采用：锁定MCP0.0.83/Playwright1.56.0先证明精确WS、CDP browser
 本决定取代spec 4.10第6条/§10第56条相关复制日常资料规则和决定24“浏览器身份失效只报告”的部分；其他历史记录保留。R1已签收main8530523：分支run39918253389对应34221b1；main run39919661089全success（1627 passed/122.49s，0skip及wheel/sdist/editable），合并后本地四项1627/66.13s，甲方提供。
 
 决定29正式评审A/B收敛：必需归属组合采用OS PID/start/profile命令行、本profile精确WS及连接后SystemInfo browserPID，取消必需CDP命令行及enable-automation；headless与系统Chrome有头证据分别记录。独立填表仅协调行/管理锁依赖，kind=form_fill+runid匹配内存运行；真失联不走投递中断收尾、不写领域状态。详见[R1b决定3](specs/public-r1b.decisions.md)。先窄复核，不开产品实现。
+
+决定29绑定早审E1–E7：首次空专属profile此后本工作区持久复用登录，实例generation更新；只读协调查询、kind/runid、独立期望root/db、原子session、有界锁内重读owner、同连接PID+元数据白名单，按R1b决定4修正基础后再迁移。

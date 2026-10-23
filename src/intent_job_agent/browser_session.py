@@ -10,6 +10,7 @@ import os
 import re
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -38,6 +39,8 @@ class BrowserBinding:
     owner_pid: int
     owner_started: str
     db_path: str
+    kind: str = ""
+    run_id: str = ""
 
     def dump(self):
         return asdict(self)
@@ -55,9 +58,23 @@ def _plain(path: Path):
         raise BrowserIdentityLost("Symlink in browser identity path")
 
 
-def validate_os(binding: BrowserBinding):
+def scope(settings):
+    return (str(Path(settings.storage.data_dir).resolve()), str(Path(settings.storage.db_path).resolve()))
+
+
+def _workspace(binding, expected):
     if not isinstance(binding, BrowserBinding):
         raise BrowserIdentityLost("A complete BrowserBinding is required, not a port")
+    if expected is None or (binding.root, binding.db_path) != tuple(map(str, expected)):
+        raise BrowserIdentityLost("Browser workspace differs from caller's expected root/db")
+    if Path(binding.profile) != Path(expected[0]) / "browser/profile":
+        raise BrowserIdentityLost("Browser profile is not this workspace's dedicated profile")
+
+
+def validate_os(binding: BrowserBinding, *, expected):
+    if not isinstance(binding, BrowserBinding):
+        raise BrowserIdentityLost("A complete BrowserBinding is required, not a port")
+    _workspace(binding, expected)
     if sys.platform not in ("darwin", "linux"):
         raise BrowserIdentityLost("Browser identity is not yet supported on this platform")
     try:
@@ -85,26 +102,46 @@ def validate_os(binding: BrowserBinding):
         raise BrowserIdentityLost(f"Cannot verify browser identity: {error}") from error
 
 
-def validate_owner(binding):
-    validate_os(binding)
-    from .store import Store
+def validate_owner(binding, *, expected):
+    validate_os(binding, expected=expected)
+    row = activity(binding.db_path)
+    if not row or (row["owner_pid"], row["owner_started"]) != (binding.owner_pid, binding.owner_started):
+        raise BrowserIdentityLost("Browser control owner changed")
+    if not binding.run_id or (row.get("kind"), row.get("run_id")) != (binding.kind, binding.run_id):
+        raise BrowserIdentityLost("Browser execution identity changed")
+    current = _read_record(Path(expected[0]) / "browser/session.json")
+    if current is None or (current.generation, current.pid, current.started) != (
+        binding.generation,
+        binding.pid,
+        binding.started,
+    ):
+        raise BrowserIdentityLost("Browser session generation changed")
+    if not watchdog.alive(binding.owner_pid, binding.owner_started):
+        raise BrowserIdentityLost("Browser control owner is no longer alive")
 
-    if not Path(binding.db_path).is_file():
+
+def activity(db_path):
+    if not Path(db_path).is_file():
         raise BrowserIdentityLost("Browser control owner is missing")
-    store = Store(binding.db_path)
     try:
-        row = store.activity()
-        if not row or (row["owner_pid"], row["owner_started"]) != (binding.owner_pid, binding.owner_started):
-            raise BrowserIdentityLost("Browser control owner changed")
-        if not watchdog.alive(binding.owner_pid, binding.owner_started):
-            raise BrowserIdentityLost("Browser control owner is no longer alive")
-    finally:
-        store.db.close()
+        with sqlite3.connect(Path(db_path).as_uri() + "?mode=ro", uri=True) as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute("SELECT * FROM apply_running WHERE id=1").fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as error:
+        raise BrowserIdentityLost("Cannot read browser coordination record") from error
 
 
-def rpc(binding, method, timeout=3.0):
-    """Browser-scope CDP only. Never discovers endpoints over HTTP or attaches to pages."""
-    validate_os(binding)
+def _pid(info, binding):
+    if [int(p["id"]) for p in info.get("processInfo", []) if p.get("type") == "browser"] != [binding.pid]:
+        raise BrowserIdentityLost("CDP browser PID does not match OS identity")
+
+
+def rpc(binding, method, timeout=3.0, *, expected):
+    """Allowlisted metadata. Each connection checks PID before reading targets on that same socket."""
+    if method not in ("SystemInfo.getProcessInfo", "Target.getTargets"):
+        raise BrowserIdentityLost("Only browser metadata RPC methods are allowed")
+    validate_os(binding, expected=expected)
     endpoint = urlsplit(binding.endpoint)
     try:
         with socket.create_connection(("127.0.0.1", endpoint.port), timeout=timeout) as sock:
@@ -121,49 +158,53 @@ def rpc(binding, method, timeout=3.0):
                     raise BrowserIdentityLost("Exact browser WebSocket refused")
                 while reader.readline() not in (b"\r\n", b""):
                     pass
-                watchdog._send(sock, json.dumps({"id": 1, "method": method}).encode())
-                while True:
-                    message = json.loads(watchdog._receive(reader))
-                    if message.get("id") == 1:
-                        if "error" in message:
-                            raise BrowserIdentityLost(f"Identity CDP failed: {message['error']}")
-                        return message["result"]
+
+                def request(number, name):
+                    watchdog._send(sock, json.dumps({"id": number, "method": name}).encode())
+                    while True:
+                        message = json.loads(watchdog._receive(reader))
+                        if message.get("id") == number:
+                            if "error" in message:
+                                raise BrowserIdentityLost(f"Identity CDP failed: {message['error']}")
+                            return message["result"]
+
+                info = request(1, "SystemInfo.getProcessInfo")
+                _pid(info, binding)
+                result = request(2, method) if method != "SystemInfo.getProcessInfo" else info
+                validate_os(binding, expected=expected)
+                return result
     except (OSError, ValueError, KeyError, ConnectionError) as error:
         raise BrowserIdentityLost(f"Exact browser connection lost: {error}") from error
 
 
-def verify(binding):
-    validate_os(binding)
-    info = rpc(binding, "SystemInfo.getProcessInfo")
-    if [int(p["id"]) for p in info.get("processInfo", []) if p.get("type") == "browser"] != [binding.pid]:
-        raise BrowserIdentityLost("CDP browser PID does not match OS identity")
-    validate_os(binding)
+def verify(binding, *, expected):
+    rpc(binding, "SystemInfo.getProcessInfo", expected=expected)
 
 
-def targets(binding):
-    verify(binding)
-    infos = rpc(binding, "Target.getTargets").get("targetInfos", [])
+def targets(binding, *, expected):
+    infos = rpc(binding, "Target.getTargets", expected=expected).get("targetInfos", [])
     return [
         {
             "id": i.get("targetId"),
             "type": i.get("type"),
             "url": i.get("url", ""),
             "title": i.get("title", ""),
+            "generation": binding.generation,
             "openerId": i.get("openerId"),
         }
         for i in infos
     ]
 
 
-def connect(playwright, binding):
+def connect(playwright, binding, *, expected):
     """A page-capable connection requires the current control owner, unlike metadata reads."""
-    validate_owner(binding)
+    validate_owner(binding, expected=expected)
     browser = playwright.chromium.connect_over_cdp(binding.endpoint, timeout=10000)
     try:
         info = browser.new_browser_cdp_session().send("SystemInfo.getProcessInfo")
         if [int(p["id"]) for p in info["processInfo"] if p["type"] == "browser"] != [binding.pid]:
             raise BrowserIdentityLost("Connected browser PID mismatch")
-        validate_owner(binding)
+        validate_owner(binding, expected=expected)
         return browser
     except BaseException:
         # Browser.close over a CDP connection disconnects this client; it must never issue Browser.close CDP.
@@ -172,7 +213,7 @@ def connect(playwright, binding):
 
 
 @contextmanager
-def management(root):
+def management(root, *, timeout):
     if sys.platform not in ("darwin", "linux"):
         raise BrowserIdentityLost("Browser management is not supported on this platform")
     import fcntl
@@ -183,90 +224,160 @@ def management(root):
     path = folder / "management.lock"
     _plain(path)
     with path.open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise BrowserIdentityLost(
+                        "Another session is managing this browser; retry after it finishes"
+                    ) from None
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
         try:
             yield folder
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def inspect(settings):
-    settings.require_external("browser.inspect")
-    root = Path(settings.storage.data_dir).resolve()
-    path = root / "browser" / "session.json"
+def _read_record(path):
     _plain(path)
     if not path.exists():
         return None
     try:
-        binding = BrowserBinding.load(json.loads(path.read_text()))
-        if binding.root != str(root) or binding.db_path != str(Path(settings.storage.db_path).resolve()):
-            raise BrowserIdentityLost("Browser workspace mismatch")
-        verify(binding)
-        return binding
-    except (OSError, ValueError) as error:
-        raise BrowserIdentityLost(f"Invalid browser session: {error}") from error
+        return BrowserBinding.load(json.loads(path.read_text()))
+    except (OSError, ValueError, BrowserIdentityLost) as error:
+        raise BrowserIdentityLost(
+            "Browser session record is damaged; preserve it and inspect this workspace's browser records before retrying"
+        ) from error
+
+
+def _atomic(path, value):
+    _plain(path)
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temp.open("x") as out:
+            json.dump(value, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def inspect(settings):
+    settings.require_external("browser.inspect")
+    expected = scope(settings)
+    binding = _read_record(Path(expected[0]) / "browser/session.json")
+    if binding is None:
+        return None
+    _workspace(binding, expected)
+    if not watchdog.alive(binding.pid, binding.started):
+        return None
+    verify(binding, expected=expected)
+    return binding
+
+
+def _own_row(db_path):
+    row = activity(db_path)
+    me = watchdog.processes().get(os.getpid())
+    if (
+        not row
+        or not me
+        or (row["owner_pid"], row["owner_started"]) != (me.pid, me.started)
+        or not row.get("run_id")
+        or row.get("kind") not in ("step", "resume", "form_fill")
+    ):
+        raise BrowserIdentityLost("Only the current coordinated run owner may manage its browser")
+    return row
 
 
 def ensure(settings):
     settings.require_external("browser.ensure")
-    from .store import Store
     from .vendor.applypilot.config import get_chrome_path
 
-    root = Path(settings.storage.data_dir).resolve()
-    db_path = Path(settings.storage.db_path).resolve()
-    if not db_path.is_file():
-        raise BrowserIdentityLost("Start a coordinated run before starting its browser")
-    store = Store(db_path)
-    try:
-        row = store.activity()
-    finally:
-        store.db.close()
-    me = watchdog.processes().get(os.getpid())
-    if not row or not me or (row["owner_pid"], row["owner_started"]) != (me.pid, me.started):
-        raise BrowserIdentityLost("Only the coordinated run owner may start or adopt its browser")
-    with management(root) as folder:
+    expected = scope(settings)
+    root, db_path = expected
+    with management(root, timeout=settings.apply.browser_lock_seconds) as folder:
+        # Re-read only after taking the management lock: a previous run may have ended while waiting.
+        row = _own_row(db_path)
+        owner = dict(
+            owner_pid=row["owner_pid"], owner_started=row["owner_started"], kind=row["kind"], run_id=row["run_id"]
+        )
         path = folder / "session.json"
-        if path.exists():
-            old = BrowserBinding.load(json.loads(path.read_text()))
+        old = _read_record(path)
+        if old is not None:
+            _workspace(old, expected)
             if watchdog.alive(old.pid, old.started):
-                verify(old)
-                binding = BrowserBinding(**{**old.dump(), "owner_pid": me.pid, "owner_started": me.started})
-                path.write_text(json.dumps(binding.dump()))
+                verify(old, expected=expected)
+                binding = BrowserBinding(**{**old.dump(), **owner})
+                _atomic(path, binding.dump())
                 return binding
-            # A dead browser is never killed/adopted by port. Its profile is retained, never deleted.
-        generation = uuid.uuid4().hex
-        profile = folder / f"profile-{generation}"
-        profile.mkdir(mode=0o700)
-        executable = get_chrome_path()
-        args = launch_arguments(executable, profile)
-        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        profile = folder / "profile"
+        marker = folder / "owned-profile.json"
+        _plain(profile)
+        _plain(marker)
+        if profile.exists():
+            try:
+                owned = json.loads(marker.read_text())
+            except (OSError, ValueError) as error:
+                raise BrowserIdentityLost("Unrecognized profile; do not adopt or delete it") from error
+            if owned != {"root": root, "db_path": db_path, "profile": str(profile)}:
+                raise BrowserIdentityLost("Profile ownership record differs from this workspace")
+        else:
+            if marker.exists():
+                raise BrowserIdentityLost("Owned profile is missing; inspect records before retrying")
+            profile.mkdir(mode=0o700)
+            _atomic(marker, {"root": root, "db_path": db_path, "profile": str(profile)})
+        # No live process using this profile may be displaced, including an unknown stale session.
+        if any(f"--user-data-dir={profile}" in p.command for p in watchdog.processes().values()):
+            raise BrowserIdentityLost("A live process still uses this profile; leave it untouched")
+        active = profile / "DevToolsActivePort"
+        _plain(active)
+        active.unlink(missing_ok=True)  # only our proven-owned profile, with no live user
+        proc = subprocess.Popen(
+            launch_arguments(get_chrome_path(), profile),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
         identity = None
         try:
-            deadline = time.monotonic() + 20
-            while not (profile / "DevToolsActivePort").is_file():
+            deadline = time.monotonic() + settings.apply.browser_start_seconds
+            while not active.is_file():
                 if proc.poll() is not None or time.monotonic() > deadline:
                     raise BrowserIdentityLost("Dedicated Chrome did not publish its endpoint")
                 time.sleep(0.05)
             identity = watchdog.processes()[proc.pid]
-            port, endpoint = (profile / "DevToolsActivePort").read_text().strip().splitlines()
+            port, endpoint = active.read_text().strip().splitlines()
             binding = BrowserBinding(
-                str(root),
+                root,
                 str(profile),
-                generation,
+                uuid.uuid4().hex,
                 proc.pid,
                 identity.started,
                 f"ws://127.0.0.1:{port}{endpoint}",
-                me.pid,
-                me.started,
-                str(db_path),
+                db_path=db_path,
+                **owner,
             )
-            verify(binding)
-            path.write_text(json.dumps(binding.dump()))
+            verify(binding, expected=expected)
+            if _own_row(db_path) != row:
+                raise BrowserIdentityLost("Run changed while browser started")
+            _atomic(path, binding.dump())
             return binding
         except BaseException:
             if proc.poll() is None and (identity is None or watchdog.alive(proc.pid, identity.started)):
-                proc.terminate()
-                proc.wait(timeout=10)
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except (OSError, subprocess.TimeoutExpired):
+                    if identity is not None and watchdog.alive(proc.pid, identity.started):
+                        proc.kill()
+                        try:
+                            proc.wait(timeout=3)
+                        except (OSError, subprocess.TimeoutExpired):
+                            pass  # Preserve the original failure; do not touch any other process.
             raise
 
 
@@ -286,8 +397,17 @@ def launch_arguments(executable, profile, *, headless=False):
     ]
 
 
-def close(binding):
-    with management(binding.root):
-        validate_owner(binding)
-        verify(binding)
+def close(binding, *, expected, timeout):
+    _workspace(binding, expected)
+    with management(expected[0], timeout=timeout):
+        validate_owner(binding, expected=expected)
+        verify(binding, expected=expected)
         os.kill(binding.pid, signal.SIGTERM)
+        deadline = time.monotonic() + timeout
+        while watchdog.alive(binding.pid, binding.started):
+            if time.monotonic() >= deadline:
+                # Identity is rechecked; never escalate against a recycled PID.
+                if watchdog.alive(binding.pid, binding.started):
+                    os.kill(binding.pid, signal.SIGKILL)
+                raise BrowserIdentityLost("Owned browser did not exit before the shutdown deadline")
+            time.sleep(0.05)

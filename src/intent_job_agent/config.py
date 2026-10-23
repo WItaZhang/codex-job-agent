@@ -96,6 +96,8 @@ class ApplyWatchdog(_Section):
 
 
 class Apply(_Section):
+    browser_lock_seconds: float = Field(default=5, gt=0)
+    browser_start_seconds: float = Field(default=20, gt=0)
     applicant_dir: str
     batch_size: int = Field(gt=0)
     review_first: int = Field(ge=0)
