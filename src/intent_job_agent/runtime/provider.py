@@ -320,7 +320,7 @@ class Runtime:
         return self.config.budgets.total_timeout_seconds - (time.monotonic() - self._started)
 
     def _rollback_unsent(self, handle):
-        """Called under runtime lock after releasing a failed unsent reservation."""
+        """Only after actual thread launch failure, under lock after releasing its slot."""
         if handle.snapshot().attempts == 0:
             self._ids.discard(handle.snapshot().request_id)
             self._handles = [(w, run, h) for w, run, h in self._handles if h is not handle]
@@ -328,6 +328,7 @@ class Runtime:
                 self._scope = None
 
     def _run(self, handle, body, schema, tools):
+        launch_failed = False
         try:
             b = self.config.budgets
             for attempt in range(b.max_retries + 1):
@@ -365,7 +366,11 @@ class Runtime:
                         ready.set()
                         done.set()
 
-                Thread(target=call, daemon=True).start()
+                try:
+                    Thread(target=call, daemon=True).start()
+                except Exception:
+                    launch_failed = True
+                    raise RuntimeFault("internal") from None
                 if not ready.wait(b.request_timeout_seconds):
                     handle.finish("failed", "timeout", stop=True)
                     done.wait()  # no new slot until this worker really ends
@@ -406,7 +411,8 @@ class Runtime:
         finally:
             with self._lock:
                 self._active -= 1
-                self._rollback_unsent(handle)
+                if launch_failed:
+                    self._rollback_unsent(handle)
             handle.drained.set()
 
     def _tools(self, value, tools):

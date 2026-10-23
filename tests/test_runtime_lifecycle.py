@@ -102,7 +102,7 @@ def test_thread_start_failure_rolls_back_unsent_slot(monkeypatch, fail_n):
     assert h.snapshot().cancel.transport == "not_sent"
     assert rt.provider.bodies == []
     now[0] = 100.0
-    ok = start(rt, "next")
+    ok = start(rt, "r", workspace="after-launch-failure")
     assert ok.wait(2).status == "completed"
     assert ok.drained.wait(2)
     assert len(rt.provider.bodies) == 1
@@ -160,3 +160,85 @@ def test_first_admission_atomically_wins_scope():
         release.set()
     for h in handles:
         assert h.drained.wait(2)
+
+
+@pytest.mark.parametrize("action", ["cancel", "invalidate", "revision"])
+@pytest.mark.parametrize("reuse", ["scope", "id"])
+def test_admitted_unsent_identity_survives_stop(monkeypatch, action, reuse):
+    from threading import Event
+
+    rt = make()
+    admitted, release = Event(), Event()
+    original = rt._run
+
+    def paused(handle, *args):
+        admitted.set()
+        assert release.wait(3)
+        return original(handle, *args)
+
+    monkeypatch.setattr(rt, "_run", paused)
+    h = start(rt)
+    try:
+        assert admitted.wait(2)
+        if action == "cancel":
+            h.cancel()
+        elif action == "invalidate":
+            rt.invalidate("w", "run")
+        else:
+            rt.set_revision("w", "run", 2)
+    finally:
+        release.set()
+    assert h.drained.wait(2)
+    assert h.snapshot().attempts == 0
+    assert rt.provider.bodies == []
+    monkeypatch.setattr(rt, "_run", original)
+    if reuse == "scope":
+        rejected = start(rt, "foreign", run_id="another")
+    else:
+        # Current revision avoids confusing revision rejection with retained ID.
+        rejected = rt.structured(
+            request_id="r",
+            workspace="w",
+            run_id="run",
+            revision=2 if action == "revision" else 1,
+            node="tagging",
+            data={"job": {"description": "synthetic"}},
+            categories=["job"],
+            schema=Value,
+        )
+    assert rejected.wait(2).error == "stale"
+    assert rejected.drained.wait(2)
+    assert rt.provider.bodies == []
+    if action == "cancel":
+        ok = start(rt, "new")
+        assert ok.wait(2).status == "completed"
+        assert ok.drained.wait(2)
+
+
+def test_admitted_budget_exhaustion_retains_request_id(monkeypatch):
+    from threading import Event
+
+    rt = make({"max_requests": 1, "concurrency": 2})
+    admitted, release = Event(), Event()
+    original = rt._run
+
+    def paused(handle, *args):
+        if handle.snapshot().request_id == "delayed":
+            admitted.set()
+            assert release.wait(3)
+        return original(handle, *args)
+
+    monkeypatch.setattr(rt, "_run", paused)
+    delayed = start(rt, "delayed")
+    try:
+        assert admitted.wait(2)
+        first = start(rt, "first")
+        assert first.wait(2).status == "completed"
+        assert first.drained.wait(2)
+    finally:
+        release.set()
+    assert delayed.drained.wait(2)
+    assert delayed.snapshot().error == "budget_exhausted"
+    assert delayed.snapshot().attempts == 0
+    assert start(rt, "delayed").wait(2).error == "stale"
+    assert len(rt.provider.bodies) == 1

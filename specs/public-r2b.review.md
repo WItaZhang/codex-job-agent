@@ -101,3 +101,9 @@ a6f0bbc命令修复固定HEAD的中间四项1854 passed/83.59s，lint/format/syn
 | 下一步及估时 | 协调者/Claude独立窄复核本固定HEAD；未获新任务不改实现、不推进S2，评审等待无工程时长承诺 |
 
 本证据提交不改产品代码或包，不重复同代码全套；工作区检查后释放锁，不推送合并。
+
+## Y1：已接纳未发送身份保留（模块决定10）
+
+固定2f4d5c7的无条件finally回滚经真实调用链Event屏障复现，非概率重跑：`/tmp/public-r2b-s1-y1-red.log` 6 failed / 8 passed。取消、invalidate/revision失效后的跨run及重复ID、发送前预算耗尽ID回退均纳入；invalidate同scope本就被invalid集合拒绝，保留该正例不冒称全部红。
+
+回滚仅限外层执行线程/内层传输线程实际启动失败；普通收尾仅释放槽。两层失败仍internal/drained/发送0，并允许相同ID在新scope重新接纳。定向runtime验证114 passed，无warning；四项及package待本次固定实现HEAD验证。S1仍待独立签收，不进入S2–S6。
