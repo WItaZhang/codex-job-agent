@@ -83,3 +83,21 @@ a6f0bbc命令修复固定HEAD的中间四项1854 passed/83.59s，lint/format/syn
 依据`/tmp/public-r2b-s1-runtime-review.md`及甲方裁决，模块决定9同步现态：max_tool_calls=0仅禁tool_turn；单Runtime首次有效接纳时绑定scope，其他scope固定stale，不占预算；总时钟在成功启动的provider worker实际调用send前起算，同run间隔计入，构造空闲不计。两个线程层级启动失败均回滚未发送占位，internal/drained且发送计数0，后续可使用槽位。后续S2必须新run新Runtime，不提供命令重置预算。S5传输必须有自己的时限/结束机制，S1不强杀不合作线程；其槽位保留到实际返回，不宣称远端取消。
 
 `/tmp/public-r2b-s1-x-red.log`为5项真实产品语义失败，非ImportError；相同断言修复后105项定向通过，再补首次scope并发竞争及非法输入不绑定的屏障。修复后新HEAD另跑全量/包契约，原中间结果保留。
+
+## S1固定2f4d5c7最终本地交审
+
+产品实现HEAD `2f4d5c78653e6d87e84fb795e6a56c5e7a2e155c`。runtime定向107项通过（`/tmp/public-r2b-s1-x-stable.log`），完整四项通过：sync locked、ruff check、format check（112文件）、**1860 passed/85.13s，无skip或warning**。日志`/tmp/public-r2b-s1-x-four-{sync,lint,format,full}.log`。`/tmp/public-r2b-s1-x-package.log`记录direct wheel及sdist→wheel均安装探针通过，runtime默认/缺节/部分覆盖/真实序列化fake、原资源闭包/47工具握手/full与scheduled local_only拒绝/第二入口通过；未上传或发行。
+
+提交范围：独立runtime配置与唯一源默认、字段过滤/打码、协议v1事件及封闭命令、受限工具提议、显式fake、错误/预算/多维取消/迟到usage、单scope生命周期和线程启动失败回滚、旧接口兼容；根索引/排期和决定31按授权同步。llm.py/业务领域/skills/R2未改，不新增SDK、网络、真实凭据或S2编排。实际四组mutation红与旧FakeClient反证、接口缺失红、中间事件初始化失败和X红均已在上述历史记录区分，未以最终绿抹除。
+
+| 字段 | 最终交审状态 |
+| --- | --- |
+| 切片 | 公众R2b S1 |
+| 产品行为 | 显式fake可验证模型契约；默认未配置不发送；字段/协议/作用域/预算拒绝，过期value不发布、usage可迟到 |
+| 状态 | 本地验证完成、代码冻结；待独立审阅及协调者整合决定，不代表R2b全量或公众发布通过 |
+| 提交证据 | 产品2f4d5c7；本次后续仅证据文档提交，最终文档HEAD在回复中报告 |
+| 验证结果 | 107定向、1860全套、wheel/sdist安装探针通过 |
+| 阻塞/限制 | S1远端CI未运行；真实provider/传输结束机制S5待实证；S2–S6未授权，R2真实GUI门槛独立保留；不合作线程只能保留槽位，不能强杀或证明远端取消 |
+| 下一步及估时 | 协调者/Claude独立窄复核本固定HEAD；未获新任务不改实现、不推进S2，评审等待无工程时长承诺 |
+
+本证据提交不改产品代码或包，不重复同代码全套；工作区检查后释放锁，不推送合并。
