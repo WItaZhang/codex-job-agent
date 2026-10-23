@@ -459,10 +459,19 @@ class LiveBrowser:
     - Response bodies are fetched only for requests that finished: a stream that never ends (EventSource, long
       polling) would hold the thread forever."""
 
-    def __init__(self, binding, redactor: Redactor, body_max_bytes: int = 30 * 2**20, *, expected):
+    def __init__(
+        self,
+        binding,
+        redactor: Redactor,
+        body_max_bytes: int = 30 * 2**20,
+        *,
+        expected,
+        render_seconds: float = readback.READ_SECONDS,
+    ):
         from playwright.sync_api import sync_playwright
 
         self.expected = expected
+        self.render_seconds = render_seconds
         self.binding, self.redactor, self.body_max_bytes = binding, redactor, body_max_bytes
         self._pw = sync_playwright().start()
         self._browser = browser_session.connect(self._pw, self.binding, expected=self.expected)
@@ -538,7 +547,7 @@ class LiveBrowser:
         """The page's simplified HTML and screenshot with the `hide` fields ((frame, path) of fields matched to a
         contact entry) and every element showing a contact value hidden or blacked out, and its MHTML."""
         page = self._page(tab)
-        shot, why = readback._masked_screenshot(page, self.redactor, hide)
+        shot, why = readback._masked_screenshot(page, self.redactor, hide, render_seconds=self.render_seconds)
         snapshot = None
         if mhtml:
             try:
@@ -638,6 +647,7 @@ def main(argv=None) -> int:
                 redactor,
                 config.network_max_mb * 2**20,
                 expected=(config.root, config.db_path),
+                render_seconds=config.timeout_seconds,
             ),
             redactor,
         ),

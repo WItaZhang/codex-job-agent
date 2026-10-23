@@ -1168,3 +1168,155 @@ def test_the_saved_page_hides_contact_fields_by_path(chromium):
     )
     html = readback.serialize(pg, [(0, "body > :nth-child(2)"), (0, "body > :nth-child(3)")])
     assert "34 Oak Avenue" not in html and "Old U" in html and "[其他值，已隐去]" in html
+
+
+def test_screenshot_waits_for_render_frames_before_capturing(monkeypatch):
+    """Deterministic ordering barrier: no contact capture before the frame promise resolves."""
+    import threading
+    from types import SimpleNamespace
+
+    entered, release = threading.Event(), threading.Event()
+    shots = []
+
+    class Page:
+        frames = []
+        main_frame = SimpleNamespace(evaluate=lambda script: [])
+
+        def wait_for_function(self, script, *, timeout):
+            assert "requestAnimationFrame" in script and timeout == 250
+            entered.set()
+            assert release.wait(3)
+            return SimpleNamespace(dispose=lambda: None)
+
+        def screenshot(self, **options):
+            shots.append(options)
+            return b"synthetic-masked"
+
+    results = []
+    worker = threading.Thread(
+        target=lambda: results.append(readback._masked_screenshot(Page(), StandInRedactor(), render_seconds=0.25))
+    )
+    worker.start()
+    try:
+        assert entered.wait(1), "capture bypassed render-frame barrier"
+        assert shots == []
+    finally:
+        release.set()
+        worker.join(3)
+    assert results == [(b"synthetic-masked", "")]
+    assert shots == [{"full_page": True, "style": None}]
+
+
+def test_unavailable_render_frames_do_not_save_a_screenshot():
+    from types import SimpleNamespace
+
+    class Page:
+        frames = []
+        main_frame = SimpleNamespace(evaluate=lambda script: [])
+
+        def wait_for_function(self, *args, **kwargs):
+            raise TimeoutError("synthetic frozen rendering")
+
+        def screenshot(self, **kwargs):
+            pytest.fail("unverified rendering must not be captured")
+
+    assert readback._masked_screenshot(Page(), StandInRedactor(), render_seconds=0.25) == (
+        None,
+        "渲染未就绪（TimeoutError）",
+    )
+
+
+def test_real_frame_barrier_keeps_full_page_and_modal_state(chromium, tmp_path):
+    """Hold the two actual rendering callbacks on a synthetic page; capture cannot race past them."""
+    import threading
+
+    browser, pg, binding = chromium
+    html = f"""<!doctype html><body style="margin:0"><div style="height:1800px">Synthetic page</div>
+      <dialog id="d"><p>Email address</p><p id="em" style="font:20px sans-serif;padding:6px">{EMAIL}</p></dialog>"""
+    pg.goto("data:text/html;base64," + base64.b64encode(html.encode()).decode())
+    pg.evaluate("""() => {
+        d.showModal(); window.scrollTo(0, 900);
+        window.syntheticNativeRAF = window.requestAnimationFrame;
+        window.syntheticFrames = [];
+        window.requestAnimationFrame = cb => { syntheticFrames.push(cb); return syntheticFrames.length; };
+    }""")
+    box = pg.locator("#em").bounding_box()
+    before = pg.evaluate("({y:scrollY, focus:document.activeElement.id, open:d.open})")
+    target = find_job_tab([], list_targets(binding, expected=(binding.root, binding.db_path)), pg.url)
+    errors = []
+
+    def read():
+        try:
+            readback.read_final_page(
+                binding, target, tmp_path, StandInRedactor(), expected=(binding.root, binding.db_path)
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    worker = threading.Thread(target=read)
+    worker.start()
+    try:
+        for _ in range(2):
+            pg.wait_for_function("syntheticFrames.length > 0", polling=10, timeout=2000)
+            assert worker.is_alive() and not (tmp_path / "screenshot.png").exists()
+            pg.evaluate("syntheticNativeRAF(syntheticFrames.shift())")
+        worker.join(5)
+        assert not worker.is_alive() and not errors
+        assert pg.evaluate("({y:scrollY, focus:document.activeElement.id, open:d.open})") == before
+        png = (tmp_path / "screenshot.png").read_bytes()
+        assert black_rows(browser, png, int(box["width"] * 0.9)) >= int(box["height"] * 0.8)
+        import struct
+
+        assert struct.unpack(">II", png[16:24])[1] == 1800  # still the entire document, not viewport-only
+    finally:
+        pg.evaluate("() => { window.requestAnimationFrame = syntheticNativeRAF; }")
+        worker.join(5)
+
+
+def test_real_frame_timeout_leaves_modal_and_refuses_image(chromium, tmp_path):
+    _, pg, binding = chromium
+    html = f'<!doctype html><dialog id="d"><p>Email address</p><p>{EMAIL}</p></dialog>'
+    pg.goto("data:text/html;base64," + base64.b64encode(html.encode()).decode())
+    pg.evaluate("""() => {
+        d.showModal(); window.syntheticNativeRAF = requestAnimationFrame;
+        window.requestAnimationFrame = () => 1;
+    }""")
+    target = find_job_tab([], list_targets(binding, expected=(binding.root, binding.db_path)), pg.url)
+    try:
+        readback.read_final_page(
+            binding, target, tmp_path, StandInRedactor(), expected=(binding.root, binding.db_path), render_seconds=0.1
+        )
+        assert not (tmp_path / "screenshot.png").exists()
+        assert (tmp_path / readback.SCREENSHOT_NOTE).read_text().startswith("截图未存：渲染未就绪")
+        assert pg.evaluate("d.open")
+    finally:
+        pg.evaluate("() => { window.requestAnimationFrame = syntheticNativeRAF; }")
+
+
+def test_final_runner_passes_configured_render_budget(monkeypatch, tmp_path):
+    from intent_job_agent.form_fill.runner import FormFillRunner
+    from tests.conftest import settings
+
+    cfg = settings()
+    cfg = cfg.model_copy(update={"form_fill": cfg.form_fill.model_copy(update={"checkpoint_timeout_seconds": 0.375})})
+    runner = FormFillRunner(tmp_path, cfg, tmp_path / "synthetic-profile")
+    runner.binding = object()
+    calls = []
+    monkeypatch.setattr(readback, "read_final_page", lambda *args, **kwargs: calls.append(kwargs))
+    runner.read({}, tmp_path / "out", StandInRedactor())
+    assert calls[0]["render_seconds"] == 0.375
+
+
+def test_checkpoint_capture_passes_its_render_budget(monkeypatch):
+    from intent_job_agent.form_fill.checkpoint import LiveBrowser
+
+    browser = object.__new__(LiveBrowser)
+    browser.redactor = StandInRedactor()
+    browser.render_seconds = 0.625
+    page = object()
+    monkeypatch.setattr(browser, "_page", lambda tab: page)
+    calls = []
+    monkeypatch.setattr(readback, "_masked_screenshot", lambda *args, **kwargs: (calls.append(kwargs), "render-test"))
+    monkeypatch.setattr(readback, "serialize", lambda *args: "synthetic")
+    browser.capture("synthetic")
+    assert calls == [{"render_seconds": 0.625}]

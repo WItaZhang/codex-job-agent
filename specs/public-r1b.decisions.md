@@ -55,3 +55,7 @@ CI39929809213实际页面为Layer 1 Sandbox=Namespace、PID namespaces=Yes、Net
 ## 最终CI证据更新（总决定29）
 
 甲方确认429a735的CI39930613311全绿（1747/126.40s），product fixture/package/editable/remove均完成。现行规格更新为限定Linux CI已实证而非待验证；仅hosted ubuntu-latest+锁定Chromium build1194 headless+精确路径userns许可，不外推公众安装。历史失败决定/报告保留，R4/R8缺口及公众不通过不变；文档交付后待Claude最终签收与整合。
+
+## 10：合并准备实际modal失败阻塞整合（总决定29、模块决定39）
+
+旧429a735远端绿不能覆盖7d914ed合并准备本地原断言重复失败；甲方扩大本轮到最小截图绘制同步修复，未批准生产像素审计/视口降级。按form-fill决定39加入有界两帧等待，沿现有checkpoint_timeout_seconds预算传递并明确渲染未就绪；原32像素断言连续20次、四项、新HEAD Linux CI为门槛。两标签系统Chrome有头产品连接实际runtime visible（Playwright既有focus emulation），不当document.hidden证据或改默认焦点行为。根因是绘制时序相关观测，未定位Chromium内部原因；精确结果和残留风险见review末尾。先前文档交付不重跑同代码CI的安排被本次产品改动取代，仍不推送合并。

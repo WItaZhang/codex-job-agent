@@ -1012,6 +1012,7 @@ class FormFillRunner:
             redactor,
             sheet,
             seconds=seconds,
+            render_seconds=self.settings.form_fill.checkpoint_timeout_seconds,
             expected=browser_session.scope(self.settings),
         )
 

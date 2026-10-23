@@ -1,6 +1,6 @@
 # R1b 实现与验证交审记录
 
-状态：产品实现、本地验证及429a735限定Linux CI39930613311已通过，等待Claude最终签收与协调者整合；不推送/合并，不宣称公众发布验收完成。总决定29；[规格](public-r1b.md)、[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)。以下早期阶段记录为历史证据，其“未实现/等待批准”只描述当时状态，最终结果见末尾。
+状态：429a735限定Linux CI39930613311已通过，但合并准备发现modal截图阻塞；最小修复本地四项1753及原modal连续20次已通过，新HEAD Linux CI及复核完成前不得整合。等待Claude复核及协调者整合；不推送/合并，不宣称公众发布验收完成。总决定29；[规格](public-r1b.md)、[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)。以下早期阶段记录为历史证据，其“未实现/等待批准”只描述当时状态，最终结果见末尾。
 
 ## 基线和历史
 
@@ -138,3 +138,36 @@ ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防
 Linux实证范围仅GitHub托管ubuntu-latest、Playwright1.56.0锁定Chromium141.0.7390.37 build1194、headless、精确实际二进制路径CI userns许可。产品sandbox页Layer1=Namespace、PID/Network namespaces=Yes、Seccomp-BPF=Yes；全部三个renderer归属成立、Seccomp2/NNP1，pid及user namespace inode与browser不同，组合无矛盾。其余产品精确WS/PID验证、disconnect、重启及MCP对照同一步通过。策略remove明确只移除本run profile。没有产品no-sandbox/全局sysctl放宽；不能外推为Linux系统Chrome包装脚本、公众Linux干净安装或Windows支持。R4凭据/授权、R8安装签名及用户系统策略仍未完成，公众发布结论不变。
 
 本次只更新文档，不改产品/测试/CI。吸收本地main85305234c57713efe8738abf0dd64aed220aef3f，`git merge main`为Already up to date，无冲突。按甲方要求本地重跑四项；本次文档差异不再触发同代码远端复跑，协调者审文档后由合并主线CI覆盖。Claude最终签收另行进行，R1b仍待整合。
+
+### 文档交付7d914ed的本地失败与后续授权
+
+上次追加失败段的Python命令出现UTF-8解析错误，7d914ed没有包含应有失败说明，现纠正：本地sync/ruff两项通过；pytest为1 failed/1746 passed/78.42s，test_a_contact_value_in_a_modal_dialog_is_blacked_out黑条像素0而要求32。原断言单例复核1 failed/1.77s，仍0>=32。日志/tmp/r1b-final-docs-four-checks.log及/tmp/r1b-final-docs-modal-recheck.log；不能据历史绿判定偶发。该提交标题不代表已记录完整失败或本地合并准备通过。甲方随后明确把范围扩大到仅合成fixture定位修复此脱敏阻塞，不放宽断言/skip；根因及修复证据继续记录，不合并。
+
+## 合并阻塞最小修复：modal绘制帧屏障（模块决定39）
+
+本节取代上述“文档差异无需新CI”的交付安排：当前包含产品修复，必须新HEAD Linux CI全绿再整合，旧429a735的绿不能替代。本轮仅合成资料/专属空profile，不增像素审计、不改视口截图，不改权限/launch参数。
+
+### 根因证实程度与连接/绘制对照
+
+原test_a_contact_value_in_a_modal_dialog_is_blacked_out原断言要求黑行>=32，三次未修路径失败：整套1746通过/1失败、单例1.77s失败、再次单例2.65s失败。查看合成失败PNG：1024×1800全页中整个modal不在图里，只有backdrop；没有观察到联系方式明文漏遮却落盘。DOM仍open，路径body > :nth-child(2) > :nth-child(2)，元素274.265625×40、scrollY900。问题不是仅有黑罩未画。
+
+同一完整Chromium、product ensure/精确WS、default context viewport=None对照：直接截图/增加读取常见42黑行，read_final_page可0；额外DOM观测改变复现概率。五组各自独立空profile对照，未等待原路径4/5为42行、1/5为0；两rAF路径5/5为42行，路径和DOM几何相同。说明缺失与绘制时序相关；**没有定位Chromium内部根因**，两帧同步是依据观测的最小缓解，不宣称消除所有合成器问题。诊断viewport截图只作比较，未采用产品降级。完整原始日志位于/tmp/r1b-modal-isolate.log、/tmp/r1b-modal-frame.log；本仓库真实事件屏障回归可复现等待顺序，不依赖这些临时文件。
+
+### 预算、失败原因、证据限度
+
+复用configs/default.yaml已有form_fill.checkpoint_timeout_seconds（当前5秒），最终runner.read及checkpoint.main/LiveBrowser显式传给_masked_screenshot；原外层read_seconds预算保留。低层兼容读API沿用既有READ_SECONDS默认，生产入口显式传配置，不新增硬编码3000。等待错误记录“截图未存：渲染未就绪”，不称打码失败；未到屏障不调用screenshot，真实暂停rAF后无PNG。Playwright临时CSS仍在full_page截图期间注入并清理，1800px高度、原滚动、焦点和dialog状态保持。
+
+锁定Python Playwright1.56.0的driver/package/lib/server/chromium/crPage.js初始化主frame时发送Emulation.setFocusEmulationEnabled(enabled=true)，不是本次产品加焦点操作。系统Google Chrome155.0.8059.85、macOS26.5.1、产品最终有头参数，专属新空profile两个合成标签和最小化条件均观测runtime visible。最后复测5秒配置预算下，四次等待+截图0.081/0.196/0.071/0.044秒成功；CDP窗口bounds确认为minimized。见[机器结果及全部参数](evidence/public-r1b-render-visibility.json)。**不是document.hidden实证**，不概括所有平台后台；未用bring_to_front改变产品行为。合成扣住rAF回调另外验证真正不响应时预算到期且不保存。未升级Python或Node依赖；系统Chrome版本为本机实际观测。
+
+屏障位于临时打码CSS注入之前，没有逐像素验收，也不把rAF当内容认证。样式后旧帧的理论风险尚无实证；页面main-world可改写rAF，页面也可能干预临时样式，不能据本次通过声称任意恶意页面绝无泄露。按甲方范围不扩生产像素审计。
+
+### 红绿记录（保留中间失败）
+
+- 原collection/浏览器入口行为红保留前文；本次新增等待/超时fake反证：未实现时2 failed/64 deselected，截图绕过屏障；/tmp/r1b-modal-barrier-red.log。
+- 首次真实帧测试1 failed/66 passed，仅测试清理evaluate返回RAF函数被误调用，改为函数体赋值；随后67 passed/5.13s。未放宽原断言。
+- 加真实暂停rAF后四项1751 passed/83.55s；后续甲方要求预算配置和明确原因，故这不是最终HEAD结果。
+- 预算传参初次定向1 failed/145 passed：测试误把render_seconds传给list_targets，TypeError；仅更正该测试调用。随后读回模块70 passed/5.56s，覆盖最终runner和checkpoint预算传递。
+- 受控批次逐次启动pytest运行**原用例20次，20/20通过**，原>=int(40*0.8)=32断言未改。/tmp/r1b-modal-20.log完整记录每轮（约1.6–1.9秒），未遇失败后挑选绿记录。
+- 最终四项结果下附；新Linux CI仍待协调者推送新HEAD，不重跑旧HEAD碰碰运气。
+
+最终本地四项：uv sync --locked通过；uv run ruff check src tests通过；uv run ruff format --check src tests通过（98 files）；uv run python -m pytest -q **1753 passed/80.14s，0 failed/0 skipped**。原20次单例全部通过，git diff --check通过。pytest日志/tmp/r1b-render-final-four-pytest.log。此结果对应本次提交的产品/测试内容，后续仅追加本结果说明；新HEAD远端Linux CI和Claude提交后窄复核仍待完成。没有push/merge，R1b不宣称可以整合。

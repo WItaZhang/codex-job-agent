@@ -1016,7 +1016,7 @@ def serialize(page, hide=()) -> str:
     return page.main_frame.evaluate(SERIALIZE_JS, [paths, HIDDEN_TEXT])
 
 
-def _masked_screenshot(page, redactor: Redactor, hide=()) -> tuple[bytes | None, str]:
+def _masked_screenshot(page, redactor: Redactor, hide=(), *, render_seconds: float) -> tuple[bytes | None, str]:
     """A full-page screenshot with every element showing a contact value, and every field at `hide` ((frame, path)
     of the fields matched to a contact entry), painted black for the shot only (Playwright adds the stylesheet for
     the shot and takes it away; the page is left as it is), or None and why when that cannot be done (5.6)."""
@@ -1030,12 +1030,23 @@ def _masked_screenshot(page, redactor: Redactor, hide=()) -> tuple[bytes | None,
                 return None, "子框架里有联系方式，涂不到"
         if any(page.locator(path).count() != 1 for path in paths):  # the page changed under us
             return None, "页面在截图前变了"
+        # A newly shown/scrolled top-layer dialog can have valid DOM geometry before
+        # Chromium has painted it. Cross a rendering opportunity without scrolling,
+        # focusing, changing the DOM, or replacing the existing full-page capture.
+        try:
+            ready = page.wait_for_function(
+                "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))",
+                timeout=render_seconds * 1000,
+            )
+            ready.dispose()
+        except Exception as exc:  # noqa: BLE001 - rendering failure is distinct from masking
+            return None, f"渲染未就绪（{type(exc).__name__}）"
         return page.screenshot(full_page=True, style=blackout_css(paths) or None), ""
     except Exception as exc:  # noqa: BLE001 - no blackout, no screenshot
         return None, type(exc).__name__
 
 
-def _read_live(holder: dict, binding, target: dict, redactor: Redactor, sheet, expected) -> tuple:
+def _read_live(holder: dict, binding, target: dict, redactor: Redactor, sheet, expected, render_seconds) -> tuple:
     # Leaving the context stops the Playwright driver, which drops the CDP connection. browser.close() is never
     # called, so the applying Chrome and its tabs stay as they are.
     with _playwright(holder) as p:
@@ -1044,7 +1055,12 @@ def _read_live(holder: dict, binding, target: dict, redactor: Redactor, sheet, e
         raw = _extract(page)
         snap = snapshot(raw, tab=str(target.get("id", "")), read_at=datetime.now().isoformat(timespec="seconds"))
         masked, hide, _ = mask_snapshot(snap, redactor, sheet)
-        return raw, masked, serialize(page, hide), *_masked_screenshot(page, redactor, hide)
+        return (
+            raw,
+            masked,
+            serialize(page, hide),
+            *_masked_screenshot(page, redactor, hide, render_seconds=render_seconds),
+        )
 
 
 READ_SECONDS = 120.0  # apply.watchdog.read_seconds, which the runners pass
@@ -1091,7 +1107,15 @@ def tab_state(binding, target: dict, seconds: float = READ_SECONDS, *, expected)
 
 
 def read_final_page(
-    binding, target: dict, out_dir: Path, redactor: Redactor, sheet=None, seconds: float = READ_SECONDS, *, expected
+    binding,
+    target: dict,
+    out_dir: Path,
+    redactor: Redactor,
+    sheet=None,
+    seconds: float = READ_SECONDS,
+    *,
+    expected,
+    render_seconds: float = READ_SECONDS,
 ) -> FinalPage:
     """Read the job tab as it is and save page.html, screenshot.png and readback.json, masked by value and by column
     (`sheet`: the answer sheet, for the fields matched to a contact entry; spec 5.6); contact values in the
@@ -1099,13 +1123,16 @@ def read_final_page(
     says so. Disconnects without closing the browser or the page. At most `seconds` (spec section 10 item 108)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    raw, snap, html, shot, why = _bounded(_read_live, seconds, binding, target, redactor, sheet or {}, expected)
+    raw, snap, html, shot, why = _bounded(
+        _read_live, seconds, binding, target, redactor, sheet or {}, expected, render_seconds
+    )
     state = page_state(raw)
     fields = tuple(f.model_copy(update={"id": f"p1.{n}"}) for n, f in enumerate(snap.fields, start=1))
     fields = tuple(f.model_copy(update={"section": "", "occurrence": 1}) for f in fields)
     (out / "page.html").write_text(redactor.mask(simplify_html(html)), encoding="utf-8")
     if shot is None:
-        (out / SCREENSHOT_NOTE).write_text(redactor.mask(f"截图未存：打码失败（{why}）\n"), encoding="utf-8")
+        reason = why if why.startswith("渲染未就绪") else f"打码失败（{why}）"
+        (out / SCREENSHOT_NOTE).write_text(redactor.mask(f"截图未存：{reason}\n"), encoding="utf-8")
     else:
         (out / "screenshot.png").write_bytes(shot)
     dumped = [f.model_dump(mode="json") for f in fields]

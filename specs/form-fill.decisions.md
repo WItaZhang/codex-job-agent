@@ -626,3 +626,9 @@
 按[public-r1b.md](public-r1b.md)统一空专属profile、精确WS及身份绑定；替代固定9222/复制资料的共用方式。独立start_form_fill与投递/恢复共用owner互斥；断连/身份失效不再作为普通tab_lost继续，按四格保留未launch状态或记录要修复失败，提交证据优先。旧离线报告兼容；旧generation不接管tab但保留安全重开。当前仅规格与探针，产品实现需交审通过。
 
 决定38正式评审B收敛：不依赖领域数据，协调行/管理锁为唯一例外；kind=form_fill+runid与self._form_fill_run匹配，正常running/收尾不误kill，真失联只清本运行并结束协调行，不走_close_interrupted、不写application/attempt/hold；other_session文案适配独立填表。三组事件屏障和nonowner元数据无attach/evaluate测试见R1b计划。
+
+## 39：R1b合并准备发现modal完整截图绘制缺失
+
+甲方授权在R1b修复新增实际阻塞：原32像素断言不改，不skip、不改默认全页语义、不扩为生产像素审计。原单例多次失败且整块modal缺失，未取得敏感文字漏遮落盘证据；相同元素路径/边界/开启状态下，增加DOM读取改变复现概率，五组独立进程中原路径一次缺失、两帧等待五次保留42黑行。证据指向顶层modal绘制同步，未定位Chromium内部具体实现。采用截图前有界等待两帧，确保至少跨过一次绘制机会；不聚焦/滚动/修改页面，超时沿现有不存截图路径。保留原Playwright临时CSS涂黑和完整页面截图、原断言，加实际浏览器屏障和超时反例，不把等待等同像素内容认证。
+
+决定39预算与证据收敛：复用已有form_fill.checkpoint_timeout_seconds，由runner/独立checkpoint入口传入截图函数，不硬编码新3000ms阈值；等待失败明确记渲染未就绪。系统Chrome有头产品连接启用Playwright focus emulation，物理后台/最小化观测仍为runtime visible，不当作document.hidden实证，不改变产品焦点行为。用合成暂停rAF验证预算与不存截图；不声称所有平台后台已验证。
