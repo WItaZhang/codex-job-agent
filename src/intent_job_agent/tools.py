@@ -296,6 +296,7 @@ class Toolbox:
         data_dir: Path | None = None,
         http_client: httpx.Client | None = None,
     ):
+        settings.validate_storage_boundary(store.path, data_dir or settings.storage.data_dir)
         if settings.execution_mode == "local_only":
             from .workspace import validate_paths
 
@@ -956,6 +957,7 @@ class Toolbox:
     # --- applying (spec 4.10) ---------------------------------------------------------------------
 
     def _applicant(self) -> applicant_files.Applicant:
+        """Read metadata; retain observed protection as a local audit-only write (decision25)."""
         if self.settings.execution_mode == "local_only":
             from .workspace import _inside, validate_applicant
 
@@ -1027,10 +1029,18 @@ class Toolbox:
         """Whether applying is set up: the applicant files (never their contents), resumes, what is plugged in,
         and the programs a run needs on this machine. Contact details are never returned."""
         if self.settings.execution_mode == "local_only":
+            try:
+                applicant = self._applicant()
+                missing = applicant.missing_files()
+            except InvariantError as error:
+                missing = [str(error)]
             return {
                 "ready": False,
                 "execution_mode": "local_only",
-                "missing": ["Business execution disabled pending R4/R5"],
+                "execution_disabled": True,
+                "reason": "Business execution disabled pending R4/R5",
+                "missing": missing,
+                "inspection": "local metadata and file existence only; programs and profile/env contents not inspected",
             }
         folder = applicant_files.folder(self.data_dir, self.settings.apply.applicant_dir)
         programs = {name: shutil.which(name) is not None for name in ("claude", "npx")}

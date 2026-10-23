@@ -454,3 +454,100 @@ def test_direct_run_job_rejects_before_creating_output(tmp_path):
     with pytest.raises(InvariantError, match="local-only"):
         run_job(SimpleNamespace(id="synthetic"), ctx)
     assert not ctx.run_dir.exists()
+
+
+@pytest.mark.parametrize("field", ["data_dir", "db_path"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_external_legacy_cannot_address_marked_workspace(tmp_path, field, nested):
+    root, _ = workspace(tmp_path)
+    raw = yaml.safe_load(Path("configs/default.yaml").read_text())
+    raw["storage"] = {"data_dir": str(tmp_path / "ordinary"), "db_path": str(tmp_path / "ordinary.sqlite")}
+    alias = tmp_path / "alias"
+    alias.symlink_to(root, target_is_directory=True)
+    raw["storage"][field] = str(alias / "nested" / "value" if nested else alias)
+    config = tmp_path / "external.yaml"
+    config.write_text(yaml.safe_dump(raw))
+    with pytest.raises(InvariantError, match="marked workspace"):
+        Settings.load(config)
+    direct = Settings.model_validate(raw)
+    with pytest.raises(InvariantError, match="marked workspace"):
+        direct.require_external("synthetic side effect")
+    with pytest.raises(InvariantError, match="marked workspace"):
+        Store(tmp_path / "not-created.sqlite", direct)
+    assert not (tmp_path / "not-created.sqlite").exists()
+
+
+def test_empty_workspace_tagging_is_actionable(tmp_path):
+    _, settings = workspace(tmp_path)
+    box = Toolbox(settings, Store(settings.storage.db_path, settings))
+    with pytest.raises(InvariantError, match="initialized"):
+        box.get_tagging_rules()
+
+
+def test_local_setup_lists_missing_files_without_program_probes(tmp_path, monkeypatch):
+    import shutil
+
+    root, settings = workspace(tmp_path)
+    box = Toolbox(settings, Store(settings.storage.db_path, settings))
+    monkeypatch.setattr(shutil, "which", lambda *a: pytest.fail("program probe"))
+    result = box.get_apply_setup()
+    assert result["ready"] is False
+    assert result["execution_disabled"] is True
+    assert any("applicant.yaml" in item for item in result["missing"])
+    assert not list(root.rglob("profile.json"))
+
+
+def test_local_setup_and_resume_only_append_protection_audit(tmp_path, monkeypatch):
+    import json
+
+    from .test_slice6 import write_applicant
+
+    root, settings = workspace(tmp_path)
+    write_applicant(root, careful=("Synthetic Labs",))
+    store = Store(settings.storage.db_path, settings)
+    box = Toolbox(settings, store)
+    original = Path.read_text
+
+    def no_private_read(path, *args, **kwargs):
+        assert path.name not in ("profile.json", ".env"), "private file loaded"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", no_private_read)
+    assert box.get_apply_setup()["missing"] == []
+    box.get_resume("ml")
+    (root / "applicant/resumes/ml.pdf").unlink()
+    missing = box.get_apply_setup()["missing"]
+    assert any("ml.pdf" in item for item in missing)
+    decisions = store.decisions()
+    assert len(decisions) == 1
+    assert decisions[0]["kind"] == "careful_companies_snapshot"
+    assert json.loads(decisions[0]["payload"])["companies"] == ["Synthetic Labs"]
+    for table in ("intent_versions", "labels", "applications", "proposals"):
+        assert store.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+
+
+def test_legacy_toolbox_override_cannot_reopen_workspace(tmp_path):
+    root, _ = workspace(tmp_path)
+    raw = yaml.safe_load(Path("configs/default.yaml").read_text())
+    raw["storage"] = {"data_dir": str(tmp_path / "ordinary"), "db_path": str(tmp_path / "ordinary.sqlite")}
+    settings = Settings.model_validate(raw)
+    store = Store(settings.storage.db_path, settings)
+    settings.require_external("ordinary legacy remains allowed")
+    with pytest.raises(InvariantError, match="marked workspace"):
+        Toolbox(settings, store, data_dir=root)
+
+
+def test_legacy_adapters_reject_marked_data_override(tmp_path, monkeypatch):
+    from intent_job_agent import apply_bridge, applypilot_bridge
+
+    root, _ = workspace(tmp_path)
+    settings = Settings.load("configs/default.yaml")
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("process launched"))
+    for action in (
+        lambda: applypilot_bridge.configure(root, settings),
+        lambda: applypilot_bridge.run_sources(root, settings, [], False),
+        lambda: apply_bridge.configure(root, settings),
+        lambda: apply_bridge.ChromeRunner(root, settings, root / "absent")(None),
+    ):
+        with pytest.raises(InvariantError, match="marked workspace"):
+            action()

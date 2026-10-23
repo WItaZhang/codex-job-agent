@@ -488,7 +488,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
     """Fill one job up to the final submit button (never submits) with the checkpoint service recording each page,
     find its tab, read the page it ended on back, close the recording, and write meta.json and the job's section of
     feasibility.md. A failure is this job's own; the run goes on."""
-    ctx.settings.require_external("form-fill execution")
+    ctx.settings.require_external("form-fill execution", ctx.run_dir)
     job_dir = ctx.run_dir / entry.id
     job_dir.mkdir(parents=True, exist_ok=True)
     started = _now()
@@ -967,37 +967,37 @@ class FormFillRunner:
 
     def ensure_chrome(self) -> int:
         """Reuse the applying Chrome if it runs (its tabs may hold forms the user is checking); start it if not."""
-        self.settings.require_external("ensure_chrome")
+        self.settings.require_external("ensure_chrome", self.data_dir, self.profile)
         apply_bridge.configure(self.data_dir, self.settings, self.profile)
         self.port = apply_bridge.ensure_chrome(self.settings)
         return self.port
 
     def targets(self) -> list[dict]:
-        self.settings.require_external("targets")
+        self.settings.require_external("targets", self.data_dir, self.profile)
         return readback.list_targets(self._port())
 
     def open_tabs(self) -> list[dict] | None:
         """The applying Chrome's tabs when it already runs, None when it does not. It never starts Chrome: the tool
         server answers one call at a time, and a cold start copies the profile."""
-        self.settings.require_external("open_tabs")
+        self.settings.require_external("open_tabs", self.data_dir, self.profile)
         from ..vendor.applypilot.apply import chrome
 
         port = chrome.BASE_CDP_PORT  # worker 0, as ensure_chrome uses
         return readback.list_targets(port) if apply_bridge.cdp_alive(port) else None
 
     def fill(self, spec: apply_bridge.ApplySpec, **options) -> apply_bridge.ApplyOutcome:
-        self.settings.require_external("fill")
+        self.settings.require_external("fill", self.data_dir, self.profile)
         return apply_bridge.run_application(
             spec, self.data_dir, self.settings, self.profile, self._port(), self.read_dirs, **options
         )
 
     def read(self, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> readback.FinalPage:
-        self.settings.require_external("read")
+        self.settings.require_external("read", self.data_dir, self.profile)
         seconds = self.settings.apply.watchdog.read_seconds  # spec section 10 item 108
         return readback.read_final_page(self._port(), target, out_dir, redactor, sheet, seconds=seconds)
 
     def tab_state(self, target: dict) -> PageState:
-        self.settings.require_external("tab_state")
+        self.settings.require_external("tab_state", self.data_dir, self.profile)
         return readback.tab_state(self._port(), target, seconds=self.settings.apply.watchdog.read_seconds)
 
     def _port(self) -> int:

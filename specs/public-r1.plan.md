@@ -64,3 +64,15 @@ The chosen force-include namespace is intent_job_agent_data; it also works in ed
 Explicit-config failures were reproduced before fixes: nonexistent/custom filename in marked workspace; settings.yaml symlink to external legacy; marker symlink. Original path context is checked before resolving, marker/config must be regular, no fallback. Offline report applicant paths are also contained within the selected data directory. Legacy CLI tests now explicitly select their old config instead of relying on removed default cwd lookup.
 
 Red evidence: first16 tests failed; selected missing/config and symlink cases failed; run_job direct entry created output before guard and report path escape failed its expected boundary. Green checkpoints:16,28,55/59 then89 focused tests. Initial full1595/67.07s preceded final path/adapter additions; final checks recorded separately.
+
+### Accepted early-review corrections (F1–F5)
+
+Legacy configuration must reject resolved data_dir/db_path and their ancestors marked as a workspace, including direct Settings adapters and Store/Toolbox construction. Ordinary explicit legacy paths retain their semantics. This is a product boundary, not protection against arbitrary Python or an actor deleting markers.
+
+Editable resource copies must follow the unique source via uv cache inputs (pyproject plus default config and the entire cover-letter tree); verify modification/addition/deletion using a disposable synthetic checkout. Installed wheels never discover source directories. Developers use uv run/sync after resource edits.
+
+Local reads may append the actual observed company protection snapshot (decision25); this audit-only exception does not create authorization, feedback, intent or application changes. Fake flows seed the Store directly in tests; R1 does not expose intent initialization as an authorized public action. Empty vocabulary/intent reads report uninitialized state. Setup reports missing local files using metadata/stat only, never loads profile/env or probes programs.
+
+Explicit form_fill --data-dir takes precedence over workspace data root for offline reporting. This deliberate override is outside the default workspace isolation guarantee; its selected directory still bounds local applicant paths. Legacy override semantics remain unchanged.
+
+交审证据与入口/sink矩阵见 [public-r1.review.md](public-r1.review.md)。

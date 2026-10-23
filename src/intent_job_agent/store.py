@@ -85,6 +85,7 @@ def new_id(prefix: str) -> str:
 
 class Store:
     def __init__(self, path: str | Path, settings: Settings):
+        settings.validate_storage_boundary(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.path = Path(path).resolve()
         self.settings = settings
@@ -640,6 +641,8 @@ class Store:
 
     def vocabulary(self) -> Vocabulary:
         row = self.db.execute("SELECT data FROM vocabulary ORDER BY seq DESC LIMIT 1").fetchone()
+        if row is None:
+            raise InvariantError("Vocabulary has not been initialized; R1 supports synthetic test setup only")
         return Vocabulary.model_validate_json(row["data"]).with_builtin()
 
     # --- analyses, proposals and decisions --------------------------------------------

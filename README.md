@@ -146,6 +146,10 @@ uv run python -m pytest -q
 
 新workspace在服务端拒绝真实网络抓取、模型外发、浏览器/邮件/投递及业务写入，包括直接Toolbox调用和scheduled profile。状态查看不恢复旧进程、不连接CDP。它不是一个通过改review_first或填source=user即可开启的授权系统。
 
-源码开发者原有 `--config configs/default.yaml` 显式legacy入口保留cwd相对路径语义，已有两个宿主配置已显式传入此参数。`--config`与`--workspace`不可同传；标记工作区中只接受普通文件`settings.yaml`，不存在配置、损坏或符号链接不回退legacy。离线表单报告也接受`--workspace`，`--data-dir`显式覆盖保持；报告不会访问浏览器。
+源码开发者原有 `--config configs/default.yaml` 显式legacy入口保留cwd相对路径语义，已有两个宿主配置已显式传入此参数。`--config`与`--workspace`不可同传；标记工作区中只接受普通文件`settings.yaml`，不存在配置、损坏或符号链接不回退legacy；外部legacy配置及直接适配入口若指向标记workspace的存储路径或后代，也会拒绝。离线表单报告也接受`--workspace`，`--data-dir`显式覆盖保持；报告不会访问浏览器。
 
 包资源来自`configs/default.yaml`和`.claude/skills/cover-letter/`唯一源，Hatchling在构建时映射到安装包，uv继续管理依赖。`uv run python scripts/check_package.py`验证直接wheel及sdist重建wheel，使用临时合成资料、真实MCP握手和离线报告；不会发起投递。
+
+开发检出通过 `uv run` / `uv sync` 刷新打包资源：uv cache keys 跟踪默认配置及完整 cover-letter 资源树（含 references），没有已安装 wheel 猜测源码父目录的回落。修改资源后不要用 `--no-sync` 或旧的常驻进程验证；重新 `uv run` 并重启进程。`scripts/check_editable_resources.py` 在临时合成源码副本验证修改/新增/删除后的实际重建。
+
+R1 本地读允许追加实际观察到的公司保护审计快照（决定25），不写授权、反馈或投递状态。空 workspace 不植入意图；合成流程测试直接种 Store，公开初始化意图入口仍关闭。`get_apply_setup` 仅检查本地资料路径是否存在，不加载 profile/env 或探测程序。离线 form_fill 报告的显式 `--data-dir` 优先于 workspace 根目录，属于主动覆盖，不属于默认目录隔离保证。

@@ -478,3 +478,7 @@ R1增加确定性拒绝边界调整为3–4日，R2b为6–10日，R5增加证�
 构建选Hatchling显式资源映射，uv继续管理依赖；YAML与.claude/skills/cover-letter保留唯一源（含references），wheel包资源与sdist重建wheel均验收，无源码补路径。初始化幂等、无个人资料/意图/凭据/授权，错误不覆盖不回退。CI产物仅内部预发布，远端由协调者推送后验证。无真实网络业务/浏览器/投递，不读或复制个人数据；R1b仍下一独立片。
 
 决定28收敛：PUBLIC仓库不等于内部产物可发行；CI禁止upload-artifact/Release/Pages/PyPI，制品只留runner临时目录。显式config保留原路径上下文，标记工作区的非canonical或符号链接config/marker一律拒绝，不静默忽略参数。新workspace所有业务mutation（含release_careful_companies）仍拒绝。静态审阅的进程全局开关建议不采纳，使用逐Settings策略，真实sink零调用测试和legacy同进程对照验证隔离；raw无Settings的OS/vendor函数不宣称为Python沙箱。
+
+#### Decision 28 — accepted R1 boundary review refinements
+
+External legacy configurations cannot address marked workspace storage (resolved data and DB paths, including ancestors); direct Settings entrypoints enforce the same rule. Keep decision25 local protection snapshot writes as an explicit local-read audit exception without granting authorization or changing feedback. Empty setup reads expose missing-file/uninitialized state without private-file or program inspection. Editable resource refresh uses uv cache inputs and disposable-source change probes; installed wheels never fall back to source. Explicit offline --data-dir overrides remain intentional and outside default workspace isolation. These refine R1 without opening business mutations or adding a consent system.

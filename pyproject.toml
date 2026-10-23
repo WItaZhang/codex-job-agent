@@ -49,3 +49,7 @@ packages = ["src/intent_job_agent"]
 
 [tool.hatch.build.targets.sdist]
 only-include = ["src", "tests", "configs/default.yaml", ".claude/skills/cover-letter", "pyproject.toml", "uv.lock", "LICENSE", "NOTICE.md", "README.md", "scripts"]
+
+[tool.uv]
+# These replace uv defaults; preserve project/build inputs and track the unique resource sources.
+cache-keys = [{ file = "pyproject.toml" }, { file = "setup.py" }, { file = "setup.cfg" }, { dir = "src" }, { file = "configs/default.yaml" }, { file = ".claude/skills/cover-letter/**/*" }]

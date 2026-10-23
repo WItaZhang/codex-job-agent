@@ -185,10 +185,28 @@ class Settings(_Section):
             from .domain import InvariantError
 
             raise InvariantError("Local-only configuration requires an initialized workspace")
+        settings.validate_storage_boundary()
         return settings
 
-    def require_external(self, operation: str) -> None:
+    def validate_storage_boundary(self, *extra_paths: str | Path) -> None:
+        """Legacy settings cannot reopen marked workspace storage as unrestricted."""
+        if self.execution_mode != "legacy":
+            return
+        from .domain import InvariantError
+        from .workspace import MARKER
+
+        for value in (self.storage.data_dir, self.storage.db_path, *extra_paths):
+            path = Path(value).expanduser().resolve()
+            for ancestor in (path, *path.parents):
+                marker = ancestor / MARKER
+                if marker.exists() or marker.is_symlink():
+                    raise InvariantError(
+                        f"Legacy configuration addresses a marked workspace at {ancestor}; use --workspace"
+                    )
+
+    def require_external(self, operation: str, *paths: str | Path) -> None:
         from .domain import InvariantError
 
+        self.validate_storage_boundary(*paths)
         if self.execution_mode == "local_only":
             raise InvariantError(f"R1 local-only workspace: {operation} is disabled pending R4/R5")
