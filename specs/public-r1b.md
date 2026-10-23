@@ -1,6 +1,6 @@
 # R1b：浏览器归属与空专属资料
 
-本规格定义R1b目标，已获甲方/Claude阶段批准并完成产品实现，正在集中验证和独立交审。[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)、[证据](public-r1b.review.md)互链；总决定29。
+本规格定义R1b目标，已获甲方/Claude阶段批准并完成产品实现，本地及限定Linux CI验证已通过，等待Claude最终签收和协调者整合。[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)、[证据](public-r1b.review.md)互链；总决定29。
 
 ## 1. 范围与已交付基线
 
@@ -14,7 +14,7 @@ R1b只修浏览器实例归属、空专属profile、必要跨会话互斥及身�
 
 绑定至少含协调kind和唯一runid（step另保留batch/phase）、canonical工作区/data root、专属profile真实路径、generation、browser PID+稳定started、精确browser WebSocket端点及控制owner(pid+started)。首次创建空的非默认专属profile，之后同工作区持久复用并保留登录；generation只标识浏览器实例。每次启动使用动态端口0；只从本次启动profile的DevToolsActivePort读取完整WS路径，不扫描/探活固定端口。拒绝过期/损坏/软链/越界记录，不覆盖不明文件，不按端口kill。
 
-S1证据按二进制/模式分别记录（见[证据](public-r1b.review.md)），不能把headless Chromium外推为系统Google Chrome有头模式；其他平台待验证。系统Google Chrome155有头、无enable-automation的macOS26.5.1探针已通过；该环境不要求强制lsof。必需证据组合为：本profile的端点记录＋精确WS实例＋OS进程PID/started及profile启动参数＋连接后的SystemInfo.getProcessInfo browser PID核验。GUID仅防实例串接，CDP自报不是恶意同用户进程认证；不宣称抵御完全控制本用户文件/进程的攻击者。若锁定MCP0.0.83/Python Playwright1.56.0不支持这些能力，报告具体限制，不能退HTTP裸端口；探针成功才去除lsof强制条件。
+S1证据按二进制/模式分别记录（见[证据](public-r1b.review.md)），不能把headless Chromium外推为系统Google Chrome有头模式；Linux限定CI实证见下文；未列平台待验证。系统Google Chrome155有头、无enable-automation的macOS26.5.1探针已通过；该环境不要求强制lsof。必需证据组合为：本profile的端点记录＋精确WS实例＋OS进程PID/started及profile启动参数＋连接后的SystemInfo.getProcessInfo browser PID核验。GUID仅防实例串接，CDP自报不是恶意同用户进程认证；不宣称抵御完全控制本用户文件/进程的攻击者。若锁定MCP0.0.83/Python Playwright1.56.0不支持这些能力，报告具体限制，不能退HTTP裸端口；探针成功才去除lsof强制条件。
 
 不要求CDP Browser.getBrowserCommandLine，不为归属验证引入--enable-automation。OS命令行中的专属profile仍是必需核验项。不承诺navigator.webdriver为false或规避网站检测；动态端口/自动化本身的可观察行为如实说明。
 
@@ -63,12 +63,12 @@ R4：legacy applicant跨目录资料权限、每用户授权/账号凭据；R5�
 
 启动保留原vendor非归属行为参数：window-size=1024,768、profile-directory=Default、disable-session-crashed-bubble、disable-features=InfiniteSessionRestore,PasswordManagerOnboarding、hide-crash-restore-bubble、noerrdialogs、password-store=basic、disable-save-password-bubble、disable-popup-blocking、use-fake-device-for-media-stream、use-fake-ui-for-media-stream、deny-permission-prompts、disable-notifications。它们是兼容性参数，不是秘密/权限硬边界；现代Chrome是否忽略某flag不能仅凭启动成功断言。保留新专属profile/动态端口0/精确WS及既有后台联网削减参数，不恢复复制资料/固定端口/端口kill，不加enable-automation。
 
-平台证据只覆盖实测二进制/模式：Linux CI拟验证Playwright Chromium无头，不代表发行版系统Chrome包装脚本（尤其fork包装）已支持；无法核对PID的启动仍失败关闭。
+平台证据只覆盖实测二进制/模式：HEAD429a735的CI39930613311已实证GitHub托管ubuntu-latest、锁定Playwright1.56.0/Chromium141 build1194无头加精确路径CI userns许可，不代表发行版系统Chrome包装脚本（尤其fork包装）已支持；无法核对PID的启动仍失败关闭。
 
-## Linux启动失败的窄诊断
+## Linux启动诊断及限定CI实证
 
 CI在真实pytest前单独用产品最终launch_arguments、Playwright实际二进制、全新临时空profile和about:blank做启动诊断。限时并有界捕获stderr与退出码、端点是否出现；只读记录OS及相关userns/AppArmor状态，不修改系统策略。诊断报告不是测试通过证明，即使未启动也继续原有pytest，以保留真实失败；不跳测试、不用fake替代。诊断仅scripts/CI入口，不让普通产品浏览器输出潜在私人stderr。没有根因日志前不判定sandbox、AppArmor或依赖问题；不加入no-sandbox或全局sysctl变更。若确证环境策略原因，另按证据评估短生命周期CI中精确二进制路径许可，不扩展产品权限/支持范围。
 
-已取得CI39928342793的No usable sandbox/-6及AppArmor限制证据。CI准备步骤只在GitHub托管Linux临时runner对锁定Playwright实际Chromium的精确规范路径安装本次run专属userns AppArmor规则；拒绝通配符、转义、变量插值、符号链接及非预期目录。配置root:root/0644，单profile加载，always清理且核对内容，不改全局sysctl、不加no-sandbox、不向公众安装器传播。Chrome自身sandbox保持开启；按路径许可不证明同权限文件防篡改。新CI需取得启动诊断、完整pytest、产品fixture和制品证据，未绿之前Linux仍待验证。
+已取得CI39928342793的No usable sandbox/-6及AppArmor限制证据。CI准备步骤只在GitHub托管Linux临时runner对锁定Playwright实际Chromium的精确规范路径安装本次run专属userns AppArmor规则；拒绝通配符、转义、变量插值、符号链接及非预期目录。配置root:root/0644，单profile加载，always清理且核对内容，不改全局sysctl、不加no-sandbox、不向公众安装器传播。Chrome自身sandbox保持开启；按路径许可不证明同权限文件防篡改。HEAD429a735b4a2cfe0c02d1c2ca6da589c5662be2a9的CI39930613311已完整通过：1747 tests/126.40s，0失败/错误/skip；启动诊断、产品fixture、wheel/sdist、editable及策略移除均执行通过。该限定范围已有实证，R1b仍待最终签收/整合；不等于公众Linux安装支持。
 
 Linux产品fixture另读取本专属浏览器的chrome://sandbox内部状态，结合SystemInfo的browser/renderer PID、/proc父链、renderer Seccomp=2和NoNewPrivs=1验证；namespace inode可读时一并记录，不可读则明确标注原因。必须按chrome://sandbox实际逐行tab分隔字段验证Layer 1 Sandbox=Namespace、PID namespaces=Yes、Network namespaces=Yes、Seccomp-BPF sandbox=Yes；各字段唯一，缺失/No/重复（包括一致重复）或非精确值均拒绝，并保留进程组合证据，不把单一Seccomp值/端点出现当全部sandbox证明。缺证据使fixture失败，结果在断言前输出便于诊断；只访问内部页/合成本地页。此证据仅锁定CI构建headless，公众Linux安装仍由R8验证。

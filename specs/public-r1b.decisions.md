@@ -51,3 +51,7 @@ CI39928342793明确stderr FATAL No usable sandbox、exit=-6，AppArmor enabled=Y
 ## 9：按CI实际sandbox表格解析（总决定29）
 
 CI39929809213实际页面为Layer 1 Sandbox=Namespace、PID namespaces=Yes、Network namespaces=Yes、Seccomp-BPF sandbox=Yes，不存在假想的Namespace sandbox Yes标签。改为逐行tab字段精确解析，拒绝缺失/No/重复矛盾或一致重复，保留所有renderer父链/Seccomp2/NoNewPrivs1验证。实际三个renderer的pid/user namespace均与browser不同，留真实合成CI fixture，不当作完整CI通过。此次install/endpoint/remove及1720测试已成功，产品探针因解析错误失败，下游制品未执行；修复只在探针/测试/文档，不改产品或降低sandbox要求。
+
+## 最终CI证据更新（总决定29）
+
+甲方确认429a735的CI39930613311全绿（1747/126.40s），product fixture/package/editable/remove均完成。现行规格更新为限定Linux CI已实证而非待验证；仅hosted ubuntu-latest+锁定Chromium build1194 headless+精确路径userns许可，不外推公众安装。历史失败决定/报告保留，R4/R8缺口及公众不通过不变；文档交付后待Claude最终签收与整合。

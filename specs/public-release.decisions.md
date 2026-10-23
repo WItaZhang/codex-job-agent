@@ -7,3 +7,7 @@
 ## R1b CI实际sandbox状态（总决定29，模块决定9）
 
 P5更新CI39929809213：精确许可安装/移除、端点及1720测试通过，已取得三个renderer实际隔离状态；产品探针失败于假想页面字段，后续制品未执行，仍不宣称完整LinuxCI或公众安装支持通过。
+
+## 最终CI证据更新（总决定29）
+
+甲方确认429a735的CI39930613311全绿（1747/126.40s），product fixture/package/editable/remove均完成。现行规格更新为限定Linux CI已实证而非待验证；仅hosted ubuntu-latest+锁定Chromium build1194 headless+精确路径userns许可，不外推公众安装。历史失败决定/报告保留，R4/R8缺口及公众不通过不变；文档交付后待Claude最终签收与整合。

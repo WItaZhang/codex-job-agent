@@ -1,6 +1,6 @@
 # R1b 实现与验证交审记录
 
-状态：产品实现及本地验证完成，待独立代码复核和协调者推送后的Linux CI；不推送/合并，不宣称公众发布验收完成。总决定29；[规格](public-r1b.md)、[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)。以下早期阶段记录为历史证据，其“未实现/等待批准”只描述当时状态，最终结果见末尾。
+状态：产品实现、本地验证及429a735限定Linux CI39930613311已通过，等待Claude最终签收与协调者整合；不推送/合并，不宣称公众发布验收完成。总决定29；[规格](public-r1b.md)、[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)。以下早期阶段记录为历史证据，其“未实现/等待批准”只描述当时状态，最终结果见末尾。
 
 ## 基线和历史
 
@@ -130,3 +130,11 @@ ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防
 日志中的合成实测JSON完整保存于[回归fixture](../tests/fixtures/synthetic_linux_sandbox_ci39929809213.json)，附来源/非完整CI成功说明，不编造字段。先红28项中2 failed/26 passed：真实样例被误拒，假想Namespace sandbox Yes被误接受。改为逐行tab字段精确值校验，所有表格字段重复均拒绝，所需四字段缺失/No/重复矛盾（两种顺序）/一致重复/假想标签或含额外文字都拒绝。renderer归属、Seccomp2、NNP1要求不变，foreign/空列表/任一进程状态不符均拒绝。namespace inode实际值仍留证，不冒充跨平台保证。
 
 本次仅探针、回归fixture/测试及规格决定；没有产品实现或CI权限变化。相关57项定向通过，src/tests与探针ruff check/format及diff检查通过。未重复无关全套/本地浏览器或制品；远端上述1720结果仅属于旧HEAD，修复后的完整CI和产品fixture及下游制品仍待协调者push。公众发布不通过、Linux公众安装归R8和R4凭据缺口保持。
+
+## 最终远端证据及文档交付
+
+精确代码HEAD **429a735b4a2cfe0c02d1c2ca6da589c5662be2a9**；远端 [CI39930613311](https://github.com/WItaZhang/codex-job-agent/actions/runs/39930613311) **全绿，1747 passed/126.40s，0 failed/0 errors/0 skipped**。甲方提供完整日志`/tmp/public-r1b-ci-39930613311.log`，本会话核对汇总及后续步骤：启动诊断、产品fixture、package（direct wheel/sdist roundtrip）、editable四种资源变更及remove均执行通过。不是把之前pytest后未执行的步骤算通过。
+
+Linux实证范围仅GitHub托管ubuntu-latest、Playwright1.56.0锁定Chromium141.0.7390.37 build1194、headless、精确实际二进制路径CI userns许可。产品sandbox页Layer1=Namespace、PID/Network namespaces=Yes、Seccomp-BPF=Yes；全部三个renderer归属成立、Seccomp2/NNP1，pid及user namespace inode与browser不同，组合无矛盾。其余产品精确WS/PID验证、disconnect、重启及MCP对照同一步通过。策略remove明确只移除本run profile。没有产品no-sandbox/全局sysctl放宽；不能外推为Linux系统Chrome包装脚本、公众Linux干净安装或Windows支持。R4凭据/授权、R8安装签名及用户系统策略仍未完成，公众发布结论不变。
+
+本次只更新文档，不改产品/测试/CI。吸收本地main85305234c57713efe8738abf0dd64aed220aef3f，`git merge main`为Already up to date，无冲突。按甲方要求本地重跑四项；本次文档差异不再触发同代码远端复跑，协调者审文档后由合并主线CI覆盖。Claude最终签收另行进行，R1b仍待整合。

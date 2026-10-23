@@ -6,11 +6,11 @@
 
 产品是可安装、本地优先、面向非开发者的完整求职工具。用户通过界面完成初始化、资料/意图输入、岗位发现、反馈/校准、清单、求职信、填表、本人确认或按个人授权提交、停止/恢复、历史、备份与升级。保持 A/B 数据边界和真实性；不以让用户自行写 YAML、使用 MCP/CLI 或全手工填表替代完整目标。公众运行不得依赖用户手装/登录 Claude Code；R2b 负责可替换真实 provider、确定性受限编排和用户可见服务配置。不默认建设多租户云。
 
-**当前结论：公众发布不通过。** R1安装资源/工作区/制品CI已在main8530523交付，UI、每用户授权、可靠提交执行边界与最终安装发行仍有阻塞。以下状态基于main8530523及R1b当前交审证据；R1b尚未整合，Linux启动修复仍待新CI验证；“待验证”不等于通过，也不把尚未发现的风险写成已发生事故。
+**当前结论：公众发布不通过。** R1安装资源/工作区/制品CI已在main8530523交付，UI、每用户授权、可靠提交执行边界与最终安装发行仍有阻塞。以下状态基于main8530523及R1b当前交审证据；R1b尚未整合，HEAD429a735的Linux限定CI39930613311已完整通过；“待验证”不等于通过，也不把尚未发现的风险写成已发生事故。
 
 §9 的每周 200、成功率、每日人工时间和连续两周业务目标原样保留；met 只表示数量/成功率。工程回归通过、完整 B 业务验收、公众发布验收分别记录。公众发布必须有全部阻塞项完成的证据、完整用户旅程及独立验收，不能仅凭本地测试数量、制品可构建或个人委托通过。真实业务指标未证实不得宣传为已达标；本规格不授权真实投递或采集个人数据。
 
-首发支持平台须在制品验收后声明版本/架构范围；现有证据包括本机macOS、已有Python的隔离venv和R1 Linux CI制品验证；R1b macOS浏览器实证另见P5。没有最终安装器的干净OS验证，不能称为非开发者安装通过。可以分平台发布，不能因缩小平台范围删掉完整业务功能。UI 采用桌面壳或本地服务的具体技术选型留在 R2；若使用本地 HTTP，也要验证仅本机访问、请求来源和会话隔离。
+首发支持平台须在制品验收后声明版本/架构范围；现有证据包括本机macOS、已有Python的隔离venv和R1 Linux CI制品验证；R1b macOS浏览器及限定Linux CI实证另见P5。没有最终安装器的干净OS验证，不能称为非开发者安装通过。可以分平台发布，不能因缩小平台范围删掉完整业务功能。UI 采用桌面壳或本地服务的具体技术选型留在 R2；若使用本地 HTTP，也要验证仅本机访问、请求来源和会话隔离。
 
 ## 2. 用户和执行边界
 
@@ -42,12 +42,12 @@
 | P2 数据工作区隔离 | R1 workspace canonical路径、独立目录/标记、symlink与legacy降级拒绝已实现 | main8530523 / CI39919661089；双cwd/工作区、损坏/覆盖、直接入口local_only及资源回归通过 | 原cwd分散缺陷已修复；每用户生效授权/凭据与legacy资料引用标记workspace边界仍归R4 | 保留目录隔离回归；R4实际授权和资料访问范围对抗 |
 | P3 非开发者完整旅程 | tools.py 领域闭环、skills、JSON/CSV/报告；MCP stdio，无公众 UI | test_tools full_day、apply/form_fill fake 测试 | 安装器、向导、资料编辑、可访问界面和完整 A/B 旅程缺失，阻塞 | 无开发环境账户安装；非开发者按界面完成旅程、错误引导和键盘操作，R2/R3/R8，真实验收待验证 |
 | P4 每用户授权 | 决定25个人默认、宿主配置；tools.start_applying 等没有独立公众用户授权检查 | test_delegated_authority 验证个人规则，不验证陌生用户许可；wheel 不携带宿主配置 | 直接服务端调用缺少个人授权边界，X7 明确缺陷，阻塞 | 未授权、撤销、跨工作区、过期/伪造声明、直接调用底层均拒绝副作用；R4/R5 |
-| P5 浏览器/凭据隔离 | R1b分支BrowserBinding、专属持久profile、精确WS/PID-start-profile/run身份和所有调用者迁移已实现，未合main | 4fe693 T1/F1独立窄复核通过；macOS系统Chrome155有头/Chromium141无头产品fixture通过；Linux CI39929809213精确userns许可后启动及1720测试通过，产品sandbox实际字段已取得但探针解析失败，下游制品未执行；解析修复待完整新CI | 原X3修复在待交审分支；Linux仅锁定构建headless+CI专用许可待实证，不能宣称系统Chrome或公众Linux安装支持；凭据R4未完成，邮箱X6仍待核实 | R1b新CI须全绿及sandbox组合证据；R4专属登录/secret生命周期/账号绑定；R8用户安装策略，Windows未验证 |
+| P5 浏览器/凭据隔离 | R1b分支BrowserBinding、专属持久profile、精确WS/PID-start-profile/run身份和所有调用者迁移已实现，未合main | 4fe693 T1/F1独立窄复核通过；macOS系统Chrome155有头/Chromium141无头产品fixture通过；429a735的CI39930613311全绿：1747/126.40s、0失败/错误/skip；产品fixture含sandbox组合/inode、package/editable/remove均通过 | 原X3修复在待最终签收/整合分支；Linux已实证仅GitHub托管ubuntu-latest、Playwright1.56.0/Chromium141 build1194 headless+精确路径CI userns许可，不能宣称系统Chrome或公众Linux安装支持；凭据R4未完成，邮箱X6仍待核实 | R1b限定CI已满足全绿及sandbox组合证据，待最终签收/整合；R4专属登录/secret生命周期/账号绑定；R8用户安装策略，Windows未验证 |
 | P6 保护公司的最终提交 | applicant.careful、store 观察名单快照、tools 逐路重查；configs form_fill 禁止列表仍允许 evaluate/click/key | test_delegated_authority 路由/中途新增/未知/留底/解除回归 | X5 提交旁路能力存在；真实最终动作无硬边界，launch blocker | 直接入口/旧批次/恢复重试/中途变化；click、Enter、requestSubmit、fetch/XHR、beacon、新窗及邮件对抗，未授权接收数0；本人有效确认后仅目标动作，另需E2/E3实际ATS许可环境证据，R5 |
 | P7 故障恢复/重复风险 | store 尝试记录、tools held/resuming/recovery/watchdog；合并岗位去重 | test_stuck_run、test_gate_handoff、test_slice5b 多场景合成回归 | 公众恢复界面/跨工作区、真实结果不明待验证；N2 锁争用可整步安全失败是已知缺陷 | 收到请求后掉线不重投、不冒称成功，停止/崩溃/锁争用/双恢复可诊断，R6 |
 | P8 外发、日志、凭据 | recording redaction、runner restricted/strict-mcp、个人路径约束 | test_slice6 和 form_fill 脱敏合成覆盖 | 全链路日志/支持包秘密扫描、删除、外发告知和凭据隔离待验证，阻塞 | 合成秘密跨日志/报告零泄露，按范围外发/撤销及安全诊断；R4/R6/R8 |
 | P9 升级备份卸载 | store 局部 ALTER，README git pull/uv sync | 无完整跨版本恢复证据 | 应用数据/保护审计/资料/状态的一致备份和迁移回滚缺失，阻塞 | 升级中断/磁盘满/损坏备份拒绝，恢复后保护不丢、不重投；卸载数据选择，R7 |
-| P10 CI/制品/支持平台 | 已有只读权限内部制品CI、四项及wheel/sdist/editable验证，不发布安装制品 | R1 main8530523 CI39919661089全通过（1627/122.49s、0skip）；R1b新Linux浏览器验证仍待通过 | CI不再缺失；最终安装器、签名/校验、干净OS及升级卸载/平台矩阵仍缺，公众发布阻塞 | 保留内部CI；R8干净OS安装/更新/卸载、签名/版本来源及故障演练；不增加用户下载渠道 |
+| P10 CI/制品/支持平台 | 已有只读权限内部制品CI、四项及wheel/sdist/editable验证，不发布安装制品 | R1 main8530523 CI39919661089全通过（1627/122.49s、0skip）；R1b HEAD429a735 CI39930613311限定Linux浏览器/制品验证已通过（1747/126.40s） | CI不再缺失；最终安装器、签名/校验、干净OS及升级卸载/平台矩阵仍缺，公众发布阻塞 | 保留内部CI；R8干净OS安装/更新/卸载、签名/版本来源及故障演练；不增加用户下载渠道 |
 | P11 依赖/许可/告知 | LICENSE、NOTICE.md、pyproject AGPL；固定 npm 顶层版本，运行依赖 npx/Chrome/Claude | wheel 含许可，但未完成分发组件逐项核验 | npm/浏览器/宿主及服务条款、隐私/风险/费用告知待验证，发行阻塞；非违法结论 | 实际发行依赖清单、源码获取/许可入口、外发/提交不可撤回说明，R8；必要专业审查不冒充工程测试 |
 | P13 宿主无关运行时 | llm.py make_client 仅fake/host，其余NotImplementedError；skills靠宿主，apply_bridge启动claude | 领域fake回归存在，没有公众真实provider及独立编排实证 | 运行时明确缺失，不能要求非开发者安装Claude Code，发布阻塞 | 无Claude机器fake完整旅程+真实provider契约/受控合成实证、缺钥匙与注入拒绝，R2b/R4/R5 |
 | P12 业务与上市表述 | apply_fill.week_stats assessment、spec §9/§10.96 | 统计8新增回归，main已含决定26 | 人工时间及连续两周仍未证实；L1舍入/L2未结束周提示列后续 | 界面不以 met 显示整体达标；真实 B 证据独立记录，R3/R8，不伪造采集 |
