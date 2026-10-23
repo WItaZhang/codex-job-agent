@@ -127,6 +127,11 @@ def main():
                             "navigation": "about:blank",
                             "business_tools_called": False,
                             "windows_verified": False,
+                            "compatibility_flags_effects_verified": False,
+                            "compatibility_flags_note": (
+                                "Launch arguments and product identity flow verified; "
+                                "per-flag popup/password/permission effects and ignored flags not determined."
+                            ),
                         },
                         indent=2,
                     )

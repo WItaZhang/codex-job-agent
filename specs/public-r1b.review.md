@@ -84,3 +84,13 @@ ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防
 **尚待证据**：本机两种模式都是macOS，不能充当Linux包装PID/进程身份实证。相同产品fixture已加入Linux CI，需协调者推送新HEAD后取得结果；Windows未验证，管理入口明确拒绝。精确WS及CDP自报不是恶意同用户进程认证；浏览器后台网络削减参数不是网络沙箱。本片不构成保护公司最终提交技术边界或公众上市验收，R4授权/资料边界、R5可靠提交、R6其他恢复、R8发行仍保留。未访问真实招聘/邮箱，未读取个人profile.json/.env或复制日常Chrome。
 
 本地实现阶段完成，交独立复核；不推送/合并。预计后续为一次独立代码复核及一次远端CI窗口，耗时取决于队列和发现的问题，不作上线承诺。
+
+## 141c582 最终评审 T1/F1 修复（决定29）
+
+甲方采纳 `/tmp/public-r1b-final-review.md`：主体已核实，T1超时分类/F1兼容参数为阻塞。本轮先改规格/决定，再新增有效行为红：3 failed/5 passed（一次普通socket超时误判身份失败、两种模式缺兼容参数）；修复后93项相关回归通过。扩展握手/PID/targets读取超时、恢复清计数、超时期间PID/端点/generation/run变化、拒绝/非101/断开、connect/verify失败关闭及参数正反契约。扩展帧断开补测先1 failed，发现struct.error被监视器吞掉；改为明确身份失败后16项通过。未放宽业务断言；旧报告文案改为只报告超时，不再推测崩溃或关闭。首次ruff发现socket.timeout别名规则，改成等价TimeoutError并移除未用import，复验通过。
+
+最终参数的macOS系统Chrome155有头与Chromium141无头产品fixture均通过，更新同名JSON；Python/MCP正确错误GUID、断开客户端不关浏览器、同profile重启新generation全部保持。恢复的每个flag均列入参数契约，未逐项验证现代Chrome是否忽略flag或实际提示行为，因此不宣称密码/权限隔离保证，也不宣称webdriver=false。Linux仅待新HEAD的Playwright Chromium无头CI，系统Chrome发行版包装脚本不在已验证范围；Windows不变。旧CI39926377064由协调者跟踪，本会话未重跑/推送。
+
+本轮第一套1703 passed/80.28s；在其运行期间新增扩展帧断开回归及异常分类，所以还需最终整套覆盖该新增项，结果在下方另记。制品首次wheel/sdist往返通过，同样在最终代码上复验。记录文档的第一次Python追加命令遇到UTF-8解析错误，未写入文件；改用直接文本追加，不影响产品测试。
+
+最终四项全部通过：uv sync --locked、ruff check src tests、ruff format --check src tests；pytest **1704 passed in 78.83s，无失败/skip**。最终代码的 direct wheel / sdist→wheel再次通过，安装MCP47工具、full/scheduled、资源闭包/cwd独立及local_only拒绝保持。产品探针脚本另经ruff check/format通过；仅增加JSON限制说明，不改变已执行的fixture逻辑。没有改资源构建机制，本轮未重复无关editable变更探针，上一轮通过证据保留。交协调者安排Claude T1/F1窄复核与新HEAD CI；本会话不推送/合并。

@@ -11,6 +11,7 @@ import re
 import signal
 import socket
 import sqlite3
+import struct
 import subprocess
 import sys
 import time
@@ -26,6 +27,10 @@ from .domain import InvariantError
 
 class BrowserIdentityLost(InvariantError):
     pass
+
+
+class BrowserProbeTimeout(watchdog.ChromeDown):
+    """An unanswered metadata probe; never evidence granting control."""
 
 
 @dataclass(frozen=True)
@@ -109,6 +114,13 @@ def validate_owner(binding, *, expected):
         raise BrowserIdentityLost("Browser control owner changed")
     if not binding.run_id or (row.get("kind"), row.get("run_id")) != (binding.kind, binding.run_id):
         raise BrowserIdentityLost("Browser execution identity changed")
+    validate_generation(binding, expected=expected)
+    if not watchdog.alive(binding.owner_pid, binding.owner_started):
+        raise BrowserIdentityLost("Browser control owner is no longer alive")
+
+
+def validate_generation(binding, *, expected):
+    _workspace(binding, expected)
     current = _read_record(Path(expected[0]) / "browser/session.json")
     if current is None or (current.generation, current.pid, current.started) != (
         binding.generation,
@@ -116,8 +128,6 @@ def validate_owner(binding, *, expected):
         binding.started,
     ):
         raise BrowserIdentityLost("Browser session generation changed")
-    if not watchdog.alive(binding.owner_pid, binding.owner_started):
-        raise BrowserIdentityLost("Browser control owner is no longer alive")
 
 
 def activity(db_path):
@@ -173,12 +183,18 @@ def rpc(binding, method, timeout=3.0, *, expected):
                 result = request(2, method) if method != "SystemInfo.getProcessInfo" else info
                 validate_os(binding, expected=expected)
                 return result
-    except (OSError, ValueError, KeyError, ConnectionError) as error:
+    except TimeoutError as error:
+        validate_os(binding, expected=expected)
+        raise BrowserProbeTimeout("Exact browser metadata probe timed out") from error
+    except (OSError, ValueError, KeyError, ConnectionError, struct.error) as error:
         raise BrowserIdentityLost(f"Exact browser connection lost: {error}") from error
 
 
 def verify(binding, *, expected):
-    rpc(binding, "SystemInfo.getProcessInfo", expected=expected)
+    try:
+        rpc(binding, "SystemInfo.getProcessInfo", expected=expected)
+    except BrowserProbeTimeout as error:
+        raise BrowserIdentityLost("Cannot grant browser control: identity verification timed out") from error
 
 
 def targets(binding, *, expected):
@@ -397,6 +413,19 @@ def launch_arguments(executable, profile, *, headless=False):
         "--remote-debugging-port=0",
         "--remote-debugging-address=127.0.0.1",
         f"--user-data-dir={profile}",
+        "--profile-directory=Default",
+        "--window-size=1024,768",
+        "--disable-session-crashed-bubble",
+        "--disable-features=InfiniteSessionRestore,PasswordManagerOnboarding",
+        "--hide-crash-restore-bubble",
+        "--noerrdialogs",
+        "--password-store=basic",
+        "--disable-save-password-bubble",
+        "--disable-popup-blocking",
+        "--use-fake-device-for-media-stream",
+        "--use-fake-ui-for-media-stream",
+        "--deny-permission-prompts",
+        "--disable-notifications",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-background-networking",

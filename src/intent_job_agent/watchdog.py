@@ -498,16 +498,17 @@ class ChromeWatch:
 
     def __init__(
         self,
-        port: int,
+        binding,
         blocked_origins,
         targets=cdp_targets,
         clock=time.time,
         own=(),
         down_after: int = 3,
-        expected=None,
+        *,
+        expected,
         control=False,
     ):
-        self.binding, self._targets, self._clock = port, targets, clock
+        self.binding, self._targets, self._clock = binding, targets, clock
         self.expected = expected
         self.control = control
         self.own = {tab_id for tab_id in own if tab_id}
@@ -532,12 +533,21 @@ class ChromeWatch:
                 if self._targets is cdp_targets
                 else self._targets(self.binding)
             )
-        except ChromeDown:
-            if self.before is not None:
-                self.misses += 1
-                self.first_miss = self.first_miss if self.misses > 1 else now
-                if self.misses >= self.down_after and self.down is None:
-                    self.down = self.first_miss
+        except ChromeDown as error:
+            from . import browser_session as bs
+
+            if isinstance(error, bs.BrowserProbeTimeout):
+                # A timeout says nothing about identity. Recheck independent evidence,
+                # including changes made while the blocking socket operation waited.
+                if self.control:
+                    bs.validate_owner(self.binding, expected=self.expected)
+                else:
+                    bs.validate_os(self.binding, expected=self.expected)
+                    bs.validate_generation(self.binding, expected=self.expected)
+            self.misses += 1
+            self.first_miss = self.first_miss if self.misses > 1 else now
+            if self.misses >= self.down_after and self.down is None:
+                self.down = self.first_miss
             return
         except Exception as error:
             from .browser_session import BrowserIdentityLost
@@ -566,12 +576,12 @@ class ChromeWatch:
         browser answered with) do not explain, one short line each, naming only sites (spec section 10 item 114):
         Chrome stopped answering; more new tabs without an opener than the agent opened; more of them closed than the
         agent closed; tabs open before the run closed or moved; a tab of the run on a site the agent cannot open."""
-        if self.before is None:
-            return []
         lines = []
         if self.down is not None:  # then the tabs are compared all the same (review #8)
-            line = f"投递用的 Chrome 从 {_clock(self.down)} 起连不上了（被关掉、崩溃，或调试端口没有响应）"
-            lines.append(line + (f"，{_clock(self.up)} 又连上了" if self.up is not None else ""))
+            line = f"投递用的 Chrome 从 {_clock(self.down)} 起探测连续超时（未据此判定浏览器关闭或身份失效）"
+            lines.append(line + (f"，{_clock(self.up)} 又响应了" if self.up is not None else ""))
+        if self.before is None:
+            return lines
         actions = [_tab_action(event) for event in events]
         visited = {_host((e.get("input") or {}).get("url", "")) for e in events} | {_host(url) for url in pages}
         new = {tab_id: entry for tab_id, entry in self.tabs.items() if tab_id not in self.before}

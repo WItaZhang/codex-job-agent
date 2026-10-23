@@ -739,7 +739,9 @@ def scripted(*lists):
 
 def watched(*lists, events=(), pages=(), clock=None, own=()):
     options = {"clock": clock} if clock else {}
-    watch = watchdog.ChromeWatch(9222, BLOCKED, targets=scripted(*lists), own=own, **options)
+    watch = watchdog.ChromeWatch(
+        9222, BLOCKED, targets=scripted(*lists), own=own, expected=("/synthetic", "/synthetic/db"), **options
+    )
     for _ in lists:
         watch.check()
     return watch.report(list(events), list(pages))
@@ -775,7 +777,7 @@ def test_chrome_going_away_is_reported_with_the_time():  # S20; three misses in 
     job = tab("N1", "https://jobs.acme.test/1")
     lines = watched([T1, T2], [T1, T2, job], None, None, None, events=[NEW, NAV], clock=lambda: next(times))
     clock = watchdog._clock(1002.0)
-    assert lines == [f"投递用的 Chrome 从 {clock} 起连不上了（被关掉、崩溃，或调试端口没有响应）"]
+    assert lines == [f"投递用的 Chrome 从 {clock} 起探测连续超时（未据此判定浏览器关闭或身份失效）"]
 
 
 def test_one_slow_answer_is_not_chrome_going_away_and_hides_nothing():  # review #8
@@ -794,7 +796,7 @@ def test_after_chrome_answers_again_the_tabs_are_still_compared():  # review #8
     )
     down, back = watchdog._clock(1001.0), watchdog._clock(1004.0)
     assert lines == [
-        f"投递用的 Chrome 从 {down} 起连不上了（被关掉、崩溃，或调试端口没有响应），{back} 又连上了",
+        f"投递用的 Chrome 从 {down} 起探测连续超时（未据此判定浏览器关闭或身份失效），{back} 又响应了",
         "运行中多了 1 个不是 agent 开的新标签页（sports.example.test）",
     ]
 

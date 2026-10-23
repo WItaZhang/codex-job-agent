@@ -56,3 +56,11 @@ held记录保存browser generation。同一已验证generation沿用id、再唯�
 事件屏障：四种失效、各与stop竞争、真崩溃held、成功不回退、正常停止无虚假attempt；旧/不同generation恢复重开；fake9222、PID复用、陈旧DevToolsActivePort、重连换主、同工作区双会话/独立填表竞争、foreign kill0、日常profile读取/复制函数调用即失败；全库非vendor裸端口生产调用迁移清单及回归。真实探针验证准确WS、MCP、PID/start/profile，仅空本地页。
 
 R4：legacy applicant跨目录资料权限、每用户授权/账号凭据；R5：保护公司可靠提交；R6：其余恢复/重复风险闭环及N2；R8：独立平台安装、升级发行、许可/完整公众验收。R1通过及本片探针通过均不能宣称公众自动业务可发布。
+
+## 最终评审 T1/F1 行为约定
+
+普通探测的 socket 超时单独分类：超时后重核 OS/PID/start/profile/端点，ChromeWatch 再核当前 generation，控制中的监视还核 kind/runid/owner；任一变化优先身份失效。身份仍一致时按 down_after 连续计数，达到 N 只报告普通探测超时，不推断关闭/崩溃、不升级身份失效；成功响应清连续计数。连接拒绝/断开、非101或错误GUID、PID/profile/run/generation不符立即身份失效。超时不能成为新控制授权：ensure/verify/connect 仍失败关闭，不返回未经验证的连接。
+
+启动保留原vendor非归属行为参数：window-size=1024,768、profile-directory=Default、disable-session-crashed-bubble、disable-features=InfiniteSessionRestore,PasswordManagerOnboarding、hide-crash-restore-bubble、noerrdialogs、password-store=basic、disable-save-password-bubble、disable-popup-blocking、use-fake-device-for-media-stream、use-fake-ui-for-media-stream、deny-permission-prompts、disable-notifications。它们是兼容性参数，不是秘密/权限硬边界；现代Chrome是否忽略某flag不能仅凭启动成功断言。保留新专属profile/动态端口0/精确WS及既有后台联网削减参数，不恢复复制资料/固定端口/端口kill，不加enable-automation。
+
+平台证据只覆盖实测二进制/模式：Linux CI拟验证Playwright Chromium无头，不代表发行版系统Chrome包装脚本（尤其fork包装）已支持；无法核对PID的启动仍失败关闭。

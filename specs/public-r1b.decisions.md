@@ -29,3 +29,7 @@ B：独立填表不依赖领域数据，唯一例外是apply_running协调行与
 ## 5：实现验收与平台证据（总决定29）
 
 b2716f5阶段批准后已完成实现，系统Chrome有头与Playwright Chromium headless均采用产品launch_arguments的本地合成fixture；配置显式选择binary/headless、锁与启动上限，默认系统Chrome有头，任何配置都不豁免local_only或身份验证。LinuxCI增同一产品fixture命令且不上传制品；Windows未验证拒绝管理。固定Node顶层包和实际传递依赖分别记录，无升级。公开产品的授权/可靠提交仍归R4/R5，R1b不解除公众外发门槛。
+
+## 6：最终评审T1/F1（总决定29）
+
+甲方采纳141c582最终评审两项：普通超时与明确身份失败分型；在重核身份一致后ChromeWatch连续N次只报告超时，恢复清计数，ensure/connect仍不建立未验证授权。恢复规格所列vendor非归属参数，不恢复复制/固定端口/kill，不声称参数具有权限隔离保证。最终参数重跑两种产品fixture并更新证据，Linux支持仅按实际CI模式记录。决定5的“产品参数”证据只描述旧参数，最新兼容参数以本决定和新fixture为准。
