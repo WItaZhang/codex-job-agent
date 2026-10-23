@@ -43,3 +43,9 @@
 依据`/tmp/public-r2b-plan-review.md`及甲方裁决采纳B1/C2/C1，模块决定5与原规格同时修改。B1采用强于评审“预留钩子”的要求：S1必须有逐节点白名单、不可省略的确定性过滤/打码、未声明类别拒绝和实际序列化哨兵反证，模型无个人文件读取能力；求职信不扩大既有材料授权。C2明确外挂测试注入合成生效意图/资料，R2草稿不自动生效；增加显式proposal/选择/decide、搜索候选选择及公众/个人授权来源区别。C1修U01并保留真实键盘/读屏要求。
 
 同时纳入budget_exhausted、v1协议版本及兼容、测试确认/sink不进入公众包（fake provider仍允许）、独立runtime配置节及协调者合并顺序。仅原四文档改动，未实现、未改skills/根规格/R2，S1仍待修订复审后正式授权。本次按甲方要求固定修订HEAD后跑四项，具体结果随后追加；不将旧规格片未跑pytest记录改写成当时通过。
+
+### 修订固定HEAD四项与后续配置建议
+
+修订固定HEAD `d7a622e73a26f088a57b89f846bdde850ba4cdd8` 四项全通过：uv sync --locked、ruff check src tests、ruff format --check src tests（98文件）、pytest **1753 passed/89.47s**。日志分别为`/tmp/public-r2b-plan-four-{sync,lint,format,full}.log`。四文档本地链接与diff检查通过；这是main23aa66b代码基线的验证，不含未合R2的1906项，也不证明新R2b契约已实现。后续仅本证据文档提交，不改实现，无需为同代码重复全套。
+
+甲方补充`/tmp/public-r2b-s1-config-review.md`仅作未来S1参考，不授权代码改动：独立runtime节，旧workspace缺节用包内默认资源唯一源，不回落legacy llm凭据；不碰R2 setup_drafts。实施前明确部分覆盖/嵌套合并语义并测试，禁止浅合并丢默认；避免config→runtime.config→config循环依赖，类型放置以实际依赖图验证。零重试等合法预算按语义允许0，不采纳机械所有字段正数的建议。合并顺序由协调者负责，不能承诺放在不同代码位置就一定无git冲突；必须实际集成验证。新字段对旧版读取的影响留R7兼容记录，不在此片实施迁移。S1具体范围仍待修订复审后正式授权。
