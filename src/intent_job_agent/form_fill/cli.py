@@ -102,7 +102,14 @@ class Sheet:
 def load_sheet(data_dir: Path, settings: Settings) -> Sheet:
     """answers.yaml checked and resolved as for a run, masked like the saved pages, and the redactor built from
     profile.json. Errors are masked too: a contact value written into answers.yaml by mistake is never echoed."""
+    if settings.execution_mode == "local_only":
+        from ..workspace import _inside, validate_applicant
+
+        root = Path(data_dir).resolve()
+        _inside(root, str(root / settings.apply.applicant_dir / applicant_files.FILE))
     applicant = applicant_files.load(Path(data_dir), settings.apply.applicant_dir)
+    if settings.execution_mode == "local_only":
+        validate_applicant(root, applicant)
     fields = profile_field_paths(applicant.profile)
     profile = json.loads(applicant.profile.read_text(encoding="utf-8"))
     redactor, old = Redactor.from_profile(profile), Redactor.from_profile(profile, legacy=True)
@@ -185,10 +192,17 @@ def main(argv=None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     report = commands.add_parser("report", help="check a saved run again and write its reports (no browser)")
     report.add_argument("run_id")
-    report.add_argument("--config", default="configs/default.yaml")
+    paths = report.add_mutually_exclusive_group()
+    paths.add_argument("--config")
+    paths.add_argument("--workspace")
     report.add_argument("--data-dir", help="defaults to storage.data_dir of the config")
     args = parser.parse_args(argv)
-    settings = Settings.load(args.config)
+    from ..workspace import resolve_settings
+
+    try:
+        settings = resolve_settings(config=args.config, workspace=args.workspace)
+    except (InvariantError, OSError, ValueError) as error:
+        parser.exit(2, f"{error}\n")
     data_dir = Path(args.data_dir or settings.storage.data_dir)
     try:
         summary = run_report(args.run_id, data_dir, settings)

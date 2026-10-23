@@ -10,7 +10,7 @@ from intent_job_agent.form_fill import cli, readback
 from intent_job_agent.form_fill.models import AnswerEntry, JobReport
 from intent_job_agent.form_fill.redact import Redactor
 
-from .conftest import settings
+from .conftest import ROOT, settings
 from .test_form_fill_runner import ANSWERS, CHECKLIST, RELOCATION
 from .test_slice6 import write_applicant
 
@@ -82,13 +82,13 @@ def test_report_rechecks_a_saved_run(data):
 
 
 def test_main_prints_the_summary_path(data, capsys):
-    assert cli.main(["report", RUN, "--data-dir", str(data)]) == 0
+    assert cli.main(["report", RUN, "--data-dir", str(data), "--config", str(ROOT / "configs/default.yaml")]) == 0
     assert str(data / "form-fill/runs" / RUN / "summary.md") in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("run", ["20990101-000000-none", "../applicant", "a/b"])
 def test_an_unknown_or_unsafe_run_is_refused(data, capsys, run):
-    assert cli.main(["report", run, "--data-dir", str(data)]) == 2
+    assert cli.main(["report", run, "--data-dir", str(data), "--config", str(ROOT / "configs/default.yaml")]) == 2
     assert "run" in capsys.readouterr().err
 
 
@@ -219,7 +219,7 @@ def test_asks_are_masked_like_the_saved_questions(data):
 def test_answers_yaml_errors_are_masked(data, capsys):
     bad = ANSWERS + '  contact.mobile:\n    from_profile: "555-0100"\n'
     (data / "applicant/answers.yaml").write_text(bad, encoding="utf-8")
-    assert cli.main(["report", RUN, "--data-dir", str(data)]) == 2
+    assert cli.main(["report", RUN, "--data-dir", str(data), "--config", str(ROOT / "configs/default.yaml")]) == 2
     err = capsys.readouterr().err
     assert "555-0100" not in err and "[phone]" in err
 

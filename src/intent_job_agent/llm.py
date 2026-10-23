@@ -39,6 +39,8 @@ class NoModelClient:
 
 
 def make_client(settings: Settings) -> LLMClient:
+    if settings.llm.provider != "fake":
+        settings.require_external("model execution")
     if settings.llm.provider == "fake":
         return FakeClient()
     if settings.llm.provider == "host":

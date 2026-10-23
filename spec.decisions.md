@@ -444,6 +444,8 @@
 
 ## 决定 27（2026-10-22）：本地优先公众产品目标、独立验收与发布路线
 
+> 排期部分已被决定28「恢复竞态前移的交接顺序」取代；历史正文保留。
+
 用户持续目标是判断并交付能面向公众使用的产品。授权协调者确认：面向非开发者、有安装器/界面/引导的完整求职工具，不以 MCP/CLI 或个人脚本加测试绿替代；不默认建多租户云。本切片仅规格/说明，不实现、不访问申请网站、不读或复制个人资料。阶段和常规技术取舍由协调者推进，开发完成提交交独立评审，再由协调者整合。
 
 取代决定 14、15 的“先完成个人 B 再开展其它交付”优先级；保留 §9 的数量、成功率、人工时间及连续两周业务目标，决定 26 的 met 兼容意义也不变。安装、引导/必要冷启动、UI、个人授权、隔离、提交边界、恢复、升级备份、CI/发行进入公众路线；新来源、校准新规则、定时任务/硬约束体检、填表 2b/2c 仍冻结。真实验证缺证据的项目明确待验证，不以本次工程验收宣称 B 达标或上市。
@@ -470,3 +472,33 @@
 - L1：不读个人日志，不采用复核中未核实数字。tracked成本/usage/benchmark清单未见可公开基线，公众费用仍未知；未来若有可公开脱敏历史证据仅作非公众基线。
 
 R1增加确定性拒绝边界调整为3–4日，R2b为6–10日，R5增加证据工作调整为10–18日；全路线45–77有效工作日，不含许可/外部等待及真实业务观察。此轮只文档修订，保留71b0768的1561测试记录，按甲方决定只做后续文档一致性检查，交Claude复核B1–B3/M1–M3后再整合。
+
+## 决定 28（2026-10-22）：R1包外初始化、资源闭包与本地工作区
+
+> 排期部分已被决定28「恢复竞态前移的交接顺序」取代；历史正文保留。
+
+依据决定27已批准八组验收，实施计划见[public-r1.plan.md](specs/public-r1.plan.md)。新workspace仅初始化/本地读/合成测试；Settings携带local_only模式到直接Toolbox及真实适配入口，拒绝公开岗位抓取、模型外发、浏览器/npx、邮件和投递/恢复；不靠MCP隐藏或review_first，不设计consent系统。状态查询不得触发恢复杀进程或CDP，求职信PDF的Chrome副作用同样受限。显式旧config保留cwd语义，标记工作区不可经--config降级。
+
+构建选Hatchling显式资源映射，uv继续管理依赖；YAML与.claude/skills/cover-letter保留唯一源（含references），wheel包资源与sdist重建wheel均验收，无源码补路径。初始化幂等、无个人资料/意图/凭据/授权，错误不覆盖不回退。CI产物仅内部预发布，远端由协调者推送后验证。无真实网络业务/浏览器/投递，不读或复制个人数据；R1b仍下一独立片。
+
+决定28收敛：PUBLIC仓库不等于内部产物可发行；CI禁止upload-artifact/Release/Pages/PyPI，制品只留runner临时目录。显式config保留原路径上下文，标记工作区的非canonical或符号链接config/marker一律拒绝，不静默忽略参数。新workspace所有业务mutation（含release_careful_companies）仍拒绝。静态审阅的进程全局开关建议不采纳，使用逐Settings策略，真实sink零调用测试和legacy同进程对照验证隔离；raw无Settings的OS/vendor函数不宣称为Python沙箱。
+
+#### Decision 28 — accepted R1 boundary review refinements
+
+External legacy configurations cannot address marked workspace storage (resolved data and DB paths, including ancestors); direct Settings entrypoints enforce the same rule. Keep decision25 local protection snapshot writes as an explicit local-read audit exception without granting authorization or changing feedback. Empty setup reads expose missing-file/uninitialized state without private-file or program inspection. Editable resource refresh uses uv cache inputs and disposable-source change probes; installed wheels never fall back to source. Explicit offline --data-dir overrides remain intentional and outside default workspace isolation. These refine R1 without opening business mutations or adding a consent system.
+
+#### 决定28：最终验收CI静态契约补充
+
+> 排期部分已被决定28「恢复竞态前移的交接顺序」取代；历史正文保留。
+
+甲方采纳独立评审F1–F5通过，但要求R1-07禁止发行自动校验：用最小workflow静态回归限定contents:read和已批准的CI动作/验证命令；合成上传/发布步骤必须被拒，R1-08的CI pytest自动执行该护栏。不扩展CI安全框架，不声称能抵御恶意代码或任意shell。原CI排队期间不启动重复run，协调者后续推送本提交验证。显式legacy资料引用marked workspace（评审R-1）归后续R4数据权限，不放入R1b。正常停止被恢复误判held的已证实竞态归R6候选修复，保留原失败关联未完全证实的限制与分析证据。
+
+#### 决定28：恢复竞态前移的交接顺序
+
+> 已被决定28「远端CI实际失败后的本片修复」取代；历史正文保留。
+
+甲方接受既有竞态的确定性复现与证据限制，不阻塞R1。R1整合后独立开R1s最小稳定性切片，只修正常收尾/恢复误判held，再立即R1b；从R6提前此项，不提前全套R6、不混入当前R1。本决定取代决定27/28中“R1b紧随R1”及将此缺陷暂留R6的排期部分，其他边界不变。关键机制和三组对照见[仓库证据](specs/public-stop-race.evidence.md)，首次全套失败记录不删。当前仅文档交接，未授权本会话自行启动下一片。
+
+#### 决定28：远端CI实际失败后的本片修复
+
+CI 39916656829实际failure（1585 passed/21 skipped/3 failed），取代此前queued认知及R1整合后另修R1s的安排。甲方要求R1建立通过的CI：本片修停止/恢复竞态、Linux非ASCII进程识别，补Playwright1.56.0对应Chromium及系统依赖；只供既有本地合成网页测试，不开放新workspace真实业务。ps使用受控子进程locale，保留C时间/UTC和Unicode，不改用户系统locale、不跳过原断言。不重跑旧run碰运气；新HEAD完整验证及制品探针后交Claude复核，协调者推送跑新CI，通过后整合再立即R1b；全套R6仍后续。

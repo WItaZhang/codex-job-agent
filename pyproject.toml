@@ -17,11 +17,12 @@ dependencies = [
 ]
 
 [project.scripts]
+intent-job-agent = "intent_job_agent.workspace:main"
 intent-job-agent-mcp = "intent_job_agent.mcp_server:main"
 
 [build-system]
-requires = ["uv_build>=0.11.32,<0.12.0"]
-build-backend = "uv_build"
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
@@ -38,3 +39,17 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/intent_job_agent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"configs/default.yaml" = "intent_job_agent_data/default.yaml"
+".claude/skills/cover-letter" = "intent_job_agent_data/cover-letter"
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "tests", "configs/default.yaml", ".claude/skills/cover-letter", "pyproject.toml", "uv.lock", "LICENSE", "NOTICE.md", "README.md", "scripts"]
+
+[tool.uv]
+# These replace uv defaults; preserve project/build inputs and track the unique resource sources.
+cache-keys = [{ file = "pyproject.toml" }, { file = "setup.py" }, { file = "setup.cfg" }, { dir = "src" }, { file = "configs/default.yaml" }, { file = ".claude/skills/cover-letter/**/*" }]

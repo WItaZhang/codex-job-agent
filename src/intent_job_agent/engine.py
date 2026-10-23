@@ -35,6 +35,11 @@ class Engine:
     def __init__(self, store: Store, settings: Settings, llm: LLMClient):
         self.store = store
         self.settings = settings
+        if settings.execution_mode == "local_only":
+            from .llm import FakeClient, NoModelClient
+
+            if type(llm) not in (FakeClient, NoModelClient):
+                settings.require_external("model client")
         self.llm = llm
 
     def _ctx(self) -> Context:

@@ -1356,3 +1356,106 @@ def test_starting_a_step_of_the_batch_drops_the_interrupted_notice(box):  # revi
     assert "退回待投" in status["notice"]
     again.start_applying(batch["batch_id"], status["next"]["summary"])
     assert "interrupted" not in again.store.apply_batch(batch["batch_id"])
+
+
+@pytest.mark.parametrize("result", ["stopped", "applied"])
+def test_normal_finish_between_sync_and_recovery_is_not_a_crash(box, monkeypatch, result):
+    """Synthetic deterministic regression for remote CI39916656829; no agent or browser."""
+    batch = batch_of(box)
+    box.start_applying(batch["batch_id"], batch["summary"])
+    rest = box.apply_status()["next"]
+    entered, go, finishing, close, done = [threading.Event() for _ in range(5)]
+    original_end = box._ended
+
+    def runner(spec):
+        assert spec.job_id == "j05"
+        stop = watchdog.LIVE.begin(spec.job_id, spec.mode)
+        entered.set()
+        assert go.wait(5)
+        assert watchdog.LIVE.launch(stop) is False
+        watchdog.LIVE.end(stop)
+        # 'applied' exercises already-persisted success preservation, not an actual submission.
+        return apply_bridge.ApplyOutcome("pending" if result == "stopped" else "applied", result, [])
+
+    def delayed_end(run, writer):
+        finishing.set()
+        assert close.wait(5)
+        try:
+            original_end(run, writer)
+        finally:
+            done.set()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("normal local finish must not trigger crash recovery/kill")
+
+    monkeypatch.setattr(box, "_ended", delayed_end)
+    monkeypatch.setattr(watchdog, "kill_agent", forbidden)
+    monkeypatch.setattr(watchdog, "kill_orphans", forbidden)
+    box.apply_runner, box.apply_in_background = runner, True
+    box.start_applying(rest["batch_id"], rest["summary"])
+    assert entered.wait(5)
+    assert box.stop_applying()["current"]["ended_now"]
+    original_sync = box._sync_apply_results
+
+    def interleave():
+        original_sync()  # observes running; the DB activity remains
+        go.set()
+        assert finishing.wait(5)  # now stopped, but normal _ended has not closed activity
+
+    monkeypatch.setattr(box, "_sync_apply_results", interleave)
+    try:
+        assert box.apply_status()["status"] == "stopped"
+        applications = box.store.applications()
+        assert applications["j05"]["status"] == ("pending" if result == "stopped" else "applied")
+        assert applications["j06"]["status"] == "pending"
+        attempts = [a for a in box.store.apply_attempts() if a["job_id"] == "j05"]
+        assert [a["reason"] for a in attempts] == ([] if result == "stopped" else ["applied"])
+    finally:
+        close.set()
+        assert done.wait(5)
+    original_sync()
+    original_sync()  # normal close is idempotent
+    assert box.store.activity() is None
+
+
+def test_linux_ps_uses_supported_utf8_without_changing_time_identity(monkeypatch):
+    """Linux procps requires a complete locale name; Darwin's UTF-8 alias is not portable."""
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("LC_ALL", "synthetic-invalid-locale")
+    monkeypatch.setenv("TZ", "Pacific/Honolulu")
+    before = dict(os.environ)
+
+    def ps(*args, **kwargs):
+        env = kwargs["env"]
+        assert env["LC_CTYPE"] == "C.UTF-8"
+        assert env["LC_TIME"] == "C" and env["TZ"] == "UTC" and "LC_ALL" not in env
+        line = f"{os.getpid()} 1 1 Fri Oct 23 07:17:49 2026 synthetic /求职/config\n"
+        return subprocess.CompletedProcess(args, 0, line.encode("utf-8"))
+
+    monkeypatch.setattr(subprocess, "run", ps)
+    proc = watchdog.processes()[os.getpid()]
+    assert proc.command == "synthetic /求职/config"
+    assert proc.started == "Fri Oct 23 07:17:49 2026"
+    assert dict(os.environ) == before
+
+
+def test_unicode_process_command_and_identity_survive_hostile_locales(monkeypatch):
+    """Real local sleeping process only; runs on Linux CI and macOS without changing system locale."""
+    mark = "--synthetic-process-path=/求职/申请资料"
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", mark])
+    try:
+        first = watchdog.processes()[proc.pid]
+        assert mark in first.command
+        for locale in ("C", "C.UTF-8", "synthetic-invalid-locale"):
+            monkeypatch.setenv("LANG", locale)
+            monkeypatch.setenv("LC_ALL", locale)
+            monkeypatch.setenv("TZ", "Pacific/Honolulu")
+            observed = watchdog.processes()[proc.pid]
+            assert observed.command == first.command
+            assert observed.started == first.started
+            assert watchdog.alive(proc.pid, first.started)
+    finally:
+        proc.kill()
+        proc.wait()
