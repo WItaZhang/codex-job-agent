@@ -19,7 +19,7 @@ from intent_job_agent.form_fill.models import JobReport, PageState
 from intent_job_agent.store import Store
 from intent_job_agent.tools import Toolbox
 
-from .apply_fakes import FormFillFake
+from .apply_fakes import FormFillFake, synthetic_binding
 from .conftest import BASE_INTENT, BASE_VOCAB, settings
 from .test_slice6 import SECRETS, FakeRunner, add_jobs, fake_claude, write_applicant, write_letters
 
@@ -343,7 +343,7 @@ def test_the_apply_agent_runs_without_the_solving_key(box, tmp_path, monkeypatch
     write_letters(box, [job])
     fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_ENV)
     apply_bridge.run_application(
-        box._apply_spec(job, "submit"), box.data_dir, box.settings, box._applicant().profile, 9
+        box._apply_spec(job, "submit"), box.data_dir, box.settings, box._applicant().profile, synthetic_binding()
     )
     seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
     assert seen["key"] is None
@@ -371,7 +371,7 @@ def test_the_form_fill_run_starts_gmail_in_its_own_config(box, tmp_path, monkeyp
         box.data_dir,
         box.settings,
         box._applicant().profile,
-        9,
+        synthetic_binding(),
         log_path=tmp_path / "runs" / "r1" / job / "log.jsonl",
         extra_servers={"checkpoint": entry},
     )
@@ -387,27 +387,31 @@ def test_the_chrome_runner_keeps_the_tab_of_a_held_job(box, monkeypatch):  # G5
     before = [{"id": "T1", "type": "page", "url": "https://news.example.test/"}]
     after = [*before, {"id": "N7", "type": "page", "url": "https://careers.zetapay.test/login"}]
     lists = iter([before, after])
-    monkeypatch.setattr(apply_bridge.readback, "list_targets", lambda port: next(lists))
-    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda port: True)
+    monkeypatch.setattr(apply_bridge.readback, "list_targets", lambda binding, **kwargs: next(lists))
+    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda binding, **kwargs: True)
     held_run = apply_bridge.ApplyOutcome("held", "login_issue", ["sign in"], last_url="https://careers.zetapay.test/")
     monkeypatch.setattr(apply_bridge, "run_application", lambda *a, **k: held_run)
     runner = apply_bridge.ChromeRunner(box.data_dir, box.settings, box._applicant().profile)
-    runner.port = 9222
+    runner.binding = synthetic_binding()
     outcome = runner(box._apply_spec(job, "submit"))
-    assert outcome.tab == {"id": "N7", "url": "https://careers.zetapay.test/login"}
+    assert outcome.tab == {"id": "N7", "url": "https://careers.zetapay.test/login", "generation": "synthetic"}
 
 
 def test_the_chrome_runner_finds_a_resumed_tab_by_its_id(box, monkeypatch):  # G5, G14
     (job,) = add_jobs(box, ["Acme"])
     write_letters(box, [job])
     tabs = [{"id": "N7", "type": "page", "url": "https://careers.zetapay.test/apply/review"}]
-    monkeypatch.setattr(apply_bridge.readback, "list_targets", lambda port: tabs)
-    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda port: True)
+    monkeypatch.setattr(apply_bridge.readback, "list_targets", lambda binding, **kwargs: tabs)
+    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda binding, **kwargs: True)
     monkeypatch.setattr(apply_bridge, "run_application", lambda *a, **k: apply_bridge.ApplyOutcome("held", "captcha"))
     runner = apply_bridge.ChromeRunner(box.data_dir, box.settings, box._applicant().profile)
-    runner.port = 9222
+    runner.binding = synthetic_binding()
     spec = dataclasses.replace(box._apply_spec(job, "submit"), resume=True, resume_tab="N7", resume_url=tabs[0]["url"])
-    assert runner(spec).tab == {"id": "N7", "url": "https://careers.zetapay.test/apply/review"}
+    assert runner(spec).tab == {
+        "id": "N7",
+        "url": "https://careers.zetapay.test/apply/review",
+        "generation": "synthetic",
+    }
 
 
 def test_the_last_address_the_agent_opened_is_kept():
@@ -448,7 +452,7 @@ def test_a_form_fill_job_hands_over_the_tab_it_was_read_in(box):  # G5, form-fil
 
 DAY = "2026-10-14"
 COMPANIES = ["Co0", "Co1", "Co2", "Co3", "Co4", "Stripe, Inc.", "Acme", "Beta"]  # 1-5 review, 6 careful, 7-8 submit
-ACME_TAB = {"id": "N7", "url": "https://careers.acme.test/login"}
+ACME_TAB = {"id": "N7", "url": "https://careers.acme.test/login", "generation": "synthetic"}
 
 
 class GateRunner(FakeRunner):

@@ -5,7 +5,6 @@ Nothing here navigates, clicks, types or closes a tab. Everything is generic: no
 
 import json
 import re
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -14,7 +13,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from .. import watchdog
+from .. import browser_session, watchdog
 from ..domain import InvariantError
 from .columns import mask_snapshot
 from .compare import HIDDEN as HIDDEN_TEXT
@@ -923,13 +922,9 @@ def find_job_tab(before: list[dict], after: list[dict], last_url: str | None) ->
     return winners[0] if best >= 1 and len(winners) == 1 else None
 
 
-def list_targets(port: int) -> list[dict]:
-    """CDP targets of the applying Chrome."""
-    with urllib.request.urlopen(f"http://127.0.0.1:{int(port)}/json/list", timeout=3) as resp:
-        data = json.load(resp)
-    if not isinstance(data, list):
-        raise ReadbackError("unexpected /json/list response")
-    return data
+def list_targets(binding, *, expected) -> list[dict]:
+    """Metadata only, from the verified exact browser endpoint."""
+    return browser_session.targets(binding, expected=expected)
 
 
 # --- reading the live page --------------------------------------------------------------------------------------
@@ -1040,11 +1035,11 @@ def _masked_screenshot(page, redactor: Redactor, hide=()) -> tuple[bytes | None,
         return None, type(exc).__name__
 
 
-def _read_live(holder: dict, port: int, target: dict, redactor: Redactor, sheet) -> tuple:
+def _read_live(holder: dict, binding, target: dict, redactor: Redactor, sheet, expected) -> tuple:
     # Leaving the context stops the Playwright driver, which drops the CDP connection. browser.close() is never
     # called, so the applying Chrome and its tabs stay as they are.
     with _playwright(holder) as p:
-        browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+        browser = browser_session.connect(p, binding, expected=expected)
         page = _find_page(browser, target)
         raw = _extract(page)
         snap = snapshot(raw, tab=str(target.get("id", "")), read_at=datetime.now().isoformat(timespec="seconds"))
@@ -1083,20 +1078,20 @@ def _playwright(holder: dict):
         yield p
 
 
-def _glance(holder: dict, port: int, target: dict) -> dict:
+def _glance(holder: dict, binding, target: dict, expected) -> dict:
     with _playwright(holder) as p:  # leaving it drops the CDP connection; the browser and its tabs stay
-        return _extract(_find_page(p.chromium.connect_over_cdp(f"http://127.0.0.1:{int(port)}"), target))
+        return _extract(_find_page(browser_session.connect(p, binding, expected=expected), target))
 
 
-def tab_state(port: int, target: dict, seconds: float = READ_SECONDS) -> PageState:
+def tab_state(binding, target: dict, seconds: float = READ_SECONDS, *, expected) -> PageState:
     """Where the page in one open tab stands, read only and without saving anything: /apply glances at a held job's
     tab before resuming it, and a page saying the application was received means the user submitted it there (spec
     section 10 item 100). At most `seconds`."""
-    return page_state(_bounded(_glance, seconds, int(port), target))
+    return page_state(_bounded(_glance, seconds, binding, target, expected))
 
 
 def read_final_page(
-    port: int, target: dict, out_dir: Path, redactor: Redactor, sheet=None, seconds: float = READ_SECONDS
+    binding, target: dict, out_dir: Path, redactor: Redactor, sheet=None, seconds: float = READ_SECONDS, *, expected
 ) -> FinalPage:
     """Read the job tab as it is and save page.html, screenshot.png and readback.json, masked by value and by column
     (`sheet`: the answer sheet, for the fields matched to a contact entry; spec 5.6); contact values in the
@@ -1104,7 +1099,7 @@ def read_final_page(
     says so. Disconnects without closing the browser or the page. At most `seconds` (spec section 10 item 108)."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    raw, snap, html, shot, why = _bounded(_read_live, seconds, int(port), target, redactor, sheet or {})
+    raw, snap, html, shot, why = _bounded(_read_live, seconds, binding, target, redactor, sheet or {}, expected)
     state = page_state(raw)
     fields = tuple(f.model_copy(update={"id": f"p1.{n}"}) for n, f in enumerate(snap.fields, start=1))
     fields = tuple(f.model_copy(update={"section": "", "occurrence": 1}) for f in fields)

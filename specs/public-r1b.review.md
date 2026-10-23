@@ -50,3 +50,11 @@ B已同步form-fill原文及R1b规格/计划/决定：不依赖领域数据，�
 ### 基础早审E1–E7修正
 
 ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防Store构造；E2固定owned profile保留登录，实例generation更新；E3唯一协调runid；E4调用方expected root/db；E5原子replace/坏记录不覆盖；E6配置有界锁且锁内重读owner；E7白名单且同连接SystemInfo→Target。管理反例先6 failed（行为/缺接口），完成后基础+管理14 passed，包括合成cookie重启保留、跨workspace、旧run、真实文件锁超时、原子写和fake连接。仍需全消费者贯穿与最终真实fixture，未把基础通过等同片验收。
+
+### 消费者、协调和启动仲裁小步
+
+消费者8项行为红（HTTP重新发现/port-only checkpoint/MCP裸port）后统一绑定和独立expected root/db。四格8项行为红后通过，加4项真实线程启动/stop事件屏障；独立fill按kind/runid识别，running期间apply_status、正常收尾交错不kill，失联不写领域状态；同进程另一Toolbox也拒绝接管。只读SQLite显式closing，管理补活profile/损坏标记/缺目录/关闭PID复用测试。checkpoint身份失效Carry on反例先失败，再改STOP。
+
+迁移过程中首组消费者回归86 failed/116 passed/16 errors（整数fake和旧checkpoint schema等），后续逐项迁移，未放宽业务断言。整套首次15 failed/1658 passed/76.13s：尚未迁移的readback裸port测试、ChromeRunner测试接口、恢复fixture缺generation；随后针对消费者236 passed/31.40s、checkpoint36 passed/16.88s、剩余197 passed/14.33s。新旧generation另有明确回归，旧记录不得靠补默认generation接管。完整最终验证仍在后面记录。
+
+系统Chrome产品fixture已跑通：产品ensure/精确连接、metadata、readback、checkpoint、watchdog、Python/MCP错误GUID、disconnect后浏览器PID仍活、持久profile重启新generation。实际navigator.webdriver=true，未加enable-automation且不宣称规避检测；仅about:blank合成页面。最终平台/参数/Node依赖JSON随最终交付保存，LinuxCI尚待协调者推送。

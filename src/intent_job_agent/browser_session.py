@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -124,7 +124,7 @@ def activity(db_path):
     if not Path(db_path).is_file():
         raise BrowserIdentityLost("Browser control owner is missing")
     try:
-        with sqlite3.connect(Path(db_path).as_uri() + "?mode=ro", uri=True) as db:
+        with closing(sqlite3.connect(Path(db_path).as_uri() + "?mode=ro", uri=True)) as db:
             db.row_factory = sqlite3.Row
             row = db.execute("SELECT * FROM apply_running WHERE id=1").fetchone()
             return dict(row) if row else None
@@ -199,7 +199,10 @@ def targets(binding, *, expected):
 def connect(playwright, binding, *, expected):
     """A page-capable connection requires the current control owner, unlike metadata reads."""
     validate_owner(binding, expected=expected)
-    browser = playwright.chromium.connect_over_cdp(binding.endpoint, timeout=10000)
+    try:
+        browser = playwright.chromium.connect_over_cdp(binding.endpoint, timeout=10000)
+    except Exception as error:
+        raise BrowserIdentityLost("Exact browser connection failed") from error
     try:
         info = browser.new_browser_cdp_session().send("SystemInfo.getProcessInfo")
         if [int(p["id"]) for p in info["processInfo"] if p["type"] == "browser"] != [binding.pid]:
@@ -249,7 +252,8 @@ def _read_record(path):
         return BrowserBinding.load(json.loads(path.read_text()))
     except (OSError, ValueError, BrowserIdentityLost) as error:
         raise BrowserIdentityLost(
-            "Browser session record is damaged; preserve it and inspect this workspace's browser records before retrying"
+            "Browser session record is damaged; preserve it and inspect "
+            "this workspace's browser records before retrying"
         ) from error
 
 
@@ -337,7 +341,11 @@ def ensure(settings):
         _plain(active)
         active.unlink(missing_ok=True)  # only our proven-owned profile, with no live user
         proc = subprocess.Popen(
-            launch_arguments(get_chrome_path(), profile),
+            launch_arguments(
+                settings.apply.browser_executable or get_chrome_path(),
+                profile,
+                headless=settings.apply.browser_headless,
+            ),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,

@@ -12,10 +12,13 @@ from pathlib import Path
 
 import pytest
 
+from intent_job_agent import browser_session
 from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill import readback
 from intent_job_agent.form_fill.models import PageState, ReadField
 from intent_job_agent.form_fill.readback import find_job_tab, list_targets, normalize
+
+from .browser_fixture import finish_owned, start_owned
 
 PAGES = Path(__file__).resolve().parent / "fixtures/form_fill/pages"
 EMAIL = "sam.synthetic@example.test"
@@ -356,7 +359,7 @@ def test_extension_and_devtools_targets_are_ignored():
 # --- list_targets against a local stand-in for Chrome's /json/list ---------------------------------------------
 
 
-def test_list_targets_reads_json_list():
+def test_list_targets_refuses_foreign_json_list():
     targets = [tab("A", "https://synthetic.example.test/")]
 
     class Handler(BaseHTTPRequestHandler):
@@ -373,7 +376,8 @@ def test_list_targets_reads_json_list():
     server = HTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        assert list_targets(server.server_address[1]) == targets
+        with pytest.raises(browser_session.BrowserIdentityLost):
+            list_targets(server.server_address[1], expected=("/synthetic", "/synthetic/db"))
     finally:
         server.shutdown()
 
@@ -441,18 +445,18 @@ def fill_synthetic(pg):
 
 
 @pytest.fixture(scope="module")
-def chromium():
+def chromium(tmp_path_factory):
     sync_api = pytest.importorskip("playwright.sync_api")
-    port = free_port()
+    root = tmp_path_factory.mktemp("synthetic-readback")
     with sync_api.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch(headless=True, args=[f"--remote-debugging-port={port}"])
-        except Exception as exc:  # no browser installed
-            pytest.skip(f"Chromium not available: {exc}")
-        page = browser.new_page()
+        context, binding = start_owned(root, p)
+        browser = context.browser
+        page = context.new_page()
         page.route("**/*", lambda route: route.continue_() if route.request.url.startswith("data:") else route.abort())
-        yield browser, page, port
-        browser.close()
+        try:
+            yield browser, page, binding
+        finally:
+            finish_owned(binding)
 
 
 def free_port() -> int:
@@ -649,11 +653,11 @@ def test_read_final_page_over_cdp_leaves_the_page_open(chromium, tmp_path):
     pg.goto(url)
     fill_synthetic(pg)
     before_url = pg.url
-    targets = list_targets(port)
+    targets = list_targets(port, expected=(port.root, port.db_path))
     target = find_job_tab([], targets, before_url)
     assert target is not None
 
-    final = readback.read_final_page(port, target, tmp_path, StandInRedactor())
+    final = readback.read_final_page(port, target, tmp_path, StandInRedactor(), expected=(port.root, port.db_path))
 
     masked = StandInRedactor()  # the fields come back masked, as they are saved
     assert final.fields == tuple(f.model_copy(update={"value": masked.mask(f.value)}) for f in EXPECTED_BROWSER)
@@ -750,9 +754,9 @@ def test_the_saved_screenshot_has_the_contact_value_blacked_out(chromium, tmp_pa
     url = "data:text/html;base64," + base64.b64encode(FORM_HTML.encode()).decode()
     pg.goto(url)
     fill_synthetic(pg)
-    target = find_job_tab([], list_targets(port), pg.url)
+    target = find_job_tab([], list_targets(port, expected=(port.root, port.db_path)), pg.url)
 
-    readback.read_final_page(port, target, tmp_path, StandInRedactor())
+    readback.read_final_page(port, target, tmp_path, StandInRedactor(), expected=(port.root, port.db_path))
 
     png = (tmp_path / "screenshot.png").read_bytes()
     email, name = pg.locator("#em").bounding_box(), pg.locator("#fn").bounding_box()
@@ -801,9 +805,9 @@ def test_a_contact_value_in_a_modal_dialog_is_blacked_out(chromium, tmp_path):
     pg.goto("data:text/html;base64," + base64.b64encode(html.encode()).decode())
     pg.evaluate("document.getElementById('d').showModal(); window.scrollTo(0, 900)")
     box = pg.locator("#em").bounding_box()
-    target = find_job_tab([], list_targets(port), pg.url)
+    target = find_job_tab([], list_targets(port, expected=(port.root, port.db_path)), pg.url)
 
-    readback.read_final_page(port, target, tmp_path, StandInRedactor())
+    readback.read_final_page(port, target, tmp_path, StandInRedactor(), expected=(port.root, port.db_path))
 
     png = (tmp_path / "screenshot.png").read_bytes()
     assert black_rows(browser, png, int(box["width"] * 0.9)) >= int(box["height"] * 0.8)
@@ -816,9 +820,9 @@ def test_a_screenshot_that_cannot_be_blacked_out_is_not_saved(chromium, tmp_path
     html = f'<!doctype html><html><body><h1>Synthetic</h1><iframe srcdoc="{inner}"></iframe></body></html>'
     pg.goto("data:text/html;base64," + base64.b64encode(html.encode()).decode())
     pg.wait_for_function("document.querySelector('iframe').contentDocument.readyState === 'complete'")
-    target = find_job_tab([], list_targets(port), pg.url)
+    target = find_job_tab([], list_targets(port, expected=(port.root, port.db_path)), pg.url)
 
-    readback.read_final_page(port, target, tmp_path, StandInRedactor())
+    readback.read_final_page(port, target, tmp_path, StandInRedactor(), expected=(port.root, port.db_path))
 
     assert not (tmp_path / "screenshot.png").exists()
     note = (tmp_path / readback.SCREENSHOT_NOTE).read_text(encoding="utf-8")

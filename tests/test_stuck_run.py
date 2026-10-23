@@ -17,12 +17,13 @@ import pytest
 import yaml
 
 from intent_job_agent import apply_bridge, watchdog
+from intent_job_agent.browser_session import targets as _real_targets
 from intent_job_agent.domain import InvariantError
 from intent_job_agent.form_fill import report as form_fill_report
 from intent_job_agent.store import Store
 from intent_job_agent.tools import Toolbox
 
-from .apply_fakes import FormFillFake
+from .apply_fakes import FormFillFake, synthetic_binding
 from .conftest import BASE_INTENT, BASE_VOCAB, settings
 from .test_slice6 import FakeRunner, add_jobs, fake_claude, write_applicant, write_letters
 
@@ -82,7 +83,9 @@ def one_job(box, tmp_path, monkeypatch, script, mode="submit"):
 
 def run(box, spec, settings, **options):
     started = time.monotonic()
-    outcome = apply_bridge.run_application(spec, box.data_dir, settings, box._applicant().profile, 9, **options)
+    outcome = apply_bridge.run_application(
+        spec, box.data_dir, settings, box._applicant().profile, synthetic_binding(), **options
+    )
     return outcome, time.monotonic() - started
 
 
@@ -298,7 +301,14 @@ def test_a_read_back_that_never_answers_fails_in_time_and_ends_its_driver(tmp_pa
     monkeypatch.setattr(readback, "_read_live", hangs_until_its_driver_ends(started))
     took = time.monotonic()
     with pytest.raises(readback.ReadbackError, match="读标签页 1 秒没有回应"):
-        readback.read_final_page(9222, {"id": "T"}, tmp_path / "out", Blank(), seconds=1)
+        readback.read_final_page(
+            synthetic_binding(),
+            {"id": "T"},
+            tmp_path / "out",
+            Blank(),
+            seconds=1,
+            expected=("/synthetic", "/synthetic/state.db"),
+        )
     assert time.monotonic() - took < 5
     assert gone(started["driver"].pid)
 
@@ -310,7 +320,7 @@ def test_a_glance_that_never_answers_fails_in_time_and_ends_its_driver(monkeypat
     monkeypatch.setattr(readback, "_glance", hangs_until_its_driver_ends(started))
     took = time.monotonic()
     with pytest.raises(readback.ReadbackError, match="读标签页 1 秒没有回应"):
-        readback.tab_state(9222, {"id": "T"}, seconds=1)
+        readback.tab_state(synthetic_binding(), {"id": "T"}, seconds=1, expected=("/synthetic", "/synthetic/state.db"))
     assert time.monotonic() - took < 5
     assert gone(started["driver"].pid)
 
@@ -323,7 +333,9 @@ def test_a_driver_that_was_already_running_is_left_alone(monkeypatch):
         started = {}
         monkeypatch.setattr(readback, "_glance", hangs_until_its_driver_ends(started))
         with pytest.raises(readback.ReadbackError):
-            readback.tab_state(9222, {"id": "T"}, seconds=1)
+            readback.tab_state(
+                synthetic_binding(), {"id": "T"}, seconds=1, expected=("/synthetic", "/synthetic/state.db")
+            )
         assert other.poll() is None  # not this read's
     finally:
         other.kill()
@@ -338,7 +350,7 @@ def test_the_form_fill_runner_reads_with_the_configured_limit(box, monkeypatch, 
     monkeypatch.setattr(readback, "read_final_page", lambda *a, **k: seen.update(read=k["seconds"]))
     monkeypatch.setattr(readback, "tab_state", lambda *a, **k: seen.update(glance=k["seconds"]))
     runner = FormFillRunner(box.data_dir, box.settings, tmp_path / "profile.json")
-    runner.port = 9222
+    runner.binding = synthetic_binding()
     runner.read({"id": "T"}, tmp_path, Blank())
     runner.tab_state({"id": "T"})
     assert box.settings.apply.watchdog.read_seconds == 120 and seen == {"read": 120, "glance": 120}
@@ -862,26 +874,34 @@ class FakeCDPHandler(socketserver.StreamRequestHandler):
             self.wfile.write(f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
             return
         self.wfile.write(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
-        head = self.rfile.read(2)
-        length = head[1] & 0x7F
-        if length == 126:
-            length = int.from_bytes(self.rfile.read(2), "big")
-        mask = self.rfile.read(4)
-        asked = json.loads(bytes(b ^ mask[i % 4] for i, b in enumerate(self.rfile.read(length))))
-        tabs = json.loads(self.server.tabs_file.read_text(encoding="utf-8"))
-        infos = [
-            {
-                "targetId": t["id"],
-                "type": t["type"],
-                "url": t["url"],
-                **({"openerId": t["openerId"]} if t.get("openerId") else {}),
-            }
-            for t in tabs
-        ]
-        self.frame(json.dumps({"method": "Target.targetInfoChanged", "params": {}}).encode(), 0x1, True)
-        answer = json.dumps({"id": asked["id"], "result": {"targetInfos": infos}}).encode()
-        self.frame(answer[:10], 0x1, False)
-        self.frame(answer[10:], 0x0, True)
+        for _ in range(2):
+            head = self.rfile.read(2)
+            if not head:
+                return
+            length = head[1] & 0x7F
+            if length == 126:
+                length = int.from_bytes(self.rfile.read(2), "big")
+            mask = self.rfile.read(4)
+            asked = json.loads(bytes(b ^ mask[i % 4] for i, b in enumerate(self.rfile.read(length))))
+            tabs = json.loads(self.server.tabs_file.read_text(encoding="utf-8"))
+            infos = [
+                {
+                    "targetId": t["id"],
+                    "type": t["type"],
+                    "url": t["url"],
+                    **({"openerId": t["openerId"]} if t.get("openerId") else {}),
+                }
+                for t in tabs
+            ]
+            self.frame(json.dumps({"method": "Target.targetInfoChanged", "params": {}}).encode(), 0x1, True)
+            result = (
+                {"processInfo": [{"type": "browser", "id": 123}]}
+                if asked["method"] == "SystemInfo.getProcessInfo"
+                else {"targetInfos": infos}
+            )
+            answer = json.dumps({"id": asked["id"], "result": result}).encode()
+            self.frame(answer[:10], 0x1, False)
+            self.frame(answer[10:], 0x0, True)
 
     def frame(self, payload, opcode, fin):
         size = len(payload)
@@ -891,11 +911,23 @@ class FakeCDPHandler(socketserver.StreamRequestHandler):
 
 
 @pytest.fixture
-def cdp(tmp_path):
+def cdp(tmp_path, monkeypatch):
     tabs_file = tmp_path / "tabs.json"
     tabs_file.write_text(json.dumps([T1, T2]), encoding="utf-8")
     server = FakeCDP(tabs_file)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    from dataclasses import replace
+
+    from intent_job_agent import browser_session
+
+    server.binding = replace(
+        synthetic_binding(), endpoint=f"ws://127.0.0.1:{server.server_address[1]}/devtools/browser/fake"
+    )
+
+    def verify(binding, **kwargs):
+        assert binding == server.binding
+
+    monkeypatch.setattr(browser_session, "validate_os", verify)
     yield server
     server.shutdown()
     server.server_close()
@@ -903,13 +935,17 @@ def cdp(tmp_path):
 
 def test_the_cdp_client_lists_the_tabs_with_their_openers(cdp):
     cdp.tabs_file.write_text(json.dumps([T1, tab("P1", "https://x.test/", opener="T1")]), encoding="utf-8")
-    port = cdp.server_address[1]
-    assert watchdog.cdp_targets(port) == [{**T1, "openerId": None}, tab("P1", "https://x.test/", opener="T1")]
+    assert watchdog.cdp_targets(cdp.binding, expected=("/synthetic", "/synthetic/state.db")) == [
+        {**T1, "openerId": None, "title": "", "generation": "synthetic"},
+        {**tab("P1", "https://x.test/", opener="T1"), "title": "", "generation": "synthetic"},
+    ]
 
 
 def test_no_chrome_on_the_port_is_chrome_down():
-    with pytest.raises(watchdog.ChromeDown):
-        watchdog.cdp_targets(9)
+    from intent_job_agent.browser_session import BrowserIdentityLost
+
+    with pytest.raises(BrowserIdentityLost):
+        watchdog.cdp_targets(9, expected=("/synthetic", "/synthetic/state.db"))
 
 
 FAKE_USER_OPENS_A_TAB = (
@@ -933,9 +969,13 @@ say({"type": "result", "result": "RESULT:APPLIED"})
 
 def test_an_agent_run_reports_a_tab_someone_else_opened(box, tmp_path, monkeypatch, cdp):  # S18, end to end
     spec = one_job(box, tmp_path, monkeypatch, FAKE_USER_OPENS_A_TAB)
+    from intent_job_agent import browser_session
+
+    monkeypatch.setattr(browser_session, "validate_owner", lambda *a, **k: None)
+    monkeypatch.setattr(browser_session, "targets", _real_targets)
     monkeypatch.setenv("FAKE_TABS", str(cdp.tabs_file))
     outcome = apply_bridge.run_application(
-        spec, box.data_dir, quick(box.settings), box._applicant().profile, cdp.server_address[1]
+        spec, box.data_dir, quick(box.settings), box._applicant().profile, cdp.binding
     )
     assert outcome.status == "applied"
     assert outcome.chrome == ["运行中多了 1 个不是 agent 开的新标签页（news2.example.test）"]
@@ -1176,7 +1216,7 @@ def test_a_stop_before_an_auto_submit_agent_starts_keeps_it_from_starting(box, t
         def __call__(self, spec):
             if spec.job_id == "j05":
                 self.calls.append(spec)
-                return apply_bridge.run_application(spec, box.data_dir, fast, profile, 9)
+                return apply_bridge.run_application(spec, box.data_dir, fast, profile, synthetic_binding())
             return super().__call__(spec)
 
     box.apply_runner, box.apply_in_background = Runner(), True
@@ -1198,7 +1238,7 @@ def test_a_stop_during_the_glance_before_a_resume_keeps_the_job_held(box):  # re
     from intent_job_agent.form_fill.models import PageState
 
     batch = batch_of(box)
-    acme = {"id": "N7", "url": "https://careers.acme.test/login"}
+    acme = {"id": "N7", "url": "https://careers.acme.test/login", "generation": "synthetic"}
 
     class Holds(FakeRunner):
         def __call__(self, spec):
@@ -1239,7 +1279,9 @@ def test_a_read_that_runs_out_of_time_ends_its_own_driver_only(monkeypatch):  # 
     monkeypatch.setattr(readback, "_glance", hangs_until_its_driver_ends(started, other=True))
     try:
         with pytest.raises(readback.ReadbackError):
-            readback.tab_state(9222, {"id": "T"}, seconds=1)
+            readback.tab_state(
+                synthetic_binding(), {"id": "T"}, seconds=1, expected=("/synthetic", "/synthetic/state.db")
+            )
         assert gone(started["driver"].pid)
         assert started["other"].poll() is None  # another thread's driver (discover_jobs, say) goes on
     finally:
@@ -1318,7 +1360,7 @@ def test_a_step_records_which_agent_it_started(box, tmp_path, monkeypatch):  # r
         def __call__(self, spec):
             if spec.job_id == "j00":
                 self.calls.append(spec)
-                return apply_bridge.run_application(spec, box.data_dir, fast, profile, 9)
+                return apply_bridge.run_application(spec, box.data_dir, fast, profile, synthetic_binding())
             return super().__call__(spec)
 
     box.apply_runner, box.apply_in_background = Runner(), True

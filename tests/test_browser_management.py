@@ -7,8 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from intent_job_agent import browser_session as bs, watchdog
+from intent_job_agent import browser_session as bs
+from intent_job_agent import watchdog
 from intent_job_agent.vendor.applypilot import config
+
 from .conftest import settings
 
 
@@ -167,3 +169,61 @@ def test_session_write_uses_atomic_replace(managed, monkeypatch):
     monkeypatch.setattr(bs.os, "replace", replace)
     b = bs.ensure(cfg)
     assert seen[-1] == ("session.json", b.dump())
+
+
+def test_live_unknown_process_on_owned_profile_preserves_active_port(managed):
+    cfg, _, procs, launched = managed
+    b = bs.ensure(cfg)
+    from pathlib import Path
+
+    active = Path(b.profile) / "DevToolsActivePort"
+    before = active.read_bytes()
+    old = procs.pop(b.pid)
+    procs[55555] = watchdog.Proc(55555, 1, 55555, "another", old.command)
+    with pytest.raises(bs.BrowserIdentityLost, match="live process"):
+        bs.ensure(cfg)
+    assert active.read_bytes() == before and len(launched) == 1
+
+
+@pytest.mark.parametrize("damage", ["marker", "missing-profile"])
+def test_ownership_damage_does_not_modify_profile(managed, damage):
+    from pathlib import Path
+
+    cfg, _, procs, launched = managed
+    b = bs.ensure(cfg)
+    procs.pop(b.pid)
+    marker = Path(b.root) / "browser/owned-profile.json"
+    profile = Path(b.profile)
+    if damage == "marker":
+        marker.write_text('{"root":"foreign"}')
+    else:
+        profile.rename(profile.with_name("preserved-profile"))
+    before = {str(p): p.read_bytes() for p in Path(b.root).rglob("*") if p.is_file()}
+    with pytest.raises(bs.BrowserIdentityLost):
+        bs.ensure(cfg)
+    after = {str(p): p.read_bytes() for p in Path(b.root).rglob("*") if p.is_file()}
+    assert after == before and len(launched) == 1
+
+
+@pytest.mark.parametrize("reused", [False, True])
+def test_close_deadline_never_escalates_reused_pid(managed, monkeypatch, reused):
+    import signal
+
+    cfg, _, procs, _ = managed
+    b = bs.ensure(cfg)
+    calls = []
+
+    def kill(pid, sig):
+        calls.append((pid, sig))
+        if reused:
+            old = procs[pid]
+            procs[pid] = watchdog.Proc(pid, old.ppid, old.pgid, "reused", old.command)
+
+    monkeypatch.setattr(bs.os, "kill", kill)
+    if reused:
+        bs.close(b, expected=bs.scope(cfg), timeout=0.02)
+        assert calls == [(b.pid, signal.SIGTERM)]
+    else:
+        with pytest.raises(bs.BrowserIdentityLost, match="shutdown deadline"):
+            bs.close(b, expected=bs.scope(cfg), timeout=0.02)
+        assert calls == [(b.pid, signal.SIGTERM), (b.pid, signal.SIGKILL)]

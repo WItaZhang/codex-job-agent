@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from intent_job_agent import apply_bridge
+from intent_job_agent.browser_session import BrowserBinding
 from intent_job_agent.form_fill import readback
 from intent_job_agent.form_fill.models import PageState, ReadField
 
@@ -72,10 +73,10 @@ class FormFillFake:
         self.fills, self.reads = [], []
 
     def ensure_chrome(self) -> int:
-        return 9222
+        return synthetic_binding()
 
     def targets(self) -> list[dict]:
-        return [dict(tab) for tab in self.tabs]
+        return [{"generation": "synthetic", **tab} for tab in self.tabs]
 
     def open_tabs(self) -> list[dict] | None:
         return self.targets() if self.running else None
@@ -113,3 +114,17 @@ class FormFillFake:
         dumped = [field.model_dump(mode="json") for field in self.fields]
         (out_dir / "readback.json").write_text(json.dumps(redactor.mask_json(dumped)), encoding="utf-8")
         return readback.FinalPage(self.fields, self.states.get(target["id"].split("-", 1)[1], self.state))
+
+
+def synthetic_binding():
+    return BrowserBinding(
+        root="/synthetic",
+        profile="/synthetic/browser/profile",
+        generation="synthetic",
+        pid=123,
+        started="synthetic",
+        endpoint="ws://127.0.0.1:43123/devtools/browser/synthetic",
+        owner_pid=456,
+        owner_started="synthetic-owner",
+        db_path="/synthetic/state.db",
+    )

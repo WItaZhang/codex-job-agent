@@ -96,6 +96,8 @@ class ApplyWatchdog(_Section):
 
 
 class Apply(_Section):
+    browser_executable: str | None = None
+    browser_headless: bool = False
     browser_lock_seconds: float = Field(default=5, gt=0)
     browser_start_seconds: float = Field(default=20, gt=0)
     applicant_dir: str

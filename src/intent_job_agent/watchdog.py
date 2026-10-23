@@ -14,8 +14,6 @@
 Nothing here clicks, types or navigates: the Chrome is only listed.
 """
 
-import base64
-import json
 import os
 import re
 import select
@@ -26,7 +24,6 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -294,6 +291,16 @@ class Live:
             run.update(state="alive", last=time.time())
             return True
 
+    def start_process(self, stop, factory):
+        """Stop and Popen are serialized. A permitted launch cannot race a prelaunch stop."""
+        with self._lock:
+            run = self._run
+            if run is None or run["stop"] is not stop or stop.is_set():
+                return None
+            proc = factory()
+            run.update(state="alive", last=time.time(), pid=proc.pid)
+            return proc
+
     def touch(self) -> None:
         with self._lock:
             if self._run is not None and self._run["state"] == "alive":
@@ -367,7 +374,11 @@ def follow(
             for tick in ticks:
                 try:
                     tick()
-                except Exception:  # noqa: BLE001 - a look at the processes or the browser never stops the run
+                except Exception as error:  # identity failure has priority over user stop
+                    from .browser_session import BrowserIdentityLost
+
+                    if isinstance(error, BrowserIdentityLost):
+                        return "browser_identity_lost"
                     pass
             next_tick = time.monotonic() + interval
         if exited is None and proc.poll() is not None:
@@ -455,40 +466,11 @@ def _receive(reader) -> bytes:
             return b"".join(parts)
 
 
-def cdp_targets(port: int, timeout: float = 3.0) -> list[dict]:
-    """The applying Chrome's targets with their openers: CDP Target.getTargets over the browser's websocket (/json/list
-    has no openerId). A minimal RFC 6455 client - one request, its answer - that never attaches to a page. Raises
-    ChromeDown when nothing answers on the port."""
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{int(port)}/json/version", timeout=timeout) as resp:
-            path = urlsplit(json.load(resp)["webSocketDebuggerUrl"]).path
-    except OSError as error:
-        raise ChromeDown(str(error)) from None
-    with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout) as sock:
-        key = base64.b64encode(os.urandom(16)).decode()
-        sock.sendall(
-            f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{int(port)}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode()
-        )
-        reader = sock.makefile("rb")
-        if b" 101 " not in reader.readline():
-            raise ConnectionError("CDP refused the websocket")
-        while reader.readline() not in (b"\r\n", b""):
-            pass
-        _send(sock, json.dumps({"id": 1, "method": "Target.getTargets"}).encode())
-        while True:
-            message = json.loads(_receive(reader))
-            if message.get("id") == 1:
-                infos = (message.get("result") or {}).get("targetInfos") or []
-                return [
-                    {
-                        "id": i.get("targetId"),
-                        "type": i.get("type"),
-                        "url": i.get("url", ""),
-                        "openerId": i.get("openerId"),
-                    }
-                    for i in infos
-                ]
+def cdp_targets(binding, timeout: float = 3.0, *, expected) -> list[dict]:
+    """Verified browser metadata only: no HTTP rediscovery or page attachment."""
+    from . import browser_session
+
+    return browser_session.targets(binding, expected=expected)
 
 
 def _host(url: str) -> str:
@@ -514,8 +496,20 @@ class ChromeWatch:
     Chrome stopped answering. `report` tells what changed that the agent's own tool calls do not explain. `own`: tabs
     open before the run that the agent works in (a resumed job's held tab, spec section 10 item 100)."""
 
-    def __init__(self, port: int, blocked_origins, targets=cdp_targets, clock=time.time, own=(), down_after: int = 3):
-        self.port, self._targets, self._clock = port, targets, clock
+    def __init__(
+        self,
+        port: int,
+        blocked_origins,
+        targets=cdp_targets,
+        clock=time.time,
+        own=(),
+        down_after: int = 3,
+        expected=None,
+        control=False,
+    ):
+        self.binding, self._targets, self._clock = port, targets, clock
+        self.expected = expected
+        self.control = control
         self.own = {tab_id for tab_id in own if tab_id}
         self.down_after = down_after  # misses in a row before Chrome counts as gone: one slow answer is not (review #8)
         self.misses, self.first_miss = 0, None
@@ -529,7 +523,15 @@ class ChromeWatch:
     def check(self) -> None:
         now = self._clock()
         try:
-            listed = self._targets(self.port)
+            if self.control:
+                from .browser_session import validate_owner
+
+                validate_owner(self.binding, expected=self.expected)
+            listed = (
+                self._targets(self.binding, expected=self.expected)
+                if self._targets is cdp_targets
+                else self._targets(self.binding)
+            )
         except ChromeDown:
             if self.before is not None:
                 self.misses += 1
@@ -537,7 +539,11 @@ class ChromeWatch:
                 if self.misses >= self.down_after and self.down is None:
                     self.down = self.first_miss
             return
-        except Exception:  # noqa: BLE001 - a list that could not be read says nothing either way
+        except Exception as error:
+            from .browser_session import BrowserIdentityLost
+
+            if isinstance(error, BrowserIdentityLost):
+                raise
             return
         pages = [t for t in listed if t.get("type") == "page" and not str(t.get("url", "")).startswith(IGNORED)]
         self.misses = 0

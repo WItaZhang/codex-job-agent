@@ -35,6 +35,10 @@ duplicates:                       # 同一个岗位的几条（spec 4.9 第 6 �
   shingle_words: 5                # 正文切成连续几个词的片段（spec §10 第 71 条）
   overlap: 0.9                    # 较短一份的片段至少有多少出现在较长一份里，才算正文基本一样
 apply:                            # 投递（spec 4.10）
+  browser_executable: null         # null: system Google Chrome; explicit binary still must prove identity
+  browser_headless: false
+  browser_lock_seconds: 5
+  browser_start_seconds: 20
   applicant_dir: applicant        # 投递资料目录（applicant.yaml、profile.json、简历），位于 storage.data_dir 下
   batch_size: 30                  # 一批最多多少个岗位
   review_first: 0                 # 默认自主提交；非零仅用于显式只填不提交抽查
