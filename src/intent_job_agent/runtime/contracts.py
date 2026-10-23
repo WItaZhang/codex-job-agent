@@ -85,12 +85,16 @@ class Event(Model):
             raise ValueError("unexpected error")
         if self.status == "stopped" and self.cancel.local != "stopped":
             raise ValueError("inconsistent local stop")
+        if self.status in ("running", "completed") and self.cancel.local == "stopped":
+            raise ValueError("inconsistent completed/running stop")
         if len(self.attempt_usage) != self.attempts:
             raise ValueError("inconsistent attempt count")
         return self
 
 
 def consume(raw: dict) -> Event:
+    if type(raw) is not dict:
+        raise RuntimeFault("schema_violation")
     if type(raw.get("protocol_version")) is not int or raw.get("protocol_version") != 1:
         raise RuntimeFault("unsupported_protocol")
     try:

@@ -69,3 +69,9 @@
 中间38 passed的唯一warning为Pydantic Tool.schema遮蔽基类属性，已更名parameters，未过滤warnings。后续81项通过无warning。新增事件一致性校验时，Handle初始状态尚为failed无error导致53 failed/28 passed；修为真实running状态后81项通过，未放宽事件断言。迟到usage仅更新用量、不发布已取消/失效value；重试中未知用量不沿用上一轮总量，逐尝试记录保留。Event覆盖取消/失效/在途槽位/总时限短于单次，未证明远端实际取消（S5待验）。
 
 基线main d15f440的CI39958072188由甲方确认全success（四项/产品browser/package/editable，日志`/tmp/public-r2b-plan-main-ci.log`），不当作本S1全量验证。当前实现稳定点先提交交Claude独立审阅，完整四项与安装包runtime资源证据继续执行，不进入S2–S6。
+
+### 固定3513cb1全量结果及协议补齐
+
+3513cb1fc683c454424ba1ea060745d1528fb2e0四项通过：sync、lint、format（109文件），pytest **1833 passed/96.80s**，日志`/tmp/public-r2b-s1-four-{sync,lint,format,full}.log`。`/tmp/public-r2b-s1-package.log`记录direct wheel和sdist→wheel均通过；包外运行验证独立runtime默认/旧快照/部分覆盖、实际fake请求打码，原47工具握手、full/scheduled真实副作用拒绝均通过，未上传。此结果仅该固定HEAD。
+
+甲方发现S1命令协议缺口，确认原实现未满足；另consume(None/[]/'x'/1)泄漏AttributeError、completed+local stopped未拒绝。新增测试先红18项：前5项是实际consumer语义失败，其余命令模块尚缺，不混记；日志`/tmp/public-r2b-s1-commands-red.log`。修复加入commands.py封闭解析与可信引用/作用域校验，无动态导入或业务权限，Event跨字段验证；定向98项先通过，再补命令在途取消/revision和tool引用屏障。四项旧轮未中断或盲重跑。模块决定8记录，当前稳定修复继续固定交审。

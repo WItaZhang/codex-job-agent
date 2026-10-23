@@ -37,3 +37,7 @@ S1–S5可按依赖另审前置实施，S6依赖R2及前述片；R3依赖R2b，R
 甲方采纳F1–F4：默认provider=unconfigured，不自动回落fake；fake必须显式选择且标模拟。请求/轮数/容量允许0，零容量返回budget_exhausted且发送0；max_retries=0仅禁止重试，首次仍可发送。决定6自行收紧为正数不构成范围变更授权，此处更正。单次及总时限正数，允许总时限更短，执行取min(单次,剩余总时限)。运行时经统一加载入口持验证后的类型；双顺序独立导入验证无循环。
 
 首步semantic-red仅旧FakeClient条目是真既有行为反证，另四项硬编码错误字典只是合同示意，不是产品链路红例；9项contract-red是ImportError。保留原日志并补同一产品断言对受控不合格实现的mutation红绿，不用字面量断言替代。
+
+## 8. S1协议范围修复
+
+3513cb1有Event消费但缺版本化命令解析，Python调用不等于v1命令。本片补structured/tool_turn/cancel/status闭合集合，可信登记schema/tool引用，绑定workspace/run/revision，不动态导入、不授权、不做业务编排。consume非对象必须固定schema_violation；完成/运行与本地停止矛盾拒绝。执行预算耗尽不阻止查询/取消既有请求。原固定HEAD验证保持历史，新修复另定向及四项，不把旧绿当新代码验证。

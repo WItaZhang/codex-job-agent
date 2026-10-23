@@ -45,7 +45,7 @@ strict适配不静默降级：只做可证明保持语义的schema转换，不�
 
 ### 2.2 面向消费者的协议版本
 
-S1定义事件、命令、错误、usage、取消统一封套protocol_version=1、request/run/node/revision关联与能力声明。版本不是权限。v1拒绝未知命令/字段/错误枚举和不支持版本，不静默执行或降级；消费者显示固定“不支持的协议版本，请更新兼容组件”，不猜状态。新增可选字段也需发布方与消费者显式支持版本/能力并有兼容测试；破坏性语义变更升主版本，持久化旧事件只能用明确适配读取，不重放副作用。缺版本、跨版本及旧revision作为合成消费者反例。旧LLMClient/FakeClient/NoModelClient与MCP host接口保留独立兼容路径，不把旧接口强行当新v1。
+S1定义事件、命令、错误、usage、取消统一封套protocol_version=1、request/run/node/revision关联与能力声明。命令仅structured/tool_turn/cancel/status，消费者由可信代码绑定workspace/run/revision；wire只引用登记的schema/tool ID，不能导入代码、注册能力或授权。控制命令在执行预算耗尽后仍可查询/停止既有请求。非对象输入固定schema_violation；completed/running与local=stopped矛盾，必须拒绝，不能仅逐字段验证。版本不是权限。v1拒绝未知命令/字段/错误枚举和不支持版本，不静默执行或降级；消费者显示固定“不支持的协议版本，请更新兼容组件”，不猜状态。新增可选字段也需发布方与消费者显式支持版本/能力并有兼容测试；破坏性语义变更升主版本，持久化旧事件只能用明确适配读取，不重放副作用。缺版本、跨版本及旧revision作为合成消费者反例。旧LLMClient/FakeClient/NoModelClient与MCP host接口保留独立兼容路径，不把旧接口强行当新v1。
 
 ## 3. 错误、取消、用量及重试
 
