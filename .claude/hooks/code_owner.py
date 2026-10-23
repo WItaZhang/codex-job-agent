@@ -48,7 +48,7 @@ def session_id(hook_input=None):
         os.environ.get("CLAUDE_CODE_HOST_SESSION_ID")
         or (hook_input or {}).get("session_id")
         or os.environ.get("CLAUDE_CODE_SESSION_ID")
-        or ""
+        or ("codex:" + os.environ["CODEX_THREAD_ID"] if os.environ.get("CODEX_THREAD_ID") else "")
     )
 
 
@@ -275,19 +275,19 @@ def refusal(change, git_dir, common, lock):
         owner = lock["label"] or lock["session"]
         return (
             f"已拒绝（{change}）：{where}的代码只能在会话「{owner}」里改。{shared}"
-            "本会话不改那里的代码、不在那里切分支或提交；需要改时，告诉用户到那个会话去做。"
-            "不要自己改锁或绕过这条限制；换会话由用户决定。"
+            "本会话不改那里的代码、不在那里切分支或提交；由协调者安排独立检出或与持锁会话交接。"
+            "不得覆盖其他会话的锁或绕过隔离。"
         )
     if git_dir == common:
         return (
             f"已拒绝（{change}）：主目录没有持锁会话，这里不改代码。{shared}"
             "开发在 worktree 会话里做（会话里先运行 python3 .claude/hooks/code_owner.py claim <名字>）；"
-            "合并回 main 由用户在主目录的会话里输入 /merge 完成。"
+            "合并回 main 由协调者安排持锁主目录会话执行 /merge。"
             "不要自己 claim 主目录或绕过这条限制。"
         )
     return (
         f"已拒绝（{change}）：{where}还没有持锁会话。"
-        "如果用户让本会话在这个 worktree 里开发，先在这里运行 python3 .claude/hooks/code_owner.py claim <名字>；"
+        "如果协调者已将本切片分配给本会话，先在这里运行 python3 .claude/hooks/code_owner.py claim <名字>；"
         "否则不要改这里的代码。"
     )
 
@@ -345,12 +345,26 @@ def cli(argv):
     if argv[0] == "claim":
         me = session_id()
         if not me:
-            print("拿不到会话 id：请在 Claude Code 会话里运行。", file=sys.stderr)
+            print("拿不到会话 id：请在 Claude Code 或 Codex 会话里运行。", file=sys.stderr)
+            return 1
+        existing = read_lock(git_dir)
+        if existing and existing["session"] != me:
+            print("代码锁已由其他会话持有；拒绝覆盖。", file=sys.stderr)
             return 1
         label = " ".join(argv[1:]) or me
-        path.write_text(f"{me}\n{label}\n", encoding="utf-8")
+        if existing is None:
+            try:
+                with path.open("x", encoding="utf-8") as lock_file:
+                    lock_file.write(f"{me}\n{label}\n")
+            except FileExistsError:
+                print("代码锁已被其他会话创建；拒绝覆盖。", file=sys.stderr)
+                return 1
         print(f"{where}的代码锁归属：{label}（{me}）")
     elif argv[0] == "release":
+        existing = read_lock(git_dir)
+        if existing and existing["session"] != session_id():
+            print("代码锁属于其他会话；拒绝解除。", file=sys.stderr)
+            return 1
         path.unlink(missing_ok=True)
         print(f"{where}的代码锁已解除：在有会话 claim 之前，谁都不能改{where}的代码。")
     elif argv[0] == "status":

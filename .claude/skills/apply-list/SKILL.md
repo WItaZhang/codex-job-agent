@@ -40,4 +40,6 @@ description: 每日模块③：按当前意图生成可交接的投递清单（J
 
 ## 3. 标签读错了
 
-用户说清单里某个岗位的标签不对：`show_job(job_id)` 看现有标签，按编号列出，让用户点出哪些不对、正确的是什么。返回的 `same_posting` 不为空时，告诉用户同一个岗位的这几条（来源、地点）也会一起改，地点标签不动。然后 `correct_tags(job_id, remove, add, also)`（会弹窗），also 是 same_posting 里全部的 job_id，不多不少。这只修正岗位标签，不改意图。改完后重新 `build_apply_list()`。
+用户说清单里某个岗位的标签不对：`show_job(job_id)` 看现有标签，依据岗位原文选定修正并展示。返回的 `same_posting` 不为空时，告诉用户同一个岗位的这几条（来源、地点）也会一起改，地点标签不动。然后 `correct_tags(job_id, remove, add, also)`，also 是 same_posting 里全部的 job_id，不多不少。这只修正岗位标签，不改意图。改完后重新 `build_apply_list()`。
+
+`mark_applications` 默认保留历史 user 报告语义，只能根据真实用户消息调用；协调者重试显式传 `actor="delegated_coordinator"`，不能冒称用户已投或主动放弃。actor 是审计声明，不认证身份。

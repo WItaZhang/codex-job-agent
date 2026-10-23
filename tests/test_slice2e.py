@@ -81,7 +81,7 @@ def test_deciding_a_command_writes_a_version_logged_as_a_command(box):
     decision = [d for d in box.store.decisions() if d["kind"] == "accept"][-1]
     payload = json.loads(decision["payload"])
     assert payload["origin"] == "command"
-    assert payload["approved_via"] == "host_permission_prompt"
+    assert payload["approved_via"] == "delegated_coordinator"
     assert box.list_open_analyses() == []
 
 

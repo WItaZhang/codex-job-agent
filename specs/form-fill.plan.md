@@ -1,5 +1,8 @@
 # 填表模块切片 1 计划（B）：用现有填表 agent 填到提交前，读回最后一页、核对、出报告（2026-10-15 用户确认，见决定 13）
 
+> 本文件保留当时的切片计划与审阅记录，不作为当前审批流程。当前授权按 spec §5.2 / 决定 25；历史“等用户确认、弹窗、前 5 份抽查”不再是生效门槛。尚未实现的冻结功能仍不启动。
+
+
 规格：`specs/form-fill.md`；决定记录：`specs/form-fill.decisions.md`；已确认样例：`tests/fixtures/form_fill/samples_work_auth.yaml`（11 例）、`samples_profile.yaml`（18 例）。
 本计划放在模块旁边，不追加到根目录的 `plan.md`，免得和其他分支冲突。**你确认之前不写实现代码。** vendor 文件不改。
 

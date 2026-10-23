@@ -562,6 +562,16 @@ class Store:
         with self._tx():
             self.db.execute("DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ?", (owner[0], owner[1]))
 
+    def protected_companies(self) -> list[str]:
+        """Retain known protected companies from saved batches; list deletion cannot silently unlock them."""
+        names = []
+        for row in self.db.execute("SELECT data FROM apply_batches"):
+            data = json.loads(row["data"])
+            for job in data["jobs"]:
+                if job["mode"] == "careful" or job.get("protected"):
+                    names.extend(job.get("companies") or [job.get("company", "")])
+        return list(dict.fromkeys(name for name in names if name))
+
     def apply_batch(self, batch_id: str) -> dict:
         row = self.db.execute("SELECT day, data FROM apply_batches WHERE id = ?", (batch_id,)).fetchone()
         if row is None:

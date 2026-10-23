@@ -37,7 +37,7 @@ duplicates:                       # 同一个岗位的几条（spec 4.9 第 6 �
 apply:                            # 投递（spec 4.10）
   applicant_dir: applicant        # 投递资料目录（applicant.yaml、profile.json、简历），位于 storage.data_dir 下
   batch_size: 30                  # 一批最多多少个岗位
-  review_first: 5                 # 每批先抽查几个，停在提交前给你检查
+  review_first: 0                 # 默认自主提交；非零仅用于显式只填不提交抽查
   model: claude-opus-5-5          # 投递用的 Claude Code 模型，填表模块也用它（spec 4.10 第 9 条；写完整的模型名）
   job_timeout_seconds: 900        # 单个岗位最长时间
   letters_dir: apply/letters      # 求职信（.txt 和 .pdf），位于 storage.data_dir 下

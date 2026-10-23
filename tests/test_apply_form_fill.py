@@ -317,15 +317,17 @@ def test_a_rerun_batch_holds_only_the_named_jobs_and_never_submits(box):
     box.apply_runner = FakeRunner({"j03": ("failed", "captcha", [])})
     run_step(box)
     with pytest.raises(InvariantError, match="pending"):  # still failed: the agent marks it pending first
-        box.prepare_apply_batch(DAY, only=["j03"])
+        box.prepare_apply_batch(DAY, only=["j03"], stop_before_submit=True)
     box.mark_applications(["j03"], "pending")
     box.apply_runner = FakeRunner()
-    again = box.prepare_apply_batch(DAY, only=["j03"])
+    again = box.prepare_apply_batch(DAY, only=["j03"], stop_before_submit=True)
     assert [(j["job_id"], j["mode"]) for j in again["jobs"]] == [("j03", "review")]
     run_step(box, batch=again)
     assert box.store.applications()["j03"]["status"] == "waiting"
 
-    many = box.prepare_apply_batch(DAY, only=jobs[5:])  # more than review_first: still all reviewed
+    many = box.prepare_apply_batch(
+        DAY, only=jobs[5:], stop_before_submit=True
+    )  # more than review_first: still all reviewed
     assert {j["mode"] for j in many["jobs"]} == {"review"} and len(many["jobs"]) == 3
     with pytest.raises(InvariantError):
         box.prepare_apply_batch(DAY, only=["j99"])
