@@ -11,30 +11,13 @@ agent 分析哪里没对上，给出几个修改选项；用户或授权协调�
 
 ## 最短开始路径
 
-准备 Git、Python 3.13（`uv sync` 可按项目要求安装所需版本）、[uv](https://docs.astral.sh/uv/getting-started/installation/) 和一个已经可用的 Codex 或 Claude Code。宿主账户和模型费用由你自己的订阅或 API 配置承担。
+请按 [README 的快速开始](../README.md#快速开始)完成安装、工具连接检查、配置摘要核对与意图初始化。初次使用不需要先运行推荐命令，也不要直接沿用示例偏好。
 
-```sh
-git clone https://github.com/WItaZhang/codex-job-agent.git
-cd codex-job-agent
-uv sync --locked
-mkdir -p data/local
-cp docs/examples/intent.example.yaml data/local/intent.yaml
-cp docs/examples/searches.example.yaml data/local/searches.yaml
-```
-
-自行编辑这两个示例，核对词条、地点和搜索范围，然后从仓库根目录启动宿主。不要把示例偏好当成你的真实判断。首次对话可说：
-
-> 我已核对 data/local/intent.yaml。请初始化意图，检查搜索设置；本次只允许发现、打标签和推荐，不投递。
-
-如果先离线试用，可复制 [合成岗位示例](../docs/examples/jobs.example.json)，让宿主导入并打标签，不运行抓取。要打开网页补全原文，另安装锁定 Playwright 对应的浏览器：
-
-```sh
-uv run playwright install chromium
-```
-
-Linux 还可能需要系统库；官方提供 `uv run playwright install --with-deps chromium`（涉及系统安装权限）。浏览器版本必须与 Python 包匹配，见 [Playwright 安装说明](https://playwright.dev/python/docs/browsers)。不要用关闭 sandbox 解决启动失败。
+宿主助手可以根据你提供的需求协助编写配置；现有初始化工具读取 `data/local/intent.yaml`，并将意图保存到数据库。搜索配置 `data/local/searches.yaml` 单独决定抓取范围。初始化完成后，修改初始文件不会自动更新数据库中的偏好。
 
 这里使用项目提供的显式 `--config configs/default.yaml` 源码入口；不要改为 `init --workspace` 期待真实业务可用，后者目前仍是本地只读模式。
+
+需要打开网页补全原文时，安装浏览器：`uv run playwright install chromium`。Linux 还可能需要系统库，见 [Playwright 安装说明](https://playwright.dev/python/docs/browsers)。
 
 ### 启动故障
 
