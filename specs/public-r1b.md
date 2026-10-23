@@ -71,4 +71,4 @@ CI在真实pytest前单独用产品最终launch_arguments、Playwright实际二�
 
 已取得CI39928342793的No usable sandbox/-6及AppArmor限制证据。CI准备步骤只在GitHub托管Linux临时runner对锁定Playwright实际Chromium的精确规范路径安装本次run专属userns AppArmor规则；拒绝通配符、转义、变量插值、符号链接及非预期目录。配置root:root/0644，单profile加载，always清理且核对内容，不改全局sysctl、不加no-sandbox、不向公众安装器传播。Chrome自身sandbox保持开启；按路径许可不证明同权限文件防篡改。新CI需取得启动诊断、完整pytest、产品fixture和制品证据，未绿之前Linux仍待验证。
 
-Linux产品fixture另读取本专属浏览器的chrome://sandbox内部状态，结合SystemInfo的browser/renderer PID、/proc父链、renderer Seccomp=2和NoNewPrivs=1验证；namespace inode可读时一并记录，不可读则明确标注原因。必须有Chromium自身Namespace/Seccomp状态及进程组合证据，不把单一Seccomp值/端点出现当全部sandbox证明。缺证据使fixture失败，结果在断言前输出便于诊断；只访问内部页/合成本地页。此证据仅锁定CI构建headless，公众Linux安装仍由R8验证。
+Linux产品fixture另读取本专属浏览器的chrome://sandbox内部状态，结合SystemInfo的browser/renderer PID、/proc父链、renderer Seccomp=2和NoNewPrivs=1验证；namespace inode可读时一并记录，不可读则明确标注原因。必须按chrome://sandbox实际逐行tab分隔字段验证Layer 1 Sandbox=Namespace、PID namespaces=Yes、Network namespaces=Yes、Seccomp-BPF sandbox=Yes；各字段唯一，缺失/No/重复（包括一致重复）或非精确值均拒绝，并保留进程组合证据，不把单一Seccomp值/端点出现当全部sandbox证明。缺证据使fixture失败，结果在断言前输出便于诊断；只访问内部页/合成本地页。此证据仅锁定CI构建headless，公众Linux安装仍由R8验证。

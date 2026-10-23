@@ -1,0 +1,91 @@
+{
+  "synthetic": true,
+  "source": "CI39929809213 product fixture, observed before failed label assertion; not complete CI success",
+  "evidence": {
+    "browser_pid": 5136,
+    "browser_status": {
+      "Pid": "5136",
+      "PPid": "5125",
+      "NoNewPrivs": "0",
+      "Seccomp": "0"
+    },
+    "chromium_sandbox_status": "Sandbox Status\nLayer 1 Sandbox\tNamespace\nPID namespaces\tYes\nNetwork namespaces\tYes\nSeccomp-BPF sandbox\tYes\nSeccomp-BPF sandbox supports TSYNC\tYes\nPtrace Protection with Yama LSM (Broker)\tYes\nPtrace Protection with Yama LSM (Non-broker)\tNo\n\nYou are adequately sandboxed.",
+    "renderers": [
+      {
+        "pid": 5248,
+        "status": {
+          "Pid": "5248",
+          "PPid": "5147",
+          "NoNewPrivs": "1",
+          "Seccomp": "2"
+        },
+        "ancestry": [
+          5248,
+          5147,
+          5145
+        ],
+        "descends_from_owned_browser": true,
+        "namespaces": {
+          "pid": {
+            "browser": "pid:[4026531836]",
+            "renderer": "pid:[4026532380]"
+          },
+          "user": {
+            "browser": "user:[4026531837]",
+            "renderer": "user:[4026532316]"
+          }
+        }
+      },
+      {
+        "pid": 5238,
+        "status": {
+          "Pid": "5238",
+          "PPid": "5147",
+          "NoNewPrivs": "1",
+          "Seccomp": "2"
+        },
+        "ancestry": [
+          5238,
+          5147,
+          5145
+        ],
+        "descends_from_owned_browser": true,
+        "namespaces": {
+          "pid": {
+            "browser": "pid:[4026531836]",
+            "renderer": "pid:[4026532379]"
+          },
+          "user": {
+            "browser": "user:[4026531837]",
+            "renderer": "user:[4026532316]"
+          }
+        }
+      },
+      {
+        "pid": 5209,
+        "status": {
+          "Pid": "5209",
+          "PPid": "5147",
+          "NoNewPrivs": "1",
+          "Seccomp": "2"
+        },
+        "ancestry": [
+          5209,
+          5147,
+          5145
+        ],
+        "descends_from_owned_browser": true,
+        "namespaces": {
+          "pid": {
+            "browser": "pid:[4026531836]",
+            "renderer": "pid:[4026532378]"
+          },
+          "user": {
+            "browser": "user:[4026531837]",
+            "renderer": "user:[4026532316]"
+          }
+        }
+      }
+    ]
+  }
+}

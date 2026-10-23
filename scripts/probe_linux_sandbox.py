@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 from pathlib import Path
 
 
@@ -16,9 +15,24 @@ def status(pid):
 
 
 def validate(evidence):
-    text = evidence["chromium_sandbox_status"]
-    assert re.search(r"Namespace sandbox\s+Yes", text, re.I), evidence
-    assert re.search(r"Seccomp-BPF sandbox\s+Yes", text, re.I), evidence
+    # Chromium 141 chrome://sandbox body text uses one exact tab-delimited row per field.
+    # Headings/prose cannot stand in for a row; duplicate rows (even agreeing ones) are ambiguous.
+    rows = {}
+    for line in evidence["chromium_sandbox_status"].splitlines():
+        if "\t" not in line:
+            continue
+        parts = line.split("\t")
+        assert len(parts) == 2, evidence
+        name, value = parts
+        assert name not in rows, evidence
+        rows[name] = value
+    for name, expected in {
+        "Layer 1 Sandbox": "Namespace",
+        "PID namespaces": "Yes",
+        "Network namespaces": "Yes",
+        "Seccomp-BPF sandbox": "Yes",
+    }.items():
+        assert rows.get(name) == expected, evidence
     assert evidence["renderers"], evidence
     for renderer in evidence["renderers"]:
         assert renderer["descends_from_owned_browser"], evidence

@@ -122,3 +122,11 @@ ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防
 红绿：新CI策略接口先10项因脚本不存在失败（接口缺失证据）；workflow新增步骤先1 failed/13 passed。实现后精确策略文本、注入/异常路径、runid、hosted环境、symlink/非可执行文件、sdist排除、禁止全局放宽、产品sandbox参数、组合证据及既有T1/诊断/CI护栏定向通过。没有修改产品src、跳过测试或放宽旧断言。构建direct wheel/sdist往返、安装MCP47工具/full/scheduled、local_only拒绝再次通过；独立检查sdist无CI策略安装脚本。新workflow只有install/remove两步，原诊断/pytest/fixture/制品顺序和只读权限、禁止发行保持。
 
 本轮本地四项：uv sync --locked、ruff check/format均通过；完整pytest **1719 passed/78.49s，0skip**。此后仅补独立产品sandbox禁止参数测试及runid反例，策略文件13项定向通过（包含该新增测试）；合计46项相关定向先前通过，未改产品src。脚本独立ruff通过。Linux安装/卸载策略及sandbox实际观测仍未执行，必须等协调者push新HEAD后的完整CI，不能用本地绿代替。交审时保持工作区锁释放，不自行push/合并。
+
+## CI39929809213：实际sandbox字段解析修复（决定29/模块决定9）
+
+该轮 **1720 passed/115.85s**，CI精确AppArmor许可install、端点启动、remove均成功。产品fixture输出真实sandbox JSON后因我们假设的`Namespace sandbox Yes`正则失败，后续制品未执行；这不是Chromium sandbox失败，也不是整轮CI成功。实际字段为`Layer 1 Sandbox\tNamespace`、`PID namespaces\tYes`、`Network namespaces\tYes`、`Seccomp-BPF sandbox\tYes`。三个renderer均归属true/Seccomp2/NNP1，pid/user namespace inode与browser不同。
+
+日志中的合成实测JSON完整保存于[回归fixture](../tests/fixtures/synthetic_linux_sandbox_ci39929809213.json)，附来源/非完整CI成功说明，不编造字段。先红28项中2 failed/26 passed：真实样例被误拒，假想Namespace sandbox Yes被误接受。改为逐行tab字段精确值校验，所有表格字段重复均拒绝，所需四字段缺失/No/重复矛盾（两种顺序）/一致重复/假想标签或含额外文字都拒绝。renderer归属、Seccomp2、NNP1要求不变，foreign/空列表/任一进程状态不符均拒绝。namespace inode实际值仍留证，不冒充跨平台保证。
+
+本次仅探针、回归fixture/测试及规格决定；没有产品实现或CI权限变化。相关57项定向通过，src/tests与探针ruff check/format及diff检查通过。未重复无关全套/本地浏览器或制品；远端上述1720结果仅属于旧HEAD，修复后的完整CI和产品fixture及下游制品仍待协调者push。公众发布不通过、Linux公众安装归R8和R4凭据缺口保持。

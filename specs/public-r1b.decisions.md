@@ -44,4 +44,10 @@ CI39928342793明确stderr FATAL No usable sandbox、exit=-6，AppArmor enabled=Y
 
 同时按甲方要求把public-release现状从ef8dbd3刷新：R1 P1/P2及CI引用8530523/39919661089；安装器/干净OS/签名仍缺，P5只按R1b实测平台记录，Linux待验证、R4凭据未完成。公众发布仍不通过，历史证据留review/decisions。
 
+> 决定8补充中的sandbox页面字段假设已由决定9取代，历史取舍保留。
+
 决定8补充：采纳Claude最新清单，Linux产品fixture用Chromium自身sandbox页加OS父链/Seccomp/NoNewPrivs的组合观测，缺证据不通过。历史Playwright自行launch测试的默认sandbox选项不替代产品ensure路径证据；R1b真实checkpoint/readback fixture现已通过product ensure启动，其他旧launch测试按各自原实现保留，不据其成功宣称产品sandbox通过。CI策略脚本从sdist排除，wheel无此入口；不作为用户安装步骤。
+
+## 9：按CI实际sandbox表格解析（总决定29）
+
+CI39929809213实际页面为Layer 1 Sandbox=Namespace、PID namespaces=Yes、Network namespaces=Yes、Seccomp-BPF sandbox=Yes，不存在假想的Namespace sandbox Yes标签。改为逐行tab字段精确解析，拒绝缺失/No/重复矛盾或一致重复，保留所有renderer父链/Seccomp2/NoNewPrivs1验证。实际三个renderer的pid/user namespace均与browser不同，留真实合成CI fixture，不当作完整CI通过。此次install/endpoint/remove及1720测试已成功，产品探针因解析错误失败，下游制品未执行；修复只在探针/测试/文档，不改产品或降低sandbox要求。
