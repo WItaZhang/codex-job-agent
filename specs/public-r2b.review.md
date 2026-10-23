@@ -107,3 +107,9 @@ a6f0bbc命令修复固定HEAD的中间四项1854 passed/83.59s，lint/format/syn
 固定2f4d5c7的无条件finally回滚经真实调用链Event屏障复现，非概率重跑：`/tmp/public-r2b-s1-y1-red.log` 6 failed / 8 passed。取消、invalidate/revision失效后的跨run及重复ID、发送前预算耗尽ID回退均纳入；invalidate同scope本就被invalid集合拒绝，保留该正例不冒称全部红。
 
 回滚仅限外层执行线程/内层传输线程实际启动失败；普通收尾仅释放槽。两层失败仍internal/drained/发送0，并允许相同ID在新scope重新接纳。定向runtime验证114 passed，无warning；四项及package待本次固定实现HEAD验证。S1仍待独立签收，不进入S2–S6。
+
+### Y1固定实现验证与冻结
+
+实现HEAD `55d8e6169bcc64ded45c968d2c7ec127f301772d`：`uv sync --locked`、ruff check、ruff format --check（112文件）、完整pytest全部成功，**1867 passed / 85.10s，无skip/warning**。日志`/tmp/public-r2b-s1-y1-four-{sync,lint,format,full}.log`。runtime定向114 passed；加强两层启动失败的同ID跨scope恢复断言后，lifecycle 14 passed，随后完整套覆盖该最终版本。
+
+`/tmp/public-r2b-s1-y1-package.log`：直接wheel安装和sdist→wheel往返成功；47工具、full/scheduled、运行资源闭包、cwd独立、local_only拒绝保持，未上传制品。此次不重跑旧HEAD碰运气，不把旧四项记录算新验证。唯一产品变更是回滚边界；取消/失效保持停止结果、未发送attempts=0，不伪造usage。当前实现冻结交窄审；远端CI/独立签收由协调者安排，未推送/合并，S2–S6仍不实施。
