@@ -22,7 +22,7 @@ from intent_job_agent.form_fill.redact import Redactor
 from intent_job_agent.store import Store
 from intent_job_agent.tools import SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
 
-from .apply_fakes import ANSWERS, FormFillFake
+from .apply_fakes import ANSWERS, FormFillFake, synthetic_binding
 from .conftest import BASE_INTENT, BASE_VOCAB, settings
 from .test_slice6 import DAY, PROFILE, SECRETS, FakeRunner, add_jobs, write_applicant, write_letters
 
@@ -120,7 +120,7 @@ def test_the_sheet_never_overrides_a_rule_that_says_stop(box):  # review #2
 def test_the_chrome_runner_hands_the_sheet_to_the_run(box, monkeypatch):
     seen = []
     monkeypatch.setattr(apply_bridge, "configure", lambda *args, **kwargs: None)
-    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda port: True)
+    monkeypatch.setattr(apply_bridge, "cdp_alive", lambda binding, **kwargs: True)
 
     def run(spec, *args, **kwargs):
         seen.append(kwargs)
@@ -129,7 +129,7 @@ def test_the_chrome_runner_hands_the_sheet_to_the_run(box, monkeypatch):
     monkeypatch.setattr(apply_bridge, "run_application", run)
     (job,) = ready(box, ["Acme"])
     runner = apply_bridge.ChromeRunner(box.data_dir, box.settings, box._applicant().profile)
-    runner.port = 9
+    runner.binding = synthetic_binding()
     spec = box._apply_spec(job, "submit")
     runner(spec)
     runner(apply_bridge.ApplySpec(**{**spec.__dict__, "sheet": "== ANSWER SHEET ==\n- x -> y"}))

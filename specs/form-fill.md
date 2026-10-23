@@ -358,7 +358,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 
 ## 4. 流程
 
-- 一次运行按清单顺序，一个岗位接一个岗位地做，因为只有一个投递用的 Chrome。
+- 一次运行按清单顺序，一个岗位接一个岗位地做；独立start_form_fill也必须与start_applying/resume_applying跨会话互斥，复用apply_running owner及最小管理锁，不创建心跳lease（[R1b](public-r1b.md)）。
 - 一个岗位出错，不影响后面的岗位。
 - 真实访问的运行在后台进行，用状态工具查看进度（和 `start_applying` 一样）。
 
@@ -414,7 +414,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 填完、点"下一步"之前调用 `checkpoint("filled")`。代码在这时读回这一页（4.3）。
   - 最后一页停在提交按钮之前，同样调用 `checkpoint("filled")`。
   - 网站打开了新标签页或弹窗时，填表 agent 在哪个标签页里，`checkpoint` 就录哪个：代码在这次运行开始后新开的标签页里按地址找，找不到再用上一次 `checkpoint` 的那个（4.3）。运行开始前就开着的标签页，地址对上了也不录。
-  - `checkpoint` 是本模块自己的 MCP 服务，和 Playwright MCP 一起由填表 agent 的 Claude Code 启动，随它退出。它经 CDP 连投递用的 Chrome，整个运行保持一个连接。它只读：不点击、不打字、不跳转、不关页面，页面弹出的对话框也留给填表 agent 处理。
+  - `checkpoint` 是本模块自己的 MCP 服务，和 Playwright MCP 一起由填表 agent 的 Claude Code 启动，随它退出。它按工作区绑定的精确WS连投递用的Chrome，连接前后核验PID/start/profile及owner；整个运行保持连接，断开即失效，不退HTTP端口发现。它只读：不点击、不打字、不跳转、不关页面，页面弹出的对话框也留给填表 agent 处理。
   - 时限从填表 agent 调用的那一刻算起，包括排队等后台读页的时间。到时限还没开始的调用就不再执行（否则晚到的 blank 会把 agent 已经填的值记成预填），在 `checkpoints.json` 里记为超时；已经开始的照常做完，记下全部用时。读页出错的调用也记下。
 - 代码另外自动补录，不靠填表 agent 调用，防止它忘了调用 `checkpoint`：
   - `checkpoint` 服务在后台每隔一段时间（配置，默认 1 秒）读一次岗位的标签页，只读不改。换页时，上一页最后一次读到的值就是这一页的补录。
@@ -442,9 +442,9 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 卡住，由代码判定：同一页（4.3 的页标识）连续 3 次 `checkpoint("filled")` 之后，页面都没有变成新的页，`checkpoint` 就返回 stop。agent 停下，状态记 `stuck`。
   - 超时（写在配置中，默认 900 秒）。
   - 填表 agent 连续一段时间没有任何输出（配置 `apply.watchdog.stall_seconds`，默认 300 秒）：代码结束它和它启动的全部进程，结果码 `stalled`，报告写"卡住"（`spec.md` §10 第 107 条）。
-  - 用户在 /apply 里说"停下"：代码马上结束它，报告写"你停下了"，这个岗位回到原来的状态（`spec.md` §10 第 109 条）。
+  - 用户在 /apply 里说"停下"：代码马上结束它，报告写"你停下了"，身份仍有效时这个岗位回到原来的状态（`spec.md` §10 第109条）；身份失效并发时按R1b四格，不能覆盖未知提交风险。
 - 以下两种由代码判定，不靠 agent：
-  - `tab_lost`：岗位的标签页（含它打开的子标签页）都不见了，或者 CDP 断开。这个岗位记为没填完。做下一个岗位前先重新连 Chrome；连不上，就把剩下的岗位都记为 `tab_lost`。
+  - `tab_lost`：岗位的标签页（含它打开的子标签页）都不见了，或者 CDP 断开。仅标签页丢失时这个岗位记为没填完；CDP断开或归属校验失败按R1b身份失效停止本步，已launch的fill记failed/browser_identity_lost（已有maybe_submitted证据优先held），未launch保留原状态，不盲目重连或批量虚构已执行结果。
   - `system_error`：填表 agent 没有起来、一次工具调用都没有，或者运行器出错。判断方法和 spec §10 第 67 条相同。
 
 ### 4.3 读回（代码）
@@ -719,7 +719,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 - **重跑和接着做**：
   - 代码在 `meta.json` 里存下这个岗位标签页最后的地址和 CDP 标签页编号。
   - 现在重跑一律新开标签页，从岗位地址从头做（`spec.md` §10 第 91 条）。/apply 里等你处理的岗位，证据表明门槛已解决后，也由本模块新开标签页从岗位地址重填（`spec.md` §10 第 100 条）；原来那个标签页留着，由用户自己关。
-  - 回到原来的标签页接着填（先按编号找，Chrome 重启后编号会变，再按地址找；还是找不到才重新打开岗位地址）要放开 checkpoint 只录新开标签页的规则（4.2）并改读回，留到下一刀（总规格决定 22）。
+  - 回到原来的标签页接着填（仅同一已验证generation内先按编号再唯一地址找；旧或不同generation直接走岗位地址重开，不接管旧tab）要放开 checkpoint 只录新开标签页的规则（4.2）并改读回，留到下一刀（总规格决定 22）。
   - 重跑算一次真实访问，录制里另存一份（6.2）。
 - 本模块不判断地点资格，也不挑岗位，清单上有的就填。
 - **不符合申请资格**：页面写明不收这类申请人、如实作答会被系统自动拒的（例如不收在读学生），填表 agent 停在那一页，用 "NOTE:" 引用原文，结果是 `not_eligible`，结论是"不符合申请资格"（3.2）。ApplyPilot 原有指令里给工作许可用的 `not_eligible_work_auth` 也算这一种。永远不编一个不真实的答案去过这道题（用户 2026-10-17）。这不是挑岗位：岗位照样在清单上，投不投由用户决定。
@@ -771,7 +771,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
     - 保存前，代码按上面两种方式打码：和 `profile.json` 相同的文字换成引用，例如 `{{personal.email}}`；其余按格式打码。每一次读都先打码再编页号、再写盘，`state.json` 也一样。
     - 按栏目：对到 `contact.*` 的栏，值和选项里只留占位和地名（州、国家），其余写成"[其他值，已隐去]"。例如网站带进来的旧住址、个人网站，不在 `profile.json` 里，也照样隐去。
     - 简化 HTML 由代码从页面上逐个元素写出（不改页面），对到 `contact.*` 的栏的元素，文字和值写成"[其他值，已隐去]"。
-    - 截图里，代码按页面元素找出显示命中文字的元素，以及对到 `contact.*` 的栏的元素，截图时给这些元素本身加样式涂黑。样式跟着元素走，所以对话框这类浏览器顶层元素里的也能涂到；盖在页面上的遮罩盖不到顶层元素。涂黑失败的截图不保存，记为"截图未存：打码失败"。子框架里有对到 `contact.*` 的栏时，也不存截图。
+    - 截图里，代码按页面元素找出显示命中文字的元素，以及对到 `contact.*` 的栏的元素，截图前使用已有 `form_fill.checkpoint_timeout_seconds` 预算（由调用方传入最终读回与checkpoint）有界等待两次动画帧回调以跨过一次绘制机会，再由Playwright在完整页面截图期间给这些元素本身加样式涂黑；不改变滚动、焦点、dialog状态或默认全页范围，等待失败不保存截图，明确记为“截图未存：渲染未就绪”，不误称打码失败。样式跟着元素走，所以对话框这类浏览器顶层元素里的也能涂到；盖在页面上的遮罩盖不到顶层元素。涂黑失败的截图不保存，记为"截图未存：打码失败"。子框架里有对到 `contact.*` 的栏时，也不存截图。
     - MHTML 是编码过的整页，按文字替换处理不到。代码按 MIME 拆开，逐段解码、打码后写回；写回后的文件打码扫描仍有命中，或者这一页有栏按栏目隐去了值，就不存 MHTML，只存简化 HTML 和截图，并写明为什么没存（6.1 第 6 项验证）。
     - 密码栏从不读值。
 - **简历**：交给评审之前由代码打码。先按 `profile.json` 的联系方式逐项替换，再用通用的邮箱、电话格式兜底。spec 3.3 要求这样做，但代码里还没有实现，本模块新写这个函数。起草标准答案用的 `get_redacted_resume`（第 9 节）也用它。
@@ -798,7 +798,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
 
 ### 6.1 先验证能不能录（切片第一步）
 
-Playwright MCP 0.0.83 有 `--save-session` 和 `--output-dir`，但不能录 HAR。它的 `--caps=devtools` 里有 trace 和录像工具，但这些工具要由 agent 自己调用，录下来的也不是每页的栏目结构。所以录制由本模块自己的代码来做：经 CDP 端口（ApplyPilot 的 9222 加 worker 编号）连上投递用的 Chrome，一页一页地录。
+Playwright MCP 0.0.83 有 `--save-session` 和 `--output-dir`，但不能录 HAR。它的 `--caps=devtools` 里有 trace 和录像工具，但这些工具要由 agent 自己调用，录下来的也不是每页的栏目结构。所以录制由本模块自己的代码来做：经工作区已验证绑定的精确browser WebSocket连上投递用的Chrome（不使用固定9222），一页一页地录。
 
 **谁来操作**：模块还没做出来，所以验证时用一个最小的填表 agent。
 
@@ -1030,8 +1030,8 @@ data/local/form-fill/
   - `get_form_fill_report(run, id)`，读级：返回报告，联系方式打码。
   - `get_redacted_resume(resume_id)`，读级：返回按 5.6 打码后的简历文本，起草标准答案时用（2.3）。`get_resume` 不变，仍返回原文。
 - 对话里的入口是项目 skill `/form-fill`（在 Codex 里是 `$form-fill`），它只编排上面这些工具。
-- **不依赖数据库**：输入都是文件；输出是标签页、文件和工具返回值。不读也不写岗位、意图、label 和投递状态。
-- **和 /apply 共用的部分**：投递用的 Chrome（复制资料、删掉密码和自动填充、CDP 端口）、MCP 的固定版本、打不开的网站名单、受限读文件。这些都从 `apply_bridge.py` 复用，不改 vendor。
+- **不依赖领域数据**：输入都是文件；输出是标签页、文件和工具返回值。不读也不写岗位、意图、label、applications、apply_attempts、holds。唯一例外是跨会话互斥和失联收尾所需的运行协调行apply_running及管理锁（决定38、[R1b](public-r1b.md)）。独立填表登记kind=form_fill及runid；恢复按runid匹配self._form_fill_run，正常running/收尾不误kill；真失联只清自己进程并结束协调记录，不走_close_interrupted，不写投递领域状态。other_session按独立填表显示，不误称投递批次。
+- **和 /apply 共用的部分**：投递用的Chrome（空专属profile、generation/PID/start/profile归属和精确WS绑定）、MCP 的固定版本、打不开的网站名单、受限读文件。这些都从 `apply_bridge.py` 复用，不改 vendor。
   - `apply_bridge.mcp_config` 和 `claude_command` 现在固定加载 Gmail 服务，放行名单读的是 `apply.allowed_tools`。
   - 本模块要给它们加参数，传入：
     - 自己的 MCP 服务表：Playwright 加 checkpoint，加 Gmail（只放行搜索和读邮件，5.6）；

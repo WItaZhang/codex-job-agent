@@ -23,11 +23,15 @@ def validate_workflow(document):
         {"uses": "astral-sh/setup-uv@v6", "with": {"python-version": "3.13"}},
         {"run": "uv sync --locked"},
         {"run": "uv run playwright install --with-deps chromium"},
+        {"run": "uv run python scripts/ci_browser_userns.py install"},
         {"run": "uv run ruff check src tests"},
         {"run": "uv run ruff format --check src tests"},
+        {"run": "uv run python scripts/probe_browser_startup.py"},
         {"run": "uv run python -m pytest -q"},
+        {"run": "uv run python scripts/probe_product_browser.py"},
         {"run": "uv run python scripts/check_package.py"},
         {"run": "uv run python scripts/check_editable_resources.py"},
+        {"if": "always()", "run": "uv run python scripts/ci_browser_userns.py remove"},
     ]
 
 

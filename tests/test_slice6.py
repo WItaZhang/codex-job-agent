@@ -15,7 +15,7 @@ from intent_job_agent.domain import InvariantError, Job
 from intent_job_agent.store import Store
 from intent_job_agent.tools import COMMIT_TOOLS, SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
 
-from .apply_fakes import FormFillFake, write_sheet
+from .apply_fakes import FormFillFake, synthetic_binding, write_sheet
 from .conftest import BASE_INTENT, BASE_VOCAB, ROOT, settings
 from .test_slice2f import frontmatter
 
@@ -446,9 +446,9 @@ def test_tool_tiers_and_approval():
 
 def test_mcp_servers_are_pinned_and_risky_sites_blocked():
     s = settings()
-    config = apply_bridge.mcp_config(s, 9222)["mcpServers"]
+    config = apply_bridge.mcp_config(s, synthetic_binding())["mcpServers"]
     args = config["playwright"]["args"]
-    assert s.apply.mcp.playwright in args and "--cdp-endpoint=http://localhost:9222" in args
+    assert s.apply.mcp.playwright in args and "--cdp-endpoint=ws://127.0.0.1:43123/devtools/browser/synthetic" in args
     blocked = next(a for a in args if a.startswith("--blocked-origins="))
     assert "https://mail.google.com" in blocked and "https://www.paypal.com" in blocked
     assert "@latest" not in json.dumps(config)
@@ -536,6 +536,7 @@ say({"type": "result", "result": "Done.\\nRESULT:APPLIED"})
 
 def test_one_application_run_reads_the_stream(box, tmp_path, monkeypatch):
     """The real process handling, with a stand-in for the claude command (no browser, no network)."""
+    fake_browser_identity(monkeypatch)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "claude"
@@ -546,15 +547,20 @@ def test_one_application_run_reads_the_stream(box, tmp_path, monkeypatch):
     jobs = add_jobs(box, ["Acme"])
     write_letters(box, jobs)
     profile = box._applicant().profile
-    outcome = apply_bridge.run_application(box._apply_spec(jobs[0], "submit"), box.data_dir, box.settings, profile, 9)
+    outcome = apply_bridge.run_application(
+        box._apply_spec(jobs[0], "submit"), box.data_dir, box.settings, profile, synthetic_binding()
+    )
     assert outcome.status == "applied" and outcome.other_sites == ["other.example.test"]
     log = box.data_dir / box.settings.apply.logs_dir / "j00.jsonl"
     assert outcome.log == str(log) and "browser_navigate" in log.read_text(encoding="utf-8")
-    stopped = apply_bridge.run_application(box._apply_spec(jobs[0], "stop"), box.data_dir, box.settings, profile, 9)
+    stopped = apply_bridge.run_application(
+        box._apply_spec(jobs[0], "stop"), box.data_dir, box.settings, profile, synthetic_binding()
+    )
     assert stopped.status == "waiting"
 
 
 def test_reading_files_runs_restricted_to_the_listed_folders(box, tmp_path, monkeypatch):
+    fake_browser_identity(monkeypatch)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     fake = bin_dir / "claude"
@@ -569,7 +575,9 @@ def test_reading_files_runs_restricted_to_the_listed_folders(box, tmp_path, monk
     write_letters(box, jobs)
     applicant = box._applicant()
     spec = box._apply_spec(jobs[0], "submit")
-    apply_bridge.run_application(spec, box.data_dir, box.settings, applicant.profile, 9, applicant.apply_agent_read)
+    apply_bridge.run_application(
+        spec, box.data_dir, box.settings, applicant.profile, synthetic_binding(), applicant.apply_agent_read
+    )
     seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
     argv = seen["argv"]
     assert "--restricted" in argv and argv[argv.index("--tools") + 1] == "Read,Glob,Grep"
@@ -699,6 +707,7 @@ sys.exit(1)
 
 
 def fake_claude(tmp_path, monkeypatch, script):
+    fake_browser_identity(monkeypatch)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     fake = bin_dir / "claude"
@@ -727,7 +736,11 @@ def test_a_relative_data_directory_still_gives_the_apply_run_real_files(tmp_path
     fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_CHECKS_FILES)
     applicant = box._applicant()
     outcome = apply_bridge.run_application(
-        box._apply_spec(job, "submit"), Path("data/local"), s, Path("data/local/applicant/profile.json"), 9
+        box._apply_spec(job, "submit"),
+        Path("data/local"),
+        s,
+        Path("data/local/applicant/profile.json"),
+        synthetic_binding(),
     )
     seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
     assert seen["exist"] == [True, True, True], seen
@@ -758,7 +771,7 @@ def test_a_run_that_never_started_returns_the_job_to_pending(box, tmp_path, monk
     write_letters(box, [job])
     fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_CANNOT_START)
     outcome = apply_bridge.run_application(
-        box._apply_spec(job, "submit"), box.data_dir, box.settings, box._applicant().profile, 9
+        box._apply_spec(job, "submit"), box.data_dir, box.settings, box._applicant().profile, synthetic_binding()
     )
     assert (outcome.status, outcome.reason) == ("pending", "system_error")
     assert "MCP config file not found" in outcome.notes[0]
@@ -987,7 +1000,7 @@ def test_notes_are_recorded_once_although_the_stream_repeats_the_last_message(bo
     write_letters(box, [job])
     fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE_REPEATS_THE_END)
     outcome = apply_bridge.run_application(
-        box._apply_spec(job, "stop"), box.data_dir, box.settings, box._applicant().profile, 9
+        box._apply_spec(job, "stop"), box.data_dir, box.settings, box._applicant().profile, synthetic_binding()
     )
     assert outcome.status == "waiting"
     assert outcome.notes == ["the posting asks for 2+ years.", "the form has no cover-letter field."]
@@ -1037,13 +1050,13 @@ FORM_FILL_DISALLOWED = (
 def test_without_the_new_options_the_apply_command_and_servers_are_unchanged():
     s = settings()
     assert apply_bridge.claude_command(s, Path("/x/mcp.json")) == APPLY_COMMAND
-    servers = apply_bridge.mcp_config(s, 9222)["mcpServers"]
+    servers = apply_bridge.mcp_config(s, synthetic_binding())["mcpServers"]
     assert list(servers) == ["playwright", "gmail"]
     assert servers["gmail"] == {"command": "npx", "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp@1.1.11"]}
     assert servers["playwright"]["args"][:4] == [
         "-y",
         "@playwright/mcp@0.0.83",
-        "--cdp-endpoint=http://localhost:9222",
+        "--cdp-endpoint=ws://127.0.0.1:43123/devtools/browser/synthetic",
         "--viewport-size=1280x900",
     ]
     assert servers["playwright"]["args"][4] == "--blocked-origins=" + ";".join(s.apply.blocked_origins)
@@ -1052,9 +1065,9 @@ def test_without_the_new_options_the_apply_command_and_servers_are_unchanged():
 
 def test_form_fill_options_drop_gmail_and_add_disallowed_tools():
     s = settings()
-    servers = apply_bridge.mcp_config(s, 9222, gmail=False)["mcpServers"]
+    servers = apply_bridge.mcp_config(s, synthetic_binding(), gmail=False)["mcpServers"]
     assert list(servers) == ["playwright"]
-    assert servers["playwright"] == apply_bridge.mcp_config(s, 9222)["mcpServers"]["playwright"]
+    assert servers["playwright"] == apply_bridge.mcp_config(s, synthetic_binding())["mcpServers"]["playwright"]
     command = apply_bridge.claude_command(s, Path("/x/mcp.json"), extra_disallowed=FORM_FILL_DISALLOWED)
     disallowed = command[command.index("--disallowedTools") + 1]
     assert disallowed == APPLY_DISALLOWED + "," + ",".join(FORM_FILL_DISALLOWED)
@@ -1069,12 +1082,12 @@ def test_an_apply_run_without_the_new_options_is_unchanged(box, tmp_path, monkey
     fake_claude(tmp_path, monkeypatch, FAKE_CLAUDE)
     profile = box._applicant().profile
     spec = box._apply_spec(job, "stop")
-    outcome = apply_bridge.run_application(spec, box.data_dir, box.settings, profile, 9)
+    outcome = apply_bridge.run_application(spec, box.data_dir, box.settings, profile, synthetic_binding())
     seen = json.loads((tmp_path / "args.json").read_text(encoding="utf-8"))
     argv = seen["argv"]
     mcp = Path(argv[argv.index("--mcp-config") + 1])
     assert mcp.name == ".mcp-apply-0.json"
-    assert json.loads(mcp.read_text(encoding="utf-8")) == apply_bridge.mcp_config(box.settings, 9)
+    assert json.loads(mcp.read_text(encoding="utf-8")) == apply_bridge.mcp_config(box.settings, synthetic_binding())
     expected = apply_bridge.claude_command(box.settings, mcp, denied=[box.data_dir, profile])
     assert ["claude", *argv] == expected
     assert argv[argv.index("--disallowedTools") + 1] == APPLY_DISALLOWED
@@ -1117,7 +1130,7 @@ def test_form_fill_options_change_only_the_form_fill_run(box, tmp_path, monkeypa
         box.data_dir,
         box.settings,
         profile,
-        9,
+        synthetic_binding(),
         log_path=log_path,
         mask=lambda text: text.replace("sam.synthetic@example.test", "[email]"),
         extra_prompt="\n\n== ANSWER SHEET ==\n- name.first -> Sam",
@@ -1142,10 +1155,22 @@ def test_form_fill_options_change_only_the_form_fill_run(box, tmp_path, monkeypa
 def test_the_checkpoint_service_is_only_added_when_asked():
     s = settings()
     entry = {"command": "/venv/bin/python", "args": ["-m", "intent_job_agent.form_fill.checkpoint", "/x/c.json"]}
-    servers = apply_bridge.mcp_config(s, 9222, gmail=False, extra_servers={"checkpoint": entry})["mcpServers"]
+    servers = apply_bridge.mcp_config(s, synthetic_binding(), gmail=False, extra_servers={"checkpoint": entry})[
+        "mcpServers"
+    ]
     assert list(servers) == ["playwright", "checkpoint"] and servers["checkpoint"] == entry
     command = apply_bridge.claude_command(s, Path("/x/mcp.json"), extra_allowed=("mcp__checkpoint__checkpoint",))
     allowed = command[command.index("--allowedTools") + 1]
     assert allowed == APPLY_COMMAND[APPLY_COMMAND.index("--allowedTools") + 1] + ",mcp__checkpoint__checkpoint"
     rest = [part for part in command if part != allowed]
     assert rest == [part for part in APPLY_COMMAND if part != APPLY_COMMAND[APPLY_COMMAND.index("--allowedTools") + 1]]
+
+
+def fake_browser_identity(monkeypatch):
+    from intent_job_agent import browser_session
+
+    def verify_fake(binding, **kwargs):
+        assert binding == synthetic_binding(), "Process-only tests must use the explicit synthetic binding"
+
+    monkeypatch.setattr(browser_session, "validate_owner", verify_fake)
+    monkeypatch.setattr(browser_session, "targets", lambda binding, **kwargs: verify_fake(binding) or [])

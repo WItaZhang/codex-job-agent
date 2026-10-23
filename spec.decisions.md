@@ -360,6 +360,8 @@
 
 ## 决定 24（2026-10-21）：一步一定能结束，能停下，重启后第二步不丢，察觉有人在用投递用的 Chrome（用户授权按推荐项）（审批与抽查依赖部分已被决定 25 取代）
 
+> 浏览器身份失效处理相关部分已被决定29取代；历史正文保留。
+
 **背景**：
 
 - 2026-10-20 第一次在场试跑（"Apply command"会话）：运行 20261020-183730-e7c8 的第 1 个岗位 18:37:30 开始，运行记录最后写入在 18:37:53，之后没有 meta.json、读回和 summary。`apply_status` 一直说 running，直到约 18:56 用户重启工具服务。那时填表 agent 已经退出，一个 18:37 启动的 Playwright 驱动还活着；那个会话把它杀掉后，这一步仍是 running。重启后这一批还没开始的第二步（25 个岗位）也丢了，只能重新生成批次。同一个岗位 18:57 重跑一次就填好了。
@@ -502,3 +504,15 @@ External legacy configurations cannot address marked workspace storage (resolved
 #### 决定28：远端CI实际失败后的本片修复
 
 CI 39916656829实际failure（1585 passed/21 skipped/3 failed），取代此前queued认知及R1整合后另修R1s的安排。甲方要求R1建立通过的CI：本片修停止/恢复竞态、Linux非ASCII进程识别，补Playwright1.56.0对应Chromium及系统依赖；只供既有本地合成网页测试，不开放新workspace真实业务。ps使用受控子进程locale，保留C时间/UTC和Unicode，不改用户系统locale、不跳过原断言。不重跑旧run碰运气；新HEAD完整验证及制品探针后交Claude复核，协调者推送跑新CI，通过后整合再立即R1b；全套R6仍后续。
+
+## 决定29（2026-10-23）：R1b浏览器归属、空专属profile及失效结果
+
+甲方批准新树先规格与本地合成探针，给甲方/Claude复核后才产品实现。采纳B1/B2：四格/stop优先序及旧generation恢复重开见[public-r1b.md](specs/public-r1b.md)；submit已launch结果不明held，不允许pending自动重投；未launch不造interrupted。仅归属有效的页面变化沿用只报告，身份失效停止自己的agent/driver。
+
+S1条件采用：锁定MCP0.0.83/Playwright1.56.0先证明精确WS、CDP browserPID、OS PID/start及profile核验；成立后可去掉强制lsof，不认证恶意同用户进程，不退裸端口。S2最小管理锁复用apply_running owner，独立填表也互斥，无heartbeat lease。旧复制profile不采用、不迁移、不删；接受重新登录。local_only不变；R4资料权限、R5提交、R6其余恢复、R8发行不扩进本片。
+
+本决定取代spec 4.10第6条/§10第56条相关复制日常资料规则和决定24“浏览器身份失效只报告”的部分；其他历史记录保留。R1已签收main8530523：分支run39918253389对应34221b1；main run39919661089全success（1627 passed/122.49s，0skip及wheel/sdist/editable），合并后本地四项1627/66.13s，甲方提供。
+
+决定29正式评审A/B收敛：必需归属组合采用OS PID/start/profile命令行、本profile精确WS及连接后SystemInfo browserPID，取消必需CDP命令行及enable-automation；headless与系统Chrome有头证据分别记录。独立填表仅协调行/管理锁依赖，kind=form_fill+runid匹配内存运行；真失联不走投递中断收尾、不写领域状态。详见[R1b决定3](specs/public-r1b.decisions.md)。先窄复核，不开产品实现。
+
+决定29绑定早审E1–E7：首次空专属profile此后本工作区持久复用登录，实例generation更新；只读协调查询、kind/runid、独立期望root/db、原子session、有界锁内重读owner、同连接PID+元数据白名单，按R1b决定4修正基础后再迁移。

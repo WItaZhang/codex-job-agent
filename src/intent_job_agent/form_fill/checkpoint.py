@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
+from .. import browser_session
 from . import readback
 from .models import AnswerEntry
 from .recorder import url_key
@@ -37,6 +38,7 @@ TIMEOUT_TEXT = "The checkpoint took too long and may not have been recorded. Car
 UNAVAILABLE_TEXT = (
     "The checkpoint service could not reach the browser, so nothing was recorded. Carry on with the form."
 )
+IDENTITY_LOST_TEXT = "STOP: browser_identity_lost. Do not continue, reconnect, or submit; this run must end."
 UNREAD_TEXT = "The page could not be read, so nothing was recorded. Carry on with the form."
 NO_TAB_TEXT = "Could not find your tab (Page URL {url}), so nothing was recorded. Carry on with the form."
 NO_FIELDS_TEXT = "No form fields on this page; nothing recorded. Carry on."
@@ -52,14 +54,16 @@ from the browser's last answer."""
 
 
 class Config(BaseModel):
-    """checkpoint.json, written by the runner for one job: the applying Chrome's port, the targets open before the
+    """checkpoint.json, written by the runner for one job: the applying Chrome's binding, the targets open before the
     run (never the job's), where to record, the limits, and the answer sheet's question phrases (keys, asks,
     overrides and contact references only, never an answer) so contact fields are masked by column. No contact
     detail is in it."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    port: int
+    binding: dict
+    root: str
+    db_path: str
     before: list[str]
     recordings_dir: str
     rec_id: str
@@ -266,6 +270,8 @@ class Session:
                 return done("no_fields", NO_FIELDS_TEXT)
             self.store.save(obs, stage, capture)
             self.store.save_state(self.recorder)
+        except browser_session.BrowserIdentityLost:
+            raise
         except Exception as error:  # noqa: BLE001 - the page could not be read; the agent carries on
             return done("error", UNREAD_TEXT, error=type(error).__name__)
         more = {"page": obs.page, "fields": len(obs.fields)}
@@ -347,11 +353,17 @@ class Worker:
                     if time.monotonic() >= next_poll:
                         try:
                             self.session.poll()
+                        except browser_session.BrowserIdentityLost:
+                            self.error = "BrowserIdentityLost"
+                            self._stop.set()
                         except Exception:  # noqa: BLE001 - one failed background read is skipped
                             pass
                         next_poll = time.monotonic() + self.interval
                     try:
                         browser.idle(min(0.05, self.interval))
+                    except browser_session.BrowserIdentityLost:
+                        self.error = "BrowserIdentityLost"
+                        self._stop.set()
                     except Exception:  # noqa: BLE001 - the page it waited on closed, or the browser went away
                         time.sleep(min(0.05, self.interval))
                     continue
@@ -365,6 +377,9 @@ class Worker:
                 try:
                     future.set_result(task())
                 except Exception as error:  # noqa: BLE001 - answered as not recorded
+                    if isinstance(error, browser_session.BrowserIdentityLost):
+                        self.error = "BrowserIdentityLost"
+                        self._stop.set()
                     future.set_exception(error)
         finally:
             close = getattr(browser, "close", None)
@@ -386,6 +401,8 @@ class Worker:
             raise
 
     def checkpoint(self, stage: str, url: str) -> str:
+        if self.error == "BrowserIdentityLost":
+            return IDENTITY_LOST_TEXT
         if self.session is None:
             return UNAVAILABLE_TEXT
         queued = time.monotonic()
@@ -397,6 +414,8 @@ class Worker:
             )
         except concurrent.futures.TimeoutError:
             return TIMEOUT_TEXT
+        except browser_session.BrowserIdentityLost:
+            return IDENTITY_LOST_TEXT
         except Exception:  # noqa: BLE001 - the page could not be read; the agent carries on
             return UNREAD_TEXT
 
@@ -440,12 +459,22 @@ class LiveBrowser:
     - Response bodies are fetched only for requests that finished: a stream that never ends (EventSource, long
       polling) would hold the thread forever."""
 
-    def __init__(self, port: int, redactor: Redactor, body_max_bytes: int = 30 * 2**20):
+    def __init__(
+        self,
+        binding,
+        redactor: Redactor,
+        body_max_bytes: int = 30 * 2**20,
+        *,
+        expected,
+        render_seconds: float = readback.READ_SECONDS,
+    ):
         from playwright.sync_api import sync_playwright
 
-        self.port, self.redactor, self.body_max_bytes = int(port), redactor, body_max_bytes
+        self.expected = expected
+        self.render_seconds = render_seconds
+        self.binding, self.redactor, self.body_max_bytes = binding, redactor, body_max_bytes
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.connect_over_cdp(f"http://127.0.0.1:{self.port}")
+        self._browser = browser_session.connect(self._pw, self.binding, expected=self.expected)
         self._cdp = None
         self._ids: dict[int, str] = {}  # id(page) -> CDP target id
         self._pages: list = []
@@ -486,19 +515,26 @@ class LiveBrowser:
         return self._ids[id(page)]
 
     def _page(self, tab: str):
+        self._validate()
         for page in list(self._pages):
             if not page.is_closed() and self._target(page) == tab:
                 return page
         raise readback.ReadbackError("job tab not found in the browser")
 
+    def _validate(self):
+        browser_session.validate_owner(self.binding, expected=self.expected)
+        if not self._browser.is_connected():
+            raise browser_session.BrowserIdentityLost("Checkpoint browser disconnected")
+
     def tabs(self) -> list[dict]:
         """The browser's targets with their openers (Target.getTargets; /json/list has no openerId)."""
+        self._validate()
         try:
             if self._cdp is None:
                 self._cdp = self._browser.new_browser_cdp_session()
             infos = self._cdp.send("Target.getTargets")["targetInfos"]
-        except Exception:  # noqa: BLE001 - the HTTP list, without openers
-            return readback.list_targets(self.port)
+        except Exception as error:
+            raise browser_session.BrowserIdentityLost("Checkpoint browser disconnected") from error
         return [
             {"id": i.get("targetId"), "type": i.get("type"), "url": i.get("url", ""), "openerId": i.get("openerId")}
             for i in infos
@@ -511,7 +547,7 @@ class LiveBrowser:
         """The page's simplified HTML and screenshot with the `hide` fields ((frame, path) of fields matched to a
         contact entry) and every element showing a contact value hidden or blacked out, and its MHTML."""
         page = self._page(tab)
-        shot, why = readback._masked_screenshot(page, self.redactor, hide)
+        shot, why = readback._masked_screenshot(page, self.redactor, hide, render_seconds=self.render_seconds)
         snapshot = None
         if mhtml:
             try:
@@ -581,6 +617,7 @@ class LiveBrowser:
         return events
 
     def idle(self, seconds: float) -> None:
+        self._validate()
         """Wait while Playwright delivers its events (new pages, requests, dialogs)."""
         open_pages = [p for p in self._pages if not p.is_closed()]
         if open_pages:
@@ -603,7 +640,17 @@ def main(argv=None) -> int:
     config = Config.model_validate_json(Path(args[0]).read_text(encoding="utf-8"))
     redactor = Redactor.from_profile(json.loads(Path(config.profile).read_text(encoding="utf-8")))
     worker = Worker(
-        lambda: Session(config, LiveBrowser(config.port, redactor, config.network_max_mb * 2**20), redactor),
+        lambda: Session(
+            config,
+            LiveBrowser(
+                browser_session.BrowserBinding.load(config.binding),
+                redactor,
+                config.network_max_mb * 2**20,
+                expected=(config.root, config.db_path),
+                render_seconds=config.timeout_seconds,
+            ),
+            redactor,
+        ),
         config.interval_seconds,
         config.timeout_seconds,
     )

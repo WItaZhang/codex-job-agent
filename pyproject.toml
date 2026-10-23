@@ -48,6 +48,7 @@ packages = ["src/intent_job_agent"]
 ".claude/skills/cover-letter" = "intent_job_agent_data/cover-letter"
 
 [tool.hatch.build.targets.sdist]
+exclude = ["/scripts/ci_browser_userns.py"]
 only-include = ["src", "tests", "configs/default.yaml", ".claude/skills/cover-letter", "pyproject.toml", "uv.lock", "LICENSE", "NOTICE.md", "README.md", "scripts"]
 
 [tool.uv]

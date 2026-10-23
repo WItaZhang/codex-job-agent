@@ -28,7 +28,6 @@ import os
 import re
 import subprocess
 import tempfile
-import urllib.request
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
@@ -340,19 +339,22 @@ def build_prompt(spec: ApplySpec, data_dir: Path, settings: Settings, profile: P
     )
 
 
-def mcp_config(settings: Settings, cdp_port: int, gmail: bool = True, extra_servers: dict | None = None) -> dict:
+def mcp_config(settings: Settings, binding, gmail: bool = True, extra_servers: dict | None = None) -> dict:
     """ApplyPilot's MCP servers at pinned versions, with the browser kept off the configured high-risk sites.
     `gmail=False` leaves the Gmail server out and `extra_servers` adds the form-fill module's own (its checkpoint
     service, specs/form-fill.md 4.2, 5.6)."""
+    from . import browser_session
     from .vendor.applypilot import config
 
+    if not isinstance(binding, browser_session.BrowserBinding):
+        raise browser_session.BrowserIdentityLost("MCP requires an exact browser binding")
     servers = {
         "playwright": {
             "command": "npx",
             "args": [
                 "-y",
                 settings.apply.mcp.playwright,
-                f"--cdp-endpoint=http://localhost:{cdp_port}",
+                f"--cdp-endpoint={binding.endpoint}",
                 f"--viewport-size={config.DEFAULTS['viewport']}",
                 "--blocked-origins=" + ";".join(settings.apply.blocked_origins),
             ],
@@ -543,6 +545,7 @@ def render_letter_pdf(text: str, pdf_path: Path, name: str, day: str) -> None:
                 config.get_chrome_path(),
                 "--headless=new",
                 "--disable-gpu",
+                f"--user-data-dir={Path(tmp) / 'empty-profile'}",
                 "--no-pdf-header-footer",
                 f"--print-to-pdf={pdf_path.resolve()}",
                 page.as_uri(),
@@ -566,28 +569,25 @@ def letter_date() -> str:
 # --- running applications (adapted from ApplyPilot's launcher.run_job) -----------------------------------
 
 
-def cdp_alive(port: int) -> bool:
-    """Whether a Chrome answers on this debugging port (the form-fill module checks it without starting one)."""
+def cdp_alive(binding, *, expected) -> bool:
+    """Compatibility predicate accepting only a verified binding, never a binding."""
+    from . import browser_session
+
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1):
-            return True
-    except OSError:
+        browser_session.verify(binding, expected=expected)
+        return True
+    except browser_session.BrowserIdentityLost:
         return False
 
 
-def ensure_chrome(settings: Settings, worker_id: int = 0) -> int:
-    """Reuse the worker Chrome if it is running (its tabs may hold forms the user is checking); otherwise copy
-    the profile as ApplyPilot does, strip it, and start Chrome."""
+def ensure_chrome(settings: Settings, worker_id: int = 0):
+    """Start/adopt only the current coordinated workspace's dedicated browser."""
     settings.require_external("ensure_chrome")
-    from .vendor.applypilot.apply import chrome
+    from . import browser_session
 
-    port = chrome.BASE_CDP_PORT + worker_id
-    if cdp_alive(port):
-        return port
-    profile_dir = chrome.setup_worker_profile(worker_id)
-    strip_profile(profile_dir, settings.apply.chrome_profile_strip)
-    chrome.launch_chrome(worker_id, port)
-    return port
+    if worker_id != 0:
+        raise InvariantError("Only the single coordinated browser worker is supported")
+    return browser_session.ensure(settings)
 
 
 def run_application(
@@ -595,7 +595,7 @@ def run_application(
     data_dir: Path,
     settings: Settings,
     profile: Path,
-    port: int,
+    binding,
     read_dirs=(),
     *,
     log_path: Path | None = None,
@@ -611,6 +611,8 @@ def run_application(
     added after the prompt, no Gmail server (written to its own MCP config file, so /apply's stays as it is), more
     refused tools, its own servers (the checkpoint service) and their allowed tools. Without them the run is
     /apply's, unchanged."""
+    from . import browser_session
+
     settings.require_external("run_application", data_dir, profile)
     from .vendor.applypilot import config
 
@@ -618,7 +620,7 @@ def run_application(
     text = build_prompt(spec, data_dir, settings, profile, read_dirs) + extra_prompt
     own = extra_servers or not gmail  # the form-fill module's servers go to their own file; /apply's stays as is
     mcp_path = config.APP_DIR / (".mcp-form-fill-0.json" if own else ".mcp-apply-0.json")
-    mcp_path.write_text(json.dumps(mcp_config(settings, port, gmail=gmail, extra_servers=extra_servers)), "utf-8")
+    mcp_path.write_text(json.dumps(mcp_config(settings, binding, gmail=gmail, extra_servers=extra_servers)), "utf-8")
     if log_path is None:
         logs = Path(data_dir) / settings.apply.logs_dir
         logs.mkdir(parents=True, exist_ok=True)
@@ -633,17 +635,22 @@ def run_application(
     # The working directory holds only the files to upload (ApplyPilot copies them to apply-workers/current),
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
     stop = watchdog.LIVE.begin(spec.job_id, spec.mode)  # from here a stop is heard, before the agent starts
+    proc = None
     try:
         chrome = watchdog.ChromeWatch(
-            port,
+            binding,
             settings.apply.blocked_origins,
             own=(spec.resume_tab,),
             down_after=settings.apply.watchdog.down_after,
+            expected=browser_session.scope(settings),
+            control=True,
         )
+        browser_session.validate_owner(binding, expected=browser_session.scope(settings))
         chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
-        proc = None
-        if watchdog.LIVE.launch(stop):  # a stop asked before this point keeps the agent from starting (review #5)
-            proc = subprocess.Popen(
+
+        def start_agent():
+            browser_session.validate_owner(binding, expected=browser_session.scope(settings))
+            return subprocess.Popen(
                 claude_command(
                     settings,
                     mcp_path,
@@ -659,7 +666,34 @@ def run_application(
                 cwd=str(config.APPLY_WORKER_DIR),
                 start_new_session=True,
             )
-            watchdog.LIVE.spawned(stop, proc.pid)  # the step records it, to end it after a restart (review #7)
+
+        proc = watchdog.LIVE.start_process(stop, start_agent)
+        if proc is not None:
+            watchdog.LIVE.spawned(stop, proc.pid)
+    except browser_session.BrowserIdentityLost as error:
+        watchdog.LIVE.end(stop)
+        if proc is not None:
+            watchdog.Tree(proc.pid).kill(alive=proc.poll() is None)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            proc.stdout.close()
+            status, reason = ("held", "interrupted") if spec.mode == "submit" else ("failed", "browser_identity_lost")
+            return ApplyOutcome(status, reason, [str(error)])
+        return ApplyOutcome("pending", "browser_identity_lost_before_launch", [str(error)])
+    except Exception as error:
+        watchdog.LIVE.end(stop)
+        if proc is None:
+            raise
+        watchdog.Tree(proc.pid).kill(alive=proc.poll() is None)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        proc.stdout.close()
+        status, reason = ("held", "interrupted") if spec.mode == "submit" else ("failed", "runner_interrupted")
+        return ApplyOutcome(status, reason, [f"After launch: {type(error).__name__}: {error}"])
     except BaseException:
         watchdog.LIVE.end(stop)
         raise
@@ -692,6 +726,10 @@ def run_application(
                 ticks=(tree.scan, chrome.check),
             )
         chrome.check()  # how the agent left the tabs
+    except browser_session.BrowserIdentityLost:
+        why = "browser_identity_lost"
+    except Exception:
+        why = "runner_interrupted"
     finally:  # whatever ended the run: the agent and everything it started (spec section 10 item 107)
         tree.kill(alive=proc.poll() is None)
         try:
@@ -702,6 +740,26 @@ def run_application(
         watchdog.LIVE.end(stop)
     seen = audit(events, spec.url)
     used = chrome.report(events, pages)
+    output = "\n".join(texts)
+    if why in ("browser_identity_lost", "runner_interrupted"):
+        # A reliable result already emitted before disconnect wins; otherwise never retry a launched submit.
+        if parse_result(output) == "failed:already_applied" or (
+            spec.mode == "submit" and parse_result(output) == "applied"
+        ):
+            status, reason = outcome_status(spec.mode, parse_result(output))
+        else:
+            status, reason = ("held", "interrupted") if spec.mode == "submit" else ("failed", why)
+        return ApplyOutcome(
+            status,
+            reason,
+            ["浏览器身份失效；已停止本运行，提交结果未知时不得自动重投"],
+            seen["other_sites"],
+            seen["emails"],
+            str(log_path),
+            None,
+            last_url(events),
+            used,
+        )
     if why == "stopped":  # the user stopped the step (item 109): nothing was submitted, the job goes back
         said = ["你停下了这一步：这个岗位没有做完，网站上没有提交任何东西"]
         return ApplyOutcome(
@@ -755,19 +813,23 @@ class ChromeRunner:
     def __init__(self, data_dir: Path, settings: Settings, profile: Path, read_dirs=()):
         self.data_dir, self.settings, self.profile = Path(data_dir).resolve(), settings, Path(profile).resolve()
         self.read_dirs = tuple(read_dirs)
-        self.port: int | None = None
+        self.binding = None
 
     def __call__(self, spec: ApplySpec) -> ApplyOutcome:
         self.settings.require_external("__call__", self.data_dir, self.profile)
+        from . import browser_session
+
         try:
             configure(self.data_dir, self.settings, self.profile)
-            if self.port is None or not cdp_alive(self.port):
-                self.port = ensure_chrome(self.settings)
+            if self.binding is None or not cdp_alive(self.binding, expected=browser_session.scope(self.settings)):
+                self.binding = ensure_chrome(self.settings)
             extra = {"extra_prompt": spec.sheet} if spec.sheet else {}  # an empty sheet: /apply's run, unchanged
             before = self._tabs()
             outcome = run_application(
-                spec, self.data_dir, self.settings, self.profile, self.port, self.read_dirs, **extra
+                spec, self.data_dir, self.settings, self.profile, self.binding, self.read_dirs, **extra
             )
+        except browser_session.BrowserIdentityLost as error:
+            return ApplyOutcome("pending", "browser_identity_lost_before_launch", [str(error)])
         except Exception as error:  # one broken run must not stop the batch; nothing reached the site
             return ApplyOutcome("pending", "system_error", [f"{type(error).__name__}: {error}"[:300]])
         if outcome.status != "held":
@@ -775,9 +837,11 @@ class ChromeRunner:
         return replace(outcome, tab=self._held_tab(spec, before, outcome))
 
     def _tabs(self) -> list[dict] | None:
+        from . import browser_session
+
         self.settings.require_external("_tabs", self.data_dir, self.profile)
         try:
-            return readback.list_targets(self.port)
+            return readback.list_targets(self.binding, expected=browser_session.scope(self.settings))
         except Exception:  # noqa: BLE001 - no tab list: a held job is resumed from its address
             return None
 
@@ -791,4 +855,8 @@ class ChromeRunner:
             target = next((t for t in after if t.get("id") == spec.resume_tab), None)
         else:
             target = readback.find_job_tab(before or [], after, outcome.last_url) if before is not None else None
-        return {"id": str(target.get("id")), "url": str(target.get("url", ""))} if target else None
+        return (
+            {"id": str(target.get("id")), "url": str(target.get("url", "")), "generation": self.binding.generation}
+            if target
+            else None
+        )

@@ -21,6 +21,7 @@ from intent_job_agent.form_fill.redact import Redactor, total_hits
 from intent_job_agent.store import Store
 from intent_job_agent.tools import COMMIT_TOOLS, SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
 
+from .apply_fakes import synthetic_binding
 from .conftest import BASE_INTENT, BASE_VOCAB, ROOT, settings
 from .test_slice6 import DAY, PROFILE, SECRETS, add_jobs, write_applicant, write_letters
 
@@ -137,7 +138,7 @@ class FakeBrowser:
 
     def ensure_chrome(self) -> int:
         self.ensured += 1
-        return 9222
+        return synthetic_binding()
 
     def targets(self) -> list[dict]:
         return [dict(tab) for tab in self.tabs]

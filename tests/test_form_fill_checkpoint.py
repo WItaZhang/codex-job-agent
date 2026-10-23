@@ -8,16 +8,18 @@ import json
 import socket
 import threading
 import time
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from intent_job_agent import browser_session
 from intent_job_agent.form_fill import checkpoint
 from intent_job_agent.form_fill.checkpoint import Config, Session, Worker
 from intent_job_agent.form_fill.recording import Capture, read_run
 from intent_job_agent.form_fill.redact import Redactor
 
+from .apply_fakes import synthetic_binding
+from .browser_fixture import finish_owned, start_owned
 from .test_form_fill_recording import PROFILE, leaks
 
 URL = "https://jobs.example.test/acme/apply"
@@ -131,7 +133,9 @@ class FakeBrowser:
 
 def config(tmp_path, **changes) -> Config:
     values = {
-        "port": 9222,
+        "binding": synthetic_binding().dump(),
+        "root": "/synthetic",
+        "db_path": "/synthetic/state.db",
         "before": ["T0"],
         "recordings_dir": str(tmp_path / "recordings"),
         "rec_id": "greenhouse-acme-1",
@@ -392,21 +396,29 @@ def site():
 
 def test_the_service_records_a_three_step_form_in_a_real_browser(tmp_path, site):
     sync_api = pytest.importorskip("playwright.sync_api")
-    port = free_port()
     with sync_api.sync_playwright() as p:
-        try:  # a persistent context: the agent's tabs live in Chrome's default context, as in the applying Chrome
-            browser = p.chromium.launch_persistent_context(
-                str(tmp_path / "chrome"), headless=True, args=[f"--remote-debugging-port={port}"]
-            )
-        except Exception as exc:  # no browser installed
-            pytest.skip(f"Chromium not available: {exc}")
-        context = browser
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list") as answer:
-            before = [t["id"] for t in json.load(answer)]
+        context, binding = start_owned(tmp_path, p)
+        before = [
+            t["id"] for t in browser_session.targets(binding, expected=(str(tmp_path), str(tmp_path / "coord.db")))
+        ]
         redactor = Redactor.from_profile(PROFILE)
-        cfg = config(tmp_path, port=port, before=before, url=f"{site}/step1", interval_seconds=0.2)
+        cfg = config(
+            tmp_path,
+            binding=binding.dump(),
+            root=str(tmp_path),
+            db_path=str(tmp_path / "coord.db"),
+            before=before,
+            url=f"{site}/step1",
+            interval_seconds=0.2,
+        )
         worker = Worker(
-            lambda: Session(cfg, checkpoint.LiveBrowser(port, redactor), redactor), interval=0.2, timeout=10
+            lambda: Session(
+                cfg,
+                checkpoint.LiveBrowser(binding, redactor, expected=(str(tmp_path), str(tmp_path / "coord.db"))),
+                redactor,
+            ),
+            interval=0.2,
+            timeout=10,
         )
         worker.start()
         try:
@@ -428,7 +440,7 @@ def test_the_service_records_a_three_step_form_in_a_real_browser(tmp_path, site)
             worker.poll_now()
         finally:
             worker.stop()
-        browser.close()
+        finish_owned(binding)
     rec = tmp_path / "recordings" / "greenhouse-acme-1"
     pages = read_run(rec, "run-1")
     assert [(p.page, p.read_from) for p in pages] == [(1, "filled"), (2, "auto"), (3, "auto")]
@@ -604,27 +616,32 @@ def test_contact_fields_are_masked_by_column_before_anything_is_saved(tmp_path):
 
 
 def _two_client_browser(tmp_path, sync_api, p):
-    port = free_port()
-    try:
-        context = p.chromium.launch_persistent_context(
-            str(tmp_path / "chrome"), headless=True, args=[f"--remote-debugging-port={port}"]
-        )
-    except Exception as exc:  # no browser installed
-        pytest.skip(f"Chromium not available: {exc}")
-    return context, port
+    return start_owned(tmp_path, p)
 
 
-def _worker(tmp_path, port, url, before, **changes):
+def _worker(tmp_path, binding, url, before, **changes):
     redactor = Redactor.from_profile(PROFILE)
-    cfg = config(tmp_path, port=port, before=before, url=url, interval_seconds=0.2, **changes)
-    worker = Worker(lambda: Session(cfg, checkpoint.LiveBrowser(port, redactor), redactor), interval=0.2, timeout=5)
+    cfg = config(
+        tmp_path,
+        binding=binding.dump(),
+        root=str(tmp_path),
+        db_path=str(tmp_path / "coord.db"),
+        before=before,
+        url=url,
+        interval_seconds=0.2,
+        **changes,
+    )
+    worker = Worker(
+        lambda: Session(cfg, checkpoint.LiveBrowser(binding, redactor, expected=(cfg.root, cfg.db_path)), redactor),
+        interval=0.2,
+        timeout=5,
+    )
     worker.start()
     return worker
 
 
-def _targets(port) -> list[str]:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list") as answer:
-        return [t["id"] for t in json.load(answer)]
+def _targets(binding) -> list[str]:
+    return [t["id"] for t in browser_session.targets(binding, expected=(binding.root, binding.db_path))]
 
 
 def test_closing_a_tab_open_before_the_run_does_not_stop_the_service(tmp_path, site):
@@ -647,7 +664,7 @@ def test_closing_a_tab_open_before_the_run_does_not_stop_the_service(tmp_path, s
             assert time.monotonic() - started < 3
         finally:
             worker.stop()
-        context.close()
+        finish_owned(port)
 
 
 def test_the_service_leaves_dialogs_to_the_agent(tmp_path, site):
@@ -670,7 +687,7 @@ def test_the_service_leaves_dialogs_to_the_agent(tmp_path, site):
             assert agent.title() == "confirm=true"
         finally:
             worker.stop()
-        context.close()
+        finish_owned(port)
 
 
 def test_a_stream_that_never_ends_does_not_hold_the_service(tmp_path, site):
@@ -688,4 +705,4 @@ def test_a_stream_that_never_ends_does_not_hold_the_service(tmp_path, site):
             assert time.monotonic() - started < 3
         finally:
             worker.stop()
-        context.close()
+        finish_owned(port)

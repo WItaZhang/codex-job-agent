@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
-from .. import apply_bridge, watchdog
+from .. import apply_bridge, browser_session, watchdog
 from ..applicant import Applicant
 from ..config import Settings
 from ..domain import InvariantError
@@ -123,6 +123,7 @@ class JobOutcome(BaseModel):
     other_sites: tuple[str, ...] = ()  # sites opened besides the job's, for /apply's checklist (spec 4.10 item 6)
     tab_id: str | None = None  # the job's tab as read back: /apply keeps it for a job held at a gate (spec item 97)
     tab_url: str | None = None
+    generation: str | None = None
     chrome: tuple[str, ...] = ()  # what changed in the applying Chrome that the agent did not do (spec item 114)
 
 
@@ -458,11 +459,13 @@ def recording_store(ctx: RunContext, url: str) -> RecordingStore:
     )
 
 
-def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, port: int, before) -> Path:
+def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, binding, before) -> Path:
     """checkpoint.json for this job's checkpoint service: paths and limits only, no contact detail."""
     form_fill = ctx.settings.form_fill
     config = checkpoint.Config(
-        port=int(port),
+        binding=binding.dump(),
+        root=browser_session.scope(ctx.settings)[0],
+        db_path=browser_session.scope(ctx.settings)[1],
         before=[str(t.get("id")) for t in before],
         recordings_dir=str(recordings_root(ctx)),
         rec_id=recording_id(entry.url),
@@ -498,11 +501,11 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
     status, page_dir, agent, sites, chrome = "system_error", None, None, (), ()
     store = recording_store(ctx, entry.url)
     try:
-        port = ctx.runner.ensure_chrome()
+        binding = ctx.runner.ensure_chrome()
         before = ctx.runner.targets()
         store.write_meta(entry.url, entry.company, entry.title)
         store.begin_run()
-        config = write_checkpoint_config(entry, ctx, job_dir, port, before)
+        config = write_checkpoint_config(entry, ctx, job_dir, binding, before)
         outcome = ctx.runner.fill(
             job_spec(entry, ctx.applicant, job_dir),
             log_path=job_dir / LOG_FILE,
@@ -513,6 +516,9 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
             extra_servers={checkpoint.SERVER_NAME: checkpoint.server_entry(config)},
             extra_allowed=(checkpoint.ALLOWED_TOOL,),
         )
+    except browser_session.BrowserIdentityLost as error:
+        agent = "browser_identity_lost_before_launch"
+        notes.append(_error(error))
     except Exception as error:  # noqa: BLE001 - nothing reached the site, or the run broke; the next job goes on
         notes.append(_error(error))
     else:
@@ -550,6 +556,7 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         recording_id=store.rec_id,
         other_sites=sites,
         tab_id=str(seen.target.get("id")) if seen.target else None,
+        generation=seen.target.get("generation") if seen.target else None,
         tab_url=ctx.redactor.mask(str(seen.target.get("url", ""))) if seen.target else None,
         chrome=chrome,
     )
@@ -963,44 +970,62 @@ class FormFillRunner:
     def __init__(self, data_dir: Path, settings: Settings, profile: Path, read_dirs=()):
         self.data_dir, self.settings, self.profile = Path(data_dir).resolve(), settings, Path(profile).resolve()
         self.read_dirs = tuple(read_dirs)
-        self.port: int | None = None
+        self.binding = None
 
-    def ensure_chrome(self) -> int:
+    def ensure_chrome(self) -> browser_session.BrowserBinding:
         """Reuse the applying Chrome if it runs (its tabs may hold forms the user is checking); start it if not."""
         self.settings.require_external("ensure_chrome", self.data_dir, self.profile)
         apply_bridge.configure(self.data_dir, self.settings, self.profile)
-        self.port = apply_bridge.ensure_chrome(self.settings)
-        return self.port
+        self.binding = apply_bridge.ensure_chrome(self.settings)
+        return self.binding
 
     def targets(self) -> list[dict]:
         self.settings.require_external("targets", self.data_dir, self.profile)
-        return readback.list_targets(self._port())
+        return readback.list_targets(self._binding(), expected=browser_session.scope(self.settings))
 
     def open_tabs(self) -> list[dict] | None:
         """The applying Chrome's tabs when it already runs, None when it does not. It never starts Chrome: the tool
         server answers one call at a time, and a cold start copies the profile."""
         self.settings.require_external("open_tabs", self.data_dir, self.profile)
-        from ..vendor.applypilot.apply import chrome
+        from .. import browser_session
 
-        port = chrome.BASE_CDP_PORT  # worker 0, as ensure_chrome uses
-        return readback.list_targets(port) if apply_bridge.cdp_alive(port) else None
+        binding = browser_session.inspect(self.settings)
+        return (
+            browser_session.targets(binding, expected=browser_session.scope(self.settings))
+            if binding is not None
+            else None
+        )
 
     def fill(self, spec: apply_bridge.ApplySpec, **options) -> apply_bridge.ApplyOutcome:
         self.settings.require_external("fill", self.data_dir, self.profile)
         return apply_bridge.run_application(
-            spec, self.data_dir, self.settings, self.profile, self._port(), self.read_dirs, **options
+            spec, self.data_dir, self.settings, self.profile, self._binding(), self.read_dirs, **options
         )
 
     def read(self, target: dict, out_dir: Path, redactor: Redactor, sheet=None) -> readback.FinalPage:
         self.settings.require_external("read", self.data_dir, self.profile)
         seconds = self.settings.apply.watchdog.read_seconds  # spec section 10 item 108
-        return readback.read_final_page(self._port(), target, out_dir, redactor, sheet, seconds=seconds)
+        return readback.read_final_page(
+            self._binding(),
+            target,
+            out_dir,
+            redactor,
+            sheet,
+            seconds=seconds,
+            render_seconds=self.settings.form_fill.checkpoint_timeout_seconds,
+            expected=browser_session.scope(self.settings),
+        )
 
     def tab_state(self, target: dict) -> PageState:
         self.settings.require_external("tab_state", self.data_dir, self.profile)
-        return readback.tab_state(self._port(), target, seconds=self.settings.apply.watchdog.read_seconds)
+        return readback.tab_state(
+            self._binding(),
+            target,
+            seconds=self.settings.apply.watchdog.read_seconds,
+            expected=browser_session.scope(self.settings),
+        )
 
-    def _port(self) -> int:
-        if self.port is None:
+    def _binding(self) -> browser_session.BrowserBinding:
+        if self.binding is None:
             raise InvariantError("The applying Chrome is not started; call ensure_chrome first")
-        return self.port
+        return self.binding

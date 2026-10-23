@@ -1549,7 +1549,7 @@ class Toolbox:
             ff_jobs = JobList(jobs=[entries[j] for j in step if j in filled])
             form_fill.begin_feasibility(ctx, list_path, ff_jobs, personal, checked=checked)
         runner = self.apply_runner or apply_bridge.ChromeRunner(
-            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
+            self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
         )
         data["phases"][phase] = "running"
         data.pop("interrupted", None)  # the user has moved on from the cut-short step (review #9)
@@ -1625,6 +1625,12 @@ class Toolbox:
                             outcome = self._masked(runner(spec), inputs.redactor)
                         note = self._note(outcome)
                     item["outcome"], item["finished"] = outcome, time.time()
+                    if outcome and outcome.reason in (
+                        "browser_identity_lost_before_launch",
+                        "browser_identity_lost",
+                        "interrupted",
+                    ):
+                        run["stop"] = run["stop"] or time.time()
                     if self._stopped(outcome):  # back where it was, pending: no result, no attempt (item 109)
                         item["state"] = "stopped"
                         continue
@@ -1660,10 +1666,19 @@ class Toolbox:
                 result["warning"] = form_fill.PERSONAL_TABS_UNCHECKED
         return result
 
+    def _browser_settings(self):
+        return self.settings.model_copy(
+            update={
+                "storage": self.settings.storage.model_copy(
+                    update={"data_dir": str(self.data_dir), "db_path": str(self.store.path)}
+                )
+            }
+        )
+
     def _browser(self, applicant):
         """The applying Chrome as the form-fill module drives it: its tabs, and a glance at one of them."""
         return self.form_fill_runner or form_fill.FormFillRunner(
-            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
+            self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
         )
 
     def _fill_context(self, applicant, inputs) -> form_fill.RunContext:
@@ -1671,7 +1686,7 @@ class Toolbox:
         return form_fill.RunContext(
             run_id=run_id,
             run_dir=self.data_dir / self.settings.form_fill.dir / "runs" / run_id,
-            settings=self.settings,
+            settings=self._browser_settings(),
             applicant=applicant,
             answers=inputs.answers,
             checklist=inputs.checklist,
@@ -1702,6 +1717,7 @@ class Toolbox:
             "reason": outcome.reason,
             "note": "；".join(n for n in outcome.notes if n) or None,
             "tab_id": tab.get("id"),
+            "generation": tab.get("generation"),
             "tab_url": tab.get("url"),
             "times": times,
         }
@@ -1770,7 +1786,9 @@ class Toolbox:
             todo=todo,
             report=str(path) if path else None,
             recording_id=outcome.recording_id or report.recording_id,  # the report's copy went through the mask
-            tab={"id": outcome.tab_id, "url": outcome.tab_url} if outcome.tab_id else None,
+            tab={"id": outcome.tab_id, "url": outcome.tab_url, "generation": outcome.generation}
+            if outcome.tab_id
+            else None,
             chrome=tuple(outcome.chrome),
         )
 
@@ -1876,6 +1894,11 @@ class Toolbox:
                 ours = owner == me
                 if not ours and watchdog.alive(*owner):
                     return row
+                if row["kind"] == "form_fill" and ours:
+                    fill = self._form_fill_run
+                    matching = fill is not None and fill.get("run_id") == row["run_id"]
+                    if not matching and watchdog.alive(*owner):
+                        return row  # another Toolbox in this same live process is not an orphan
                 run = self._apply_run
                 # A normal worker may finish after _sync_apply_results but before this transaction.
                 # Its matching in-memory run still owns cleanup, even when status is no longer running.
@@ -1891,12 +1914,22 @@ class Toolbox:
                         )
                     )
                 )
+                fill = self._form_fill_run
+                known = known or (
+                    ours
+                    and row["kind"] == "form_fill"
+                    and fill is not None
+                    and not fill.get("closed")
+                    and row["run_id"] == fill.get("run_id")
+                )
                 if not known:
                     watchdog.kill_agent(row["agent_pid"], row["agent_started"])  # by identity (review #7)
                     watchdog.kill_orphans(self._agent_marks())
                     if row["kind"] == "step":
                         self._close_interrupted(row["batch_id"], row["phase"], row)
                     self.store.end_activity(owner)
+                if row["kind"] == "form_fill":
+                    return None  # standalone fill never closes application phases
             row = self.store.activity()  # what is left is a live server's (or this one's running) step
             mine = self._apply_run if _running(self._apply_run) else None
             left = [
@@ -1967,15 +2000,18 @@ class Toolbox:
         """Another session's tool server runs a step or a resume (spec section 10 item 111)."""
         since = datetime.fromisoformat(row["since"]).astimezone().strftime("%H:%M")
         what = "接着做"
-        if row["kind"] != "resume":
+        if row["kind"] == "form_fill":
+            what = f"独立填表 {row['run_id']}"
+        elif row["kind"] != "resume":
             what = f"批次 {row['batch_id']} 的{apply_fill.STEP_NAMES[row['phase']]}"
         return {
             "kind": row["kind"],
+            "run_id": row.get("run_id"),
             "batch_id": row["batch_id"],
             "phase": row["phase"],
             "job_id": row["job_id"],
             "since": row["since"],
-            "message": f"另一个会话的工具服务正在跑投递：{what}（从 {since} 起）",
+            "message": f"另一个会话的工具服务正在运行：{what}（从 {since} 起）",
         }
 
     def _pending_step(self, batch_id: str, data: dict) -> dict | None:
@@ -2015,7 +2051,11 @@ class Toolbox:
     @staticmethod
     def _stopped(outcome) -> bool:
         """A job the user's stop ended before it was done (spec section 10 item 109): it goes back where it was."""
-        return outcome is not None and outcome.status == "pending" and outcome.reason == "stopped"
+        return (
+            outcome is not None
+            and outcome.status == "pending"
+            and outcome.reason in ("stopped", "browser_identity_lost_before_launch")
+        )
 
     def _ended(self, run: dict, writer: Store | None) -> None:
         """The end of a step's or a resume's thread, however it ended: never left running (spec section 10 item
@@ -2278,7 +2318,11 @@ class Toolbox:
     def _held_tab(hold: dict, tabs: list[dict] | None) -> tuple[dict | None, int]:
         """A held job's tab among the open ones: by its CDP id, else by the address kept (Chrome may have restarted).
         Returns the tab and how many open tabs show its address; a tab is only taken when that is exactly one."""
-        pages = [tab for tab in tabs or [] if tab.get("type") == "page"]
+        pages = [
+            tab
+            for tab in tabs or []
+            if tab.get("type") == "page" and hold.get("generation") and tab.get("generation") == hold["generation"]
+        ]
         target = next((tab for tab in pages if hold["tab_id"] and tab.get("id") == hold["tab_id"]), None)
         url = target.get("url", "") if target else hold["tab_url"]
         if not url:
@@ -2414,7 +2458,7 @@ class Toolbox:
             ctx = self._fill_context(applicant, inputs)
             form_fill.begin_feasibility(ctx, list_path, JobList(jobs=[entries[j] for j in refill]))
         runner = self.apply_runner or apply_bridge.ChromeRunner(
-            self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read
+            self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
         )
         owner = self._owner()
         self.store.begin_activity(owner, "resume")
@@ -2467,6 +2511,12 @@ class Toolbox:
                     writer.set_resuming([item["job_id"]], True)
                     outcome = self._resume_one(item, writer, inputs.redactor, **work_on)
                     item["outcome"], item["finished"] = outcome, time.time()
+                    if outcome and outcome.reason in (
+                        "browser_identity_lost_before_launch",
+                        "browser_identity_lost",
+                        "interrupted",
+                    ):
+                        run["stop"] = run["stop"] or time.time()
                     item["state"] = "skipped" if outcome is None else "stopped" if self._stopped(outcome) else "done"
                     if outcome and outcome.reason == "maybe_submitted":
                         run["stopped"] = item["job_id"]
@@ -2584,7 +2634,9 @@ class Toolbox:
                 },
             )
         hold_row = None
-        if outcome.status == "held" and hold["times"] >= 2:  # at most two holds per job (decision 23, G-g)
+        if (
+            outcome.status == "held" and hold["times"] >= 2 and outcome.reason != "interrupted"
+        ):  # at most two holds per job (decision 23, G-g)
             outcome = dataclasses.replace(outcome, status="failed")
             note = f"{outcome.reason}；第三次卡在门槛，算一次允许的失败；{note or ''}".rstrip("；")
         elif outcome.status == "held":
@@ -2614,19 +2666,22 @@ class Toolbox:
             raise InvariantError("A form-fill run is still running; check form_fill_status")
         if _running(self._apply_run):
             raise InvariantError("An apply step is using the applying Chrome; wait for it (apply_status)")
+        self._refuse_other_session()
         applicant = self._ready_applicant()
         inputs = form_fill.load_inputs(list_path, applicant, self.settings)
         run_id = form_fill.new_run_id()
         ctx = form_fill.RunContext(
             run_id=run_id,
             run_dir=self.data_dir / self.settings.form_fill.dir / "runs" / run_id,
-            settings=self.settings,
+            settings=self._browser_settings(),
             applicant=applicant,
             answers=inputs.answers,
             checklist=inputs.checklist,
             redactor=inputs.redactor,
             runner=self.form_fill_runner
-            or form_fill.FormFillRunner(self.data_dir, self.settings, applicant.profile, applicant.apply_agent_read),
+            or form_fill.FormFillRunner(
+                self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
+            ),
         )
         try:  # only a reminder (decision 23); it never starts Chrome, so other tool calls do not wait
             tabs = ctx.runner.open_tabs()
@@ -2677,25 +2732,47 @@ class Toolbox:
                 for n, e in enumerate(inputs.jobs.jobs, start=1)
             ],
         }
+        owner = self._owner()
+        self.store.begin_activity(owner, "form_fill", run_id=run_id)
+        run["closed"] = False
         self._form_fill_run = run
 
         def work():
+            writer = None
             try:
+                writer = Store(self.store.path, self.settings)
+                self._record_agents(writer)
                 for item, entry in zip(run["jobs"], inputs.jobs.jobs, strict=True):
                     if item["state"] == "skipped":
                         continue
                     item["state"] = "running"
                     item["outcome"] = form_fill.run_job(entry, ctx)
                     item["state"] = "done"
+                    if item["outcome"].agent_result in ("browser_identity_lost_before_launch", "browser_identity_lost"):
+                        run["error"] = item["outcome"].agent_result
+                        run["status"] = "failed"
+                        break
                 form_fill.finish_feasibility(ctx)
                 run["summary"] = str(form_fill_report.run_report(run_id, self.data_dir, self.settings))
-                run["status"] = "done"
+                if run["status"] == "running":
+                    run["status"] = "done"
             except Exception as error:  # run_job reports per-job failures itself; this is a broken run
                 run["error"] = ctx.redactor.mask(f"{type(error).__name__}: {error}")[:300]
                 run["status"] = "failed"
+            finally:
+                watchdog.LIVE.listen(None)
+                (writer or self.store).end_activity(owner)
+                run["closed"] = True
+                if writer is not None:
+                    writer.db.close()
 
         if self.form_fill_in_background:
-            threading.Thread(target=work, name="intent-agent-form-fill", daemon=True).start()
+            try:
+                threading.Thread(target=work, name="intent-agent-form-fill", daemon=True).start()
+            except BaseException:
+                self.store.end_activity(owner)
+                run.update(status="failed", closed=True)
+                raise
         else:
             work()
         result = {

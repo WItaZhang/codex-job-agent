@@ -1,0 +1,40 @@
+{
+  "synthetic": true,
+  "playwright": "1.56.0",
+  "browser": "141.0.7390.37",
+  "empty_profile": true,
+  "dynamic_endpoint": true,
+  "exact_ws": true,
+  "cdp_browser_pid_matches_popen": true,
+  "started_stable": true,
+  "os_profile_argument_matches": true,
+  "cdp_profile_argument_matches": true,
+  "wrong_guid_refused": true,
+  "mcp": {
+    "package": "@playwright/mcp@0.0.83",
+    "installed_package_version": "0.0.83",
+    "server_version": "1.64.0-alpha-1790635538000",
+    "exact_ws_tabs": true,
+    "wrong_guid_tool_error": null,
+    "synthetic_title_absent": null,
+    "resolved_playwright_packages": {
+      "playwright": "1.64.0-alpha-1790635538000",
+      "playwright-core": "1.64.0-alpha-1790635538000"
+    }
+  },
+  "mcp_wrong_guid": {
+    "package": "@playwright/mcp@0.0.83",
+    "installed_package_version": "0.0.83",
+    "server_version": "1.64.0-alpha-1790635538000",
+    "exact_ws_tabs": false,
+    "wrong_guid_tool_error": true,
+    "synthetic_title_absent": true,
+    "resolved_playwright_packages": {
+      "playwright": "1.64.0-alpha-1790635538000",
+      "playwright-core": "1.64.0-alpha-1790635538000"
+    }
+  },
+  "navigation": "about:blank",
+  "business_tools_called": false,
+  "claim": "capability evidence, not authentication against malicious same-user processes"
+}
