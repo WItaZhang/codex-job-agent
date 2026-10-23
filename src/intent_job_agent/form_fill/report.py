@@ -45,16 +45,19 @@ AGENT_REASONS = {
     "system_error": "system_error",
     "login_issue": "login_failed",  # could not sign in nor register: not a gate (spec 5.5)
 }
-ADVICE = {  # what the user does next, by why the form was not filled (spec 5.5)
-    "gate": "请你自己在标签页里过了这一关（不填 SSN、付款，不接受仲裁），再说“重跑 {job}”。",
-    "needs_answer": "请补上标准答案，再在标签页里自己填，或者说“重跑 {job}”。",
-    "stuck": "请在标签页里接着填，或者说“重跑 {job}”。",
+ADVICE = {  # next action or real capability blocker; no extra user authorization gate (decision 25)
+    "gate": "请你自己在标签页里过了这一关（不填 SSN、付款，不接受仲裁），实际门槛解决后由协调者安排重跑 {job}。",
+    "needs_answer": "依据权威资料补齐标准答案；缺事实则报告，资料齐备后安排重跑 {job}。",
+    "stuck": "协调者检查卡住原因并安排重跑 {job}；不得编造答案。",
     "stopped": (  # /apply's stop (spec section 10 item 109): the job is back where it was
         "你在这一步运行时停下了它：这个岗位没有做完、也没有提交，标签页里可能有填了一半的表。它已回到原来的状态。"
     ),
-    "system_error": "填表 agent 没起来，网站没有打开过。请检查投递用的 Chrome 和 Claude Code，再说“重跑 {job}”。",
-    "page_error": "请在标签页里看看页面怎么了，好了以后说“重跑 {job}”。",
-    "login_failed": "登录和注册都没成功：请你自己在标签页里登录，再说“重跑 {job}”。",
+    "system_error": (
+        "填表 agent 没起来，网站没有打开过。请检查投递用的 Chrome 和 Claude Code，"
+        "实际门槛解决后由协调者安排重跑 {job}。"
+    ),
+    "page_error": "请在标签页里看看页面怎么了，页面恢复正常后由协调者安排重跑 {job}。",
+    "login_failed": "登录和注册都没成功：请你自己在标签页里登录，实际门槛解决后由协调者安排重跑 {job}。",
     "expired": "岗位已经下架，不用再填。",
     "already_applied": "你已经申请过这个岗位，不用再填。",
     "wrong_job": "页面跳到了别的岗位，请确认清单里的地址。",
@@ -117,7 +120,7 @@ def _headline(meta: dict, conclusion: str, reason: str | None, results) -> str:
         )
     if conclusion == "not_filled":
         agent = meta.get("agent_result") or meta.get("status")
-        advice = ADVICE.get(reason or "", "请在标签页里看一眼，再决定接着填还是说“重跑 {job}”。").format(job=job)
+        advice = ADVICE.get(reason or "", "协调者核对标签页状态，再决定接着填还是重跑 {job}。").format(job=job)
         tail = "下面是已经填了的部分的核对结果。" if any(r.field_id for r in results) else ""
         return f"没填完：{REASONS.get(reason or '', reason)}（填表 agent 的结果：{agent}）。{advice}{tail}"
     if conclusion == "unreadable":

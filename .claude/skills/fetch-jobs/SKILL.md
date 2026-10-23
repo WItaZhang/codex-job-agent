@@ -17,8 +17,8 @@ description: 每日模块①：抓取今天能抓到的岗位，代码预打标�
 
 `get_discovery_setup()`：
 
-- 没有 searches.yaml：根据 `get_intent()` 在数据目录里起草一份（ApplyPilot 的格式：查询词、地点、过滤条件），先给用户看，确认后再抓。
-- 第一次配置（起草 searches.yaml 的同时）用编号选项问一次要不要 LLM key，以后不再问：1) 不用（跳过 smartextract 和补全原文的最后一步） 2) Gemini 3) OpenAI 4) 本地模型。key 由用户自己写进返回结果里的 .env 文件；不要让用户把 key 贴到对话里，也不要读出或显示 key。
+- 没有 searches.yaml：根据 `get_intent()` 在数据目录里起草一份（ApplyPilot 的格式：查询词、地点、过滤条件），说明依据后自主抓取。
+- 没有可用 LLM key 时默认不用（跳过 smartextract 和补全原文最后一步），不阻塞已有抓取。key 由用户自己写进返回结果里的 .env 文件；不要让用户把 key 贴到对话里，也不要读出或显示 key。
 - 配置齐了：直接往下走，不再追问。
 
 ## 3. 抓取

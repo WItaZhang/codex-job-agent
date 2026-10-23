@@ -93,14 +93,12 @@ def test_scheduled_runs_get_reads_and_user_independent_preparation_only():
     assert not SCHEDULED_TOOLS & COMMIT_TOOLS
 
 
-def test_project_settings_ask_for_every_commit_tool_and_never_allow_them():
-    config = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))
-    permissions = config["permissions"]
+def test_project_settings_allow_delegated_commits_without_broadening_the_server():
+    permissions = json.loads((ROOT / ".claude/settings.json").read_text())["permissions"]
     expected = {f"mcp__{SERVER_NAME}__{name}" for name in COMMIT_TOOLS}
-    assert set(permissions["ask"]) == expected
-    allowed = " ".join(permissions.get("allow", []))
-    assert all(rule not in allowed for rule in expected)
-    assert f"mcp__{SERVER_NAME}" not in permissions.get("allow", [])  # no server-wide allow
+    assert set(permissions["allow"]) == expected
+    assert not expected & set(permissions.get("ask", []))
+    assert f"mcp__{SERVER_NAME}" not in permissions["allow"]
 
 
 def test_mcp_json_registers_the_server():
@@ -267,7 +265,7 @@ def test_full_day_through_tools(box):
     intent = box.decide(analysis["id"], first["n"], summary=first["summary"])
     assert intent["version"] == 2
     decision = [d for d in box.store.decisions() if d["kind"] == "accept"][-1]
-    assert json.loads(decision["payload"])["approved_via"] == "host_permission_prompt"
+    assert json.loads(decision["payload"])["approved_via"] == "delegated_coordinator"
     assert box.list_open_analyses() == []
 
 

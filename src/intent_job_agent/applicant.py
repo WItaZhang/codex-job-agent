@@ -5,11 +5,12 @@ nothing here is stored in the database. Paths are relative to the applicant dire
 knowledge base elsewhere on the machine).
 """
 
+import re
 from pathlib import Path
 from typing import Annotated
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
 
 from .domain import InvariantError
 
@@ -38,10 +39,17 @@ class Applicant(_Model):
     resume_selection: Path | None = None  # optional rules file for choosing a resume
     cover_letter_skill: Path | None = None  # optional own skill directory (with SKILL.md)
     cover_letter_context: list[Path] = []  # optional extra files that skill needs
-    careful_companies: list[str] = []  # applications to these always stop before submit
+    careful_companies: list[Line]  # applications to these always stop before submit
     apply_agent_read: list[Path] = []  # folders the apply agent may read (read-only), e.g. a knowledge base
     onsite_ok: list[Line] = []  # where on-site or hybrid jobs are fine; empty: ApplyPilot's single profile city
     relocation: Line | None = None  # the answer to relocation questions; None: ApplyPilot's "cannot relocate"
+
+    @field_validator("careful_companies")
+    @classmethod
+    def meaningful_companies(cls, names):
+        if any(unknown_company(name) for name in names):
+            raise ValueError("careful_companies entries must identify a company, not only punctuation/legal suffixes")
+        return names
 
     def resume(self, resume_id: str) -> Resume:
         for resume in self.resumes:
@@ -71,7 +79,7 @@ def load(data_dir: Path, applicant_dir: str) -> Applicant:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         raw = {**raw, "folder": base}
         applicant = Applicant.model_validate(raw)
-    except (ValidationError, yaml.YAMLError) as error:
+    except (ValidationError, yaml.YAMLError, TypeError) as error:
         raise InvariantError(f"Invalid {path}: {error}") from error
 
     def resolve(value: Path | None) -> Path | None:
@@ -117,8 +125,62 @@ def read_dir_problems(applicant: Applicant, data_dir: Path, home: Path | None = 
     return problems
 
 
+# General legal suffixes, not a company alias database. Strip only trailing whole tokens.
+_LEGAL_SUFFIX = re.compile(r"(?:\s|^)(?:incorporated|inc|corporation|corp|limited|ltd|llc|llp|plc|gmbh|co|company)$")
+_UNKNOWN_COMPANIES = {
+    "",
+    "unknown",
+    "na",
+    "none",
+    "null",
+    "undisclosed",
+    "confidential",
+    "notavailable",
+    "nan",
+    "undefined",
+    "notdisclosed",
+    "notprovided",
+    "unspecified",
+    "未知",
+    "保密",
+    "未公开",
+    "某公司",
+    "stealth",
+    "private",
+    "anonymous",
+    "companyconfidential",
+    "hiringcompany",
+    "hiring",
+    "stealthstartup",
+    "confidentialemployer",
+}
+
+
+def company_key(company: str) -> str:
+    text = re.sub(r"[^\w\s]", " ", (company or "").casefold())
+    text = " ".join(text.split())
+    # Dotted legal abbreviations have the same meaning as their undotted forms.
+    text = re.sub(r"\bl l c$", "llc", text)
+    text = re.sub(r"\bl l p$", "llp", text)
+    while (shorter := _LEGAL_SUFFIX.sub("", text).strip()) != text:
+        text = shorter
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def unknown_company(company: str) -> bool:
+    """Generic unidentified-employer markers; no guesses about corporate relationships."""
+    words = re.sub(r"[^\w]", " ", (company or "").casefold()).split()
+    return (
+        company_key(company) in _UNKNOWN_COMPANIES
+        or bool({"confidential", "stealth", "undisclosed", "anonymous"}.intersection(words))
+        or "not disclosed" in " ".join(words)
+    )
+
+
 def careful(company: str, names: list[str]) -> bool:
-    """Whether a company is on the stop-before-submit list (case and punctuation ignored; "Stripe" matches
-    "Stripe, Inc."). A loose match only ever stops more applications, never fewer."""
-    simple = "".join(ch for ch in company.casefold() if ch.isalnum())
-    return any(key and key in simple for key in ("".join(ch for ch in n.casefold() if ch.isalnum()) for n in names))
+    """Fail closed for unknown companies; retain conservative containment after legal-suffix normalization.
+    No inferred corporate relationships. False positives stop more applications, never fewer."""
+    key = company_key(company)
+    if unknown_company(company):
+        return True
+    return any(not (other := company_key(name)) or other in key or key in other for name in names)

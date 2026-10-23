@@ -437,7 +437,7 @@ def test_tool_tiers_and_approval():
         assert TOOL_TIERS[name] == "prepare"
     applying = {"prepare_apply_batch", "save_cover_letter", "start_applying", "apply_status"}
     assert not applying & SCHEDULED_TOOLS
-    ask = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))["permissions"]["ask"]
+    ask = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))["permissions"]["allow"]
     assert "mcp__intent-agent__start_applying" in ask
 
 

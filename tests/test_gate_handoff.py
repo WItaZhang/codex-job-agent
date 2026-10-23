@@ -740,7 +740,7 @@ def test_resuming_takes_over_the_tab_submits_and_refills(box):  # G11 a, c; G13
     assert any("原来等你处理的那个标签页可以关掉" in item for item in refill["todo"])
     assert box.notices == [("投递：1 个填好等你检查", "接着做做完")]
     (decision,) = [d for d in box.store.decisions() if d["kind"] == "resume"]
-    assert json.loads(decision["payload"]) == {"job_ids": HELD, "approved_via": "host_permission_prompt"}
+    assert json.loads(decision["payload"]) == {"job_ids": HELD, "approved_via": "delegated_coordinator"}
 
 
 def test_two_tabs_on_the_same_address_keep_that_job_waiting(box):  # G11 d
@@ -748,7 +748,7 @@ def test_two_tabs_on_the_same_address_keep_that_job_waiting(box):  # G11 d
     box.form_fill_runner.tabs.append({"id": "X9", "type": "page", "url": STEP2})
     plan = box.prepare_resume(HELD)
     assert plan["job_ids"] == ["j01", "j07"]
-    assert plan["problems"] == [{"job_id": "j06", "problem": "7 Acme：同一个地址开着 2 个标签页，关掉多余的再说“好了”"}]
+    assert plan["problems"] == [{"job_id": "j06", "problem": "7 Acme：同一个地址开着 2 个标签页，关掉多余的再恢复"}]
     with pytest.raises(InvariantError, match="summary"):
         box.resume_applying(HELD, plan["summary"])
     box.resume_applying(plan["job_ids"], plan["summary"])
@@ -763,6 +763,8 @@ def test_a_tab_the_user_already_submitted_is_counted_without_an_agent(box):  # G
     assert box.apply_runner.calls[calls:] == [] and box.form_fill_runner.glances[-1] == "N7"
     application = box.store.applications()["j06"]
     assert application["status"] == "applied" and application["note"].startswith("submitted_by_user；")
+    audit = [json.loads(d["payload"]) for d in box.store.decisions() if d["kind"] == "observed_submission"]
+    assert audit[-1]["actor"] == "unknown" and audit[-1]["evidence"] == "held_tab_received"
     row = box.store.apply_attempts()[-1]
     assert (row["status"], row["reason"], row["phase"]) == ("applied", "submitted_by_user", "resume")
     assert box.apply_stats()["weeks"][0]["submitted"] == 1  # the user's own submission (G-e)
@@ -882,12 +884,12 @@ def test_a_step_offers_its_next_step_with_the_batch(box):
     assert box.apply_status()["next"]["batch_id"] == batch["batch_id"]
 
 
-def test_a_held_form_says_to_say_done_not_to_run_it_again(box):  # review 3: spec section 10 items 91, 97
+def test_a_held_form_says_to_resume_without_requiring_a_user_phrase(box):  # review 3: spec section 10 items 91, 97
     first_step_held(box)
     rows = {row["job_id"]: row for row in box.apply_status()["jobs"]}
     for job_id, gate in (("j00", "登录和注册都不成"), ("j01", "验证码"), ("j02", "单点登录")):
         todo = rows[job_id]["todo"]
-        assert todo and gate in todo[0] and "好了" in todo[0], job_id
+        assert todo and gate in todo[0] and "恢复" in todo[0] and "好了" not in todo[0], job_id
         assert not any("重跑" in item for item in todo), job_id
     assert any("重跑" in item for item in rows["j03"]["todo"]) or rows["j03"]["result"] == "failed"
 

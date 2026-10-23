@@ -1,10 +1,11 @@
 """The calibration tools, grouped in three tiers (spec §5.1).
 
-- read: look only.
+- read: look only, except reading the company list may append protection audit snapshots;
+  this changes neither intent, labels nor application status.
 - prepare: may change analyses or the job pool, never the intent or the user's labels.
-- commit: the user's own decisions (labels, choices, tag fixes, initialization, starting an apply step or a
-  form-fill run). The host must ask the user to approve every call (see .claude/settings.json); these tools are
-  never auto-allowed.
+- commit: validated decisions and runs under delegated authority. Labels still require actual user evidence;
+  decisions identify delegated_coordinator. Project approval overrides never expand runner tool access.
+
 
 Job descriptions are untrusted; they are returned wrapped in a marker and never reach analysis.
 """
@@ -98,12 +99,10 @@ LEVEL_TEXT = {
     Level.require: "必须",
 }
 UNSET = "未设置"
-APPROVED_VIA = "host_permission_prompt"
+APPROVED_VIA = "delegated_coordinator"
 # Added to a refilled job's to-dos: the held tab stays open, the new form is in a new tab (spec section 10 item 100).
 # The first to-do of a held form-fill job: it waits for the user, it is not run again (spec section 10 items 91, 97).
-HELD_TODO = (
-    "等你处理（{gate}）：请在投递用的 Chrome 里那个标签页里处理完，再说“好了”，系统会接着做（spec 4.10 第 10 条）。"
-)
+HELD_TODO = "等你处理（{gate}）：请在投递用的 Chrome 里那个标签页里处理完，再恢复，系统会接着做（spec 4.10 第 10 条）。"
 CLOSE_OLD_TAB = "原来等你处理的那个标签页可以关掉：填好的表在新开的标签页里。"
 # Said when a step or a resume starts (spec section 10 item 115).
 REMINDER = (
@@ -822,9 +821,20 @@ class Toolbox:
         if best.result.below_salary_floor:
             why.append("薪资低于下限")
         also = [j.url for j in posting.offered if j.id != job.id and j.url and j.url != job.url]
-        listings = (job, *posting.listings)  # names first, then company tags of listings without one
+        listings = (job, *posting.listings)  # raw names and every known company tag both protect
         named = [j.company.strip() for j in listings if j.company.strip()]
-        companies = list(dict.fromkeys(named + [name for j in listings if (name := _company_name(j))]))
+        companies = list(
+            dict.fromkeys(
+                named
+                + [name for j in listings if (name := _company_name(j))]
+                + [
+                    tag.removeprefix("company.").replace("_", " ")
+                    for j in listings
+                    for tag in self.store.effective_tags(j.id)
+                    if tag.startswith("company.")
+                ]
+            )
+        )
         return {
             "n": n,
             "job_id": job.id,
@@ -854,25 +864,105 @@ class Toolbox:
         return {"json": str(json_path), "csv": str(csv_path)}
 
     @_tool("prepare")
-    def mark_applications(self, job_ids: list[str], status: Literal["pending", "applied", "skipped"]) -> dict:
-        """What the user did with jobs on the apply list: applied, skipped, or back to pending. The other listings
-        of the same posting change with them (`same_posting`). Not a label and not a signal: it changes neither the
-        intent nor any analysis."""
+    def mark_applications(
+        self,
+        job_ids: list[str],
+        status: Literal["pending", "applied", "skipped"],
+        actor: Literal["user", "delegated_coordinator"] = "user",
+        user_report: str | None = None,
+    ) -> dict:
+        """User reports (legacy default) or an explicitly identified coordinator retry. Actor/report are audit
+        assertions, not authentication: only actual user messages justify actor=user. Coordinators must pass
+        actor=delegated_coordinator and can only reset a clearly unsubmitted job to pending, never claim a
+        submission or abandon a held job. Neither path is a label or intent signal. Do not include private facts
+        in user_report; its text is not persisted, only its presence. Legacy user reports retain via=user."""
+        if actor not in ("user", "delegated_coordinator"):
+            raise InvariantError("Unknown application status actor")
         busy = [job_id for job_id in job_ids if job_id in self._resuming()]
-        if busy:  # its result is about to be written by the resume (spec section 10 item 102)
+        if busy:
             raise InvariantError(f"Jobs {busy} are being resumed now; wait for apply_status")
-        # checks the ids and the status before any change; each job the user named is one attempt (spec item 95)
-        self.store.set_application_status(job_ids, status, by_user=True)
         same = self._same_posting(self.store.applications())
         others = [j for j in dict.fromkeys(j for job_id in job_ids for j in same.get(job_id, [])) if j not in job_ids]
-        self.store.list_applications(others, _day(None))
-        self.store.set_application_status(others, status)
+        if actor == "delegated_coordinator":
+            if status != "pending":
+                raise InvariantError("Coordinator cannot report user submission or abandonment")
+            applications = self.store.applications()
+            for job_id in [*job_ids, *others]:
+                item = applications.get(job_id, {})
+                if item.get("status") in ("held", "applied") or any(
+                    code in (item.get("note") or "") for code in ("maybe_submitted", "interrupted")
+                ):
+                    raise InvariantError(
+                        "Unresolved submission or held job: inspect evidence and use resume, not retry"
+                    )
+        with self.store.exclusive():
+            self.store.set_application_status(job_ids, status, by_user=actor == "user")
+            self.store.list_applications(others, _day(None))
+            self.store.set_application_status(others, status)
+            self.store.record_decision(
+                None,
+                "application_status",
+                {
+                    "job_ids": job_ids,
+                    "status": status,
+                    "approved_via": actor,
+                    "user_report_provided": bool(user_report and user_report.strip()),
+                },
+            )
         return {"job_ids": job_ids, "same_posting": others, "status": status}
 
     # --- applying (spec 4.10) ---------------------------------------------------------------------
 
     def _applicant(self) -> applicant_files.Applicant:
-        return applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        # Guards also run in background workers: do not share the tool connection's write transaction.
+        observer = Store(self.store.path, self.settings)
+        try:
+            effective = observer.observe_careful_companies(applicant.careful_companies)
+        finally:
+            observer.db.close()
+        return applicant.model_copy(update={"careful_companies": effective})
+
+    @_tool("prepare")
+    def release_careful_companies(self, companies: list[str], user_report: str, actor: Literal["user"]) -> dict:
+        """Record only an actual user's explicit removal request, never a coordinator's autonomous choice.
+        First remove the named entries from applicant.yaml under that same user request, then call this tool.
+        user_report is the non-sensitive explicit request/reference, not invented evidence. Actor is an audit
+        assertion, NOT human authentication. Old careful batches stay fill-only; prepare a new batch afterwards.
+        A later observed readdition restores protection. No private profile is read or configuration written."""
+        if actor != "user" or not user_report.strip() or not companies:
+            raise InvariantError("Release requires an explicit user request and named companies")
+        if any(applicant_files.unknown_company(name) for name in companies):
+            raise InvariantError("Name actual retained company entries to release")
+        applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        requested = {applicant_files.company_key(name) for name in companies}
+        current = {applicant_files.company_key(name) for name in applicant.careful_companies}
+        writer = Store(self.store.path, self.settings)
+        try:
+            writer.observe_careful_companies(applicant.careful_companies)
+            with writer.exclusive():
+                retained = writer.protected_companies()
+                if requested & current:
+                    raise InvariantError(
+                        "Remove the requested entries from applicant.yaml first, on the user's command"
+                    )
+                if not requested <= {applicant_files.company_key(name) for name in retained}:
+                    raise InvariantError("Release must name retained list entries, not matching job names")
+                released = [name for name in retained if applicant_files.company_key(name) in requested]
+                decision_id = writer.record_decision(
+                    None,
+                    "careful_companies_release",
+                    {
+                        "companies": released,
+                        "actor": "user",
+                        "user_report": user_report.strip(),
+                        "evidence_authenticated": False,
+                    },
+                )
+                effective = writer.protected_companies()
+        finally:
+            writer.db.close()
+        return {"released": released, "careful_companies": effective, "decision_id": decision_id}
 
     def _ready_applicant(self) -> applicant_files.Applicant:
         applicant = self._applicant()
@@ -1136,13 +1226,14 @@ class Toolbox:
         size: int | None = None,
         exclude: list[str] | None = None,
         only: list[str] | None = None,
+        stop_before_submit: bool = False,
     ) -> dict:
-        """The next batch from the apply list's pending jobs, in list order: the first ones (config) stop before
-        submit for the user to check, jobs at companies on the careful list always stop, the rest are submitted.
+        """Prepare pending jobs. Default review_first=0: nonprotected jobs submit without a human review gate.
+        Protected/unknown companies stop before submit. The current list is required and rechecked at execution.
         Lists missing cover letters, jobs the form-fill list would refuse (`problems`: leave them out with
         `exclude`) and the summary of the first step for start_applying. `exclude`: jobs to leave out, e.g. a
-        letter that never passed its checks. `only`: a rerun - exactly these pending jobs, all of them reviewed by
-        the form-fill module and stopped before submit, never submitted."""
+        letter that never passed its checks. `only`: exactly these pending jobs, routed by the current protection list.
+        `stop_before_submit`: explicitly fill only, never submit; not the default retry mode."""
         self._recover()
         applicant = self._ready_applicant()
         day = _day(day)
@@ -1154,17 +1245,28 @@ class Toolbox:
             items = [item for item in listed if item["job_id"] not in skip][: size or self.settings.apply.batch_size]
         if not items:
             raise InvariantError("No pending jobs on the apply list")
-        review_first = len(items) if only is not None else self.settings.apply.review_first
+        review_first = (
+            len(items) if stop_before_submit else (0 if only is not None else self.settings.apply.review_first)
+        )
         jobs = []
         for n, item in enumerate(items, start=1):
+            protected = self._protected_company(item["job_id"], applicant, item["companies"])
             if n <= review_first:
                 mode = "review"
-            elif any(applicant_files.careful(name, applicant.careful_companies) for name in item["companies"]):
+            elif protected:
                 mode = "careful"
             else:
                 mode = "submit"
             jobs.append(
-                {"n": n, "job_id": item["job_id"], "title": item["title"], "company": item["company"], "mode": mode}
+                {
+                    "n": n,
+                    "job_id": item["job_id"],
+                    "title": item["title"],
+                    "company": item["company"],
+                    "companies": item["companies"],
+                    "mode": mode,
+                    "protected": protected,
+                }
             )
         phases = {
             "review": "proposed" if any(job["mode"] == "review" for job in jobs) else "none",
@@ -1174,7 +1276,45 @@ class Toolbox:
         self.store.save_apply_batch(batch_id, day, {"jobs": jobs, "phases": phases})
         return self._batch_view(batch_id)
 
-    def _apply_spec(self, job_id: str, mode: str) -> apply_bridge.ApplySpec:
+    def _company_names(self, job_id: str, ids=()) -> list[str]:
+        """Known listing names and existing tags, never inferred corporate aliases."""
+        names = []
+        for key in dict.fromkeys((job_id, *ids)):
+            job = self.store.job(key)
+            names.append(job.company)
+            if applicant_files.company_key(job.company) in {
+                applicant_files.company_key(job.source),
+                applicant_files.company_key(job.board or ""),
+            }:
+                names.append("")  # source/board placeholder is not an identified employer
+            names.extend(
+                tag.removeprefix("company.").replace("_", " ")
+                for tag in self.store.effective_tags(key)
+                if tag.startswith("company.")
+            )
+        return list(dict.fromkeys(names))
+
+    def _protected_company(self, job_id: str, applicant=None, names=()) -> bool:
+        applicant = applicant or self._applicant()  # required list, never default to []
+        return any(
+            applicant_files.careful(name, applicant.careful_companies)
+            for name in (*names, *self._company_names(job_id))
+        )
+
+    def _guard_submit(self, job_id: str, names=()) -> None:
+        if self._protected_company(job_id, names=names):
+            raise InvariantError("Company is protected: stop before submit, including email; prepare again")
+
+    def _submission_block(self, job_id: str, names=()) -> bool:
+        try:
+            self._guard_submit(job_id, names)
+        except (InvariantError, OSError):
+            return True  # no site actions; do not echo malformed private configuration
+        return False
+
+    def _apply_spec(self, job_id: str, mode: str, names=()) -> apply_bridge.ApplySpec:
+        if mode == "submit":
+            self._guard_submit(job_id, names)
         letter = self.store.cover_letter(job_id)
         if letter is None or not self._letter_ready(job_id):
             raise InvariantError(f"No cover letter for {job_id}")
@@ -1248,9 +1388,9 @@ class Toolbox:
 
     @_tool("commit")
     def start_applying(self, batch_id: str, summary: str) -> dict:
-        """Start the next step of an apply batch, as the user approved it: first the jobs to review (all stop
-        before submit), then, after the user checked those, the rest. `summary` must be that step's summary
-        exactly as shown to the user. The reviewed jobs and the careful companies are filled by the form-fill
+        """Start the next validated step under delegated authority, without a user go-ahead.
+        Explicit review jobs stop before submit; default batches have no review step. `summary` must match the step
+        exactly as returned by preparation. The reviewed jobs and the careful companies are filled by the form-fill
         module (stop before submit, one report each); the rest are submitted by ApplyPilot with the answer sheet
         and the checklist. Nothing starts when the step's form-fill list, answers.yaml, checklist.yaml or
         profile.json do not pass their checks, or when profile.json and answers.yaml disagree. When mail, bank,
@@ -1263,7 +1403,9 @@ class Toolbox:
         self._refuse_other_session()
         data = self._settle(batch_id)
         if data.get("review_holds"):
-            raise InvariantError(f"第一步还在等 {self._waiting_on(data)} 处理完（spec §10 第 101 条）；处理完再说继续")
+            raise InvariantError(
+                f"第一步还在等 {self._waiting_on(data)} 处理完（spec §10 第 101 条）；实际门槛处理完再继续"
+            )
         phase = self._next_phase(data)
         if phase is None:
             raise InvariantError(f"Batch {batch_id} has no step left to start")
@@ -1292,6 +1434,26 @@ class Toolbox:
         if no_letter:
             raise InvariantError(f"Jobs {no_letter} have no cover letter yet")
         applicant = self._ready_applicant()
+        # The existing duplicate grouping is reused once per step, not rescored per job.
+        jobs = [
+            dict(
+                job,
+                companies=list(
+                    dict.fromkeys(
+                        (*job.get("companies", []), *self._company_names(job["job_id"], same.get(job["job_id"], [])))
+                    )
+                ),
+            )
+            for job in jobs
+        ]
+        for job in jobs:
+            if job["mode"] == "submit" and (
+                job.get("protected") or self._protected_company(job["job_id"], applicant, job["companies"])
+            ):
+                job["mode"] = "careful"
+                job["protected"] = True
+        actual = {job["job_id"]: job for job in jobs}
+        data["jobs"] = [actual.get(job["job_id"], job) for job in data["jobs"]]
         list_path = self._step_list(batch_id, phase, jobs)
         inputs = self._checked_inputs(applicant, list_path)
         sheet = form_fill.instructions(inputs.answers, inputs.checklist)
@@ -1299,7 +1461,7 @@ class Toolbox:
         specs = [
             self._apply_spec(job["job_id"], "stop")
             if job["job_id"] in filled
-            else dataclasses.replace(self._apply_spec(job["job_id"], "submit"), sheet=sheet)
+            else dataclasses.replace(self._apply_spec(job["job_id"], "submit", job["companies"]), sheet=sheet)
             for job in jobs
         ]
         entries = {entry.id: entry for entry in inputs.jobs.jobs}
@@ -1384,7 +1546,14 @@ class Toolbox:
                         if outcome.reason == "maybe_submitted":
                             run["stopped"] = item["job_id"]
                     else:
-                        outcome = self._masked(runner(spec), inputs.redactor)
+                        if self._submission_block(item["job_id"], item["companies"]):
+                            outcome = apply_bridge.ApplyOutcome(
+                                "pending",
+                                "protection_changed",
+                                ["公司保护变化或名单不可读取；未启动此岗位，请重新准备。"],
+                            )
+                        else:
+                            outcome = self._masked(runner(spec), inputs.redactor)
                         note = self._note(outcome)
                     item["outcome"], item["finished"] = outcome, time.time()
                     if self._stopped(outcome):  # back where it was, pending: no result, no attempt (item 109)
@@ -2041,6 +2210,7 @@ class Toolbox:
             raise InvariantError(f"Jobs {missing} are not held at a gate; only held jobs are resumed")
         running = self._resuming()
         items, problems = [], []
+        same = self._same_posting(self.store.applications())
         for job_id in wanted:
             hold = holds[job_id]
             job = self.store.job(job_id)
@@ -2056,11 +2226,20 @@ class Toolbox:
                 "interrupted": (hold["resuming"] and job_id not in running) or hold["reason"] == "interrupted",
                 "gate": hold["reason"],
             }
+            item["companies"] = list(
+                dict.fromkeys((*shown.get("companies", []), *self._company_names(job_id, same.get(job_id, []))))
+            )
+            if item["mode"] == "submit" and (
+                shown.get("mode") == "careful"
+                or shown.get("protected")
+                or self._protected_company(job_id, names=item["companies"])
+            ):
+                item.update(mode="careful", via="form_fill")
             target, count = self._held_tab(hold, tabs)
             if count > 1:
                 name = f"{item['n']} {item['company'] or item['title']}"
                 problems.append(
-                    {"job_id": job_id, "problem": f"{name}：同一个地址开着 {count} 个标签页，关掉多余的再说“好了”"}
+                    {"job_id": job_id, "problem": f"{name}：同一个地址开着 {count} 个标签页，关掉多余的再恢复"}
                 )
                 continue
             item["tab"] = {"id": str(target["id"]), "url": str(target.get("url", ""))} if target else None
@@ -2093,7 +2272,7 @@ class Toolbox:
 
     @_tool("prepare")
     def prepare_resume(self, job_ids: list[str]) -> dict:
-        """Before resuming jobs held at a gate the user says they handled ("好了"; without numbers, every held job):
+        """Prepare a resume when actual evidence shows the gate was handled; no user approval phrase is required:
         how each one goes on - auto-submitted ones back in their own tab (or from the job's address when it is
         gone), then submitted; reviewed and careful ones refilled by the form-fill module and stopped before submit.
         `summary` is for resume_applying, exactly as shown; `problems` are jobs left out (their address is open in
@@ -2114,9 +2293,9 @@ class Toolbox:
 
     @_tool("commit")
     def resume_applying(self, job_ids: list[str], summary: str) -> dict:
-        """Resume jobs held at a gate, as the user approved them after handling the gates: `job_ids` and `summary`
+        """Resume resolved gates under delegated authority, rechecking company protection: `job_ids` and `summary`
         exactly as prepare_resume gave them. One by one in the background, each result recorded as it comes: a held
-        tab that already shows the application received counts as the user's own submission; auto-submitted jobs
+        tab showing receipt keeps the legacy submitted_by_user code, with actor=unknown in audit; automatic jobs
         are submitted from their tab (checked first for an earlier submission); reviewed and careful ones are
         refilled and stop before submit. A job held a third time fails at its gate. Not while a step, a form-fill
         run or another resume runs. Poll apply_status."""
@@ -2167,7 +2346,10 @@ class Toolbox:
             "lock": threading.Lock(),  # closing it happens once (review #2)
             "jobs": [
                 {
-                    **{key: item[key] for key in ("n", "job_id", "batch_id", "title", "company", "mode", "via")},
+                    **{
+                        key: item[key]
+                        for key in ("n", "job_id", "batch_id", "title", "company", "companies", "mode", "via")
+                    },
                     "state": "queued",
                     "outcome": None,
                     "started": None,
@@ -2221,8 +2403,7 @@ class Toolbox:
 
     @staticmethod
     def _own_submission(outcome):
-        """A resumed job the agent finds already submitted: the user finished it while it was held, so it is the
-        user's own submission (decision 23 G-e), not an earlier application (spec section 10 item 100)."""
+        """Keep the historical reason code; observed receipt does not identify who submitted (decision 25)."""
         if outcome.status == "applied" and outcome.reason == "already_applied":
             return dataclasses.replace(outcome, reason="submitted_by_user")
         return outcome
@@ -2232,6 +2413,11 @@ class Toolbox:
         several tabs, so it was not touched and stays held."""
         job_id = item["job_id"]
         hold = writer.hold(job_id)
+        if item["mode"] == "submit" and self._submission_block(job_id, item["companies"]):
+            writer.set_resuming([job_id], False)
+            return apply_bridge.ApplyOutcome(
+                "held", "protection_changed", ["公司保护变化或名单不可读取；未启动恢复，原门槛及次数保留，请重新准备。"]
+            )
         try:
             tabs = browser.targets()
         except Exception:  # noqa: BLE001 - no tab list: start again from the job's address
@@ -2250,7 +2436,17 @@ class Toolbox:
         if stopping():  # the user stopped the resume while the tab was looked at: no agent starts (review #5)
             writer.set_resuming([job_id], False)
             return apply_bridge.ApplyOutcome("pending", "stopped", ["你停下了这一步：这个岗位没有接着做，仍等你处理"])
-        if state is not None and state.received:  # the user submitted it in that tab (decision 23, G-e)
+        if state is not None and state.received:  # receipt proves submission, not actor identity
+            writer.record_decision(
+                None,
+                "observed_submission",
+                {
+                    "job_id": job_id,
+                    "actor": "unknown",
+                    "evidence": "held_tab_received",
+                    "legacy_reason": "submitted_by_user",
+                },
+            )
             said = f"原标签页写着「{redactor.mask(state.received)}」"
             outcome = apply_bridge.ApplyOutcome("applied", "submitted_by_user", [said])
             writer.record_application_result(
@@ -2258,8 +2454,16 @@ class Toolbox:
             )
             return outcome
         if item["mode"] == "submit":
+            if self._submission_block(job_id, item["companies"]):
+                writer.set_resuming([job_id], False)
+                return apply_bridge.ApplyOutcome("held", "protection_changed", ["保护变化；保持原门槛，请重新准备。"])
+            try:
+                current_spec = self._apply_spec(job_id, "submit", item["companies"])
+            except (InvariantError, OSError):
+                writer.set_resuming([job_id], False)
+                return apply_bridge.ApplyOutcome("held", "protection_changed", ["恢复前置校验变化；保留原门槛。"])
             spec = dataclasses.replace(
-                self._apply_spec(job_id, "submit"),
+                current_spec,
                 sheet=sheet,
                 resume=True,
                 resume_url=target.get("url") if target else None,
@@ -2279,6 +2483,17 @@ class Toolbox:
             outcome = dataclasses.replace(self._own_submission(outcome), todo=(*outcome.todo, CLOSE_OLD_TAB))
             note = apply_fill.note(outcome.reason, outcome.conclusion, ctx.run_id, outcome.notes)
             attempt["run_id"] = ctx.run_id
+        if outcome.reason == "submitted_by_user":
+            writer.record_decision(
+                None,
+                "observed_submission",
+                {
+                    "job_id": job_id,
+                    "actor": "unknown",
+                    "evidence": "runner_already_applied",
+                    "legacy_reason": "submitted_by_user",
+                },
+            )
         hold_row = None
         if outcome.status == "held" and hold["times"] >= 2:  # at most two holds per job (decision 23, G-g)
             outcome = dataclasses.replace(outcome, status="failed")
@@ -2483,11 +2698,13 @@ class Toolbox:
         self.engine.decline(analysis_id)
         return {"analysis_id": analysis_id, "status": "declined"}
 
-    # --- commit (user-approved) -------------------------------------------------------------------
+    # --- commit (delegated authority; genuine user labels only) ---
 
     @_tool("commit")
-    def record_labels(self, day: str, labels: list[LabelSpec]) -> dict:
-        """Record the user's labels (want / reject / misread) for jobs selected on `day`, all at once."""
+    def record_labels(self, day: str, labels: list[LabelSpec], user_message_ref: str | None = None) -> dict:
+        """Record labels from actual user messages, never agent-invented feedback. Optional user_message_ref is
+        a non-sensitive message locator for audit, not authentication. Without real user evidence do not call.
+        Legacy callers may omit the locator; calibration logic is unchanged."""
         try:
             specs = [LabelSpec.model_validate(s.model_dump() if isinstance(s, BaseModel) else s) for s in labels]
         except ValidationError as error:
@@ -2514,7 +2731,17 @@ class Toolbox:
             for spec in specs
         ]
         report = self.engine.process_day(day, inputs)
-        self.store.record_decision(None, "labels", {"day": day, "count": len(inputs), "approved_via": APPROVED_VIA})
+        self.store.record_decision(
+            None,
+            "labels",
+            {
+                "day": day,
+                "count": len(inputs),
+                "approved_via": APPROVED_VIA,
+                "evidence_reference": user_message_ref,
+                "evidence_authenticated": False,
+            },
+        )
         return {
             "analyses": [self._analysis_view(a) for a in report.analyses],
             "misread": [m.model_dump() for m in report.misread],

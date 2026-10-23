@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from .applicant import company_key
 from .changes import apply_changes
 from .config import Settings
 from .domain import BOARD_SOURCES, IntentModel, InvariantError, Job, Label, Vocabulary
@@ -561,6 +562,46 @@ class Store:
         """`owner`'s step or resume is closed: only its own row goes (review #3)."""
         with self._tx():
             self.db.execute("DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ?", (owner[0], owner[1]))
+
+    def protected_companies(self) -> list[str]:
+        """Replay observed configuration entries and explicit user releases; never infer from postings."""
+        active = {}
+        rows = self.db.execute(
+            "SELECT kind, payload FROM decisions WHERE kind IN "
+            "('careful_companies_snapshot', 'careful_companies_release') ORDER BY seq"
+        )
+        for row in rows:
+            payload = json.loads(row["payload"])
+            if row["kind"] == "careful_companies_snapshot":
+                for name in payload["companies"]:
+                    active[company_key(name)] = name
+            else:
+                for name in payload["companies"]:
+                    active.pop(company_key(name), None)
+        return list(active.values())
+
+    def observe_careful_companies(self, names: list[str]) -> list[str]:
+        """Snapshot the successfully loaded list on first observation/change, including entries without jobs."""
+        with self.exclusive():
+            latest = self.db.execute(
+                "SELECT payload FROM decisions WHERE kind = 'careful_companies_snapshot' ORDER BY seq DESC LIMIT 1"
+            ).fetchone()
+            active = {company_key(name) for name in self.protected_companies()}
+            if (
+                latest is None
+                or json.loads(latest["payload"])["companies"] != names
+                or any(company_key(name) not in active for name in names)
+            ):
+                self.record_decision(
+                    None,
+                    "careful_companies_snapshot",
+                    {
+                        "companies": names,
+                        "source": "applicant.yaml",
+                        "actor": "configuration_observer",
+                    },
+                )
+            return self.protected_companies()
 
     def apply_batch(self, batch_id: str) -> dict:
         row = self.db.execute("SELECT day, data FROM apply_batches WHERE id = ?", (batch_id,)).fetchone()

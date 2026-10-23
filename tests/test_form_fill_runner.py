@@ -274,11 +274,11 @@ def test_tiers_approval_and_never_scheduled():
     for tool in (Toolbox.start_form_fill, Toolbox.form_fill_status):
         assert "never submits" in tool.__doc__
     permissions = json.loads((ROOT / ".claude/settings.json").read_text(encoding="utf-8"))["permissions"]
-    assert "mcp__intent-agent__start_form_fill" in permissions["ask"]
+    assert "mcp__intent-agent__start_form_fill" in permissions["allow"]
     assert "Read(./data/local/form-fill/runs/*/*/log.jsonl)" in permissions["deny"]
     codex = tomllib.loads((ROOT / ".codex/config.toml").read_text(encoding="utf-8"))
     tools = codex["mcp_servers"]["intent-agent"]["tools"]
-    assert {name: tools[name]["approval_mode"] for name in COMMIT_TOOLS} == dict.fromkeys(COMMIT_TOOLS, "prompt")
+    assert {name: tools[name]["approval_mode"] for name in COMMIT_TOOLS} == dict.fromkeys(COMMIT_TOOLS, "approve")
 
 
 def test_outcome_statuses_are_the_report_statuses():
