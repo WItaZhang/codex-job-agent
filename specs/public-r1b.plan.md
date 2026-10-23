@@ -1,6 +1,6 @@
 # R1b 最小切片计划
 
-[现行规格](public-r1b.md) · [模块决定](public-r1b.decisions.md) · [交审证据](public-r1b.review.md)。基线main8530523；唯一编辑检出public-r1b-browser。本轮只规格/计划/独立合成探针，甲方及Claude复核后才产品实现；不推送，不改owner/main或旧R1树。
+[现行规格](public-r1b.md) · [模块决定](public-r1b.decisions.md) · [交审证据](public-r1b.review.md)。基线main8530523；唯一编辑检出public-r1b-browser。b2716f5已获甲方及Claude阶段批准，现按1–9测试先行产品实现；不推送，不改owner/main或旧R1树。
 
 ## 当前阶段
 
@@ -9,7 +9,7 @@
 3. 保存可复现脚本和精简JSON证据；故障区分探针脚手架问题与能力不支持，不因失败退HTTP裸端口。能力成立后不用强制lsof；不把GUID/CDP自报当恶意同用户身份认证。
 4. 更新基线记录、规格互链、未实现状态，交甲方/Claude；本轮不修改src产品代码、业务权限或CI，不为local_only加例外。
 
-## 后续产品实现责任（收到阶段批准后）
+## 已批准产品实现责任
 
 | 文件/模块 | 改动责任与不可遗漏调用者 |
 | --- | --- |
@@ -37,10 +37,10 @@
 6. **独立填表协调三组事件屏障**：kind=form_fill+runid匹配self._form_fill_run；running期间调用apply_status等恢复入口，kill0且运行继续；正常结束与_recover交错，收尾完成前不误kill、不抢清记录；真失联才清理身份匹配的本运行进程并结束协调行。三组都断言_close_interrupted调用0、applications/apply_attempts/holds无写入。其他会话展示独立填表类型/runid；非owner只取元数据，Target.attachToTarget/Runtime.evaluate调用0。
 7. **清理**：结束agent树不杀独立browser；PID变更/foreign port不kill；PDF临时空profile；reader退出只disconnect；旧离线报告可读、旧port-only执行配置拒绝。
 8. **真实本地fixture**：批准后空profile、about:blank/127.0.0.1；正确绑定完成列标签/checkpoint/readback/watchdog，错误实例拒绝，退出只处理自己进程。无招聘/邮箱/真实申请。导航限制不等同于浏览器后台零联网，不虚称网络隔离。
-9. 四项、必要制品及独立评审。若CI增加探针命令，须更新已批准静态workflow契约，不上传制品/Release/Pages/PyPI。当前阶段不改CI。
+9. 四项、必要制品及独立评审。若CI增加探针命令，须更新已批准静态workflow契约，不上传制品/Release/Pages/PyPI。实现阶段可按既有发行护栏加入必要Linux合成验证。
 
 ## 依赖、估时及缺证据项
 
-预计后续实现2.5–4.5有效工作日：绑定/启动0.5–1，所有调用者及子进程迁移1–1.5，四格/恢复/互斥0.5–1，真实本地fixture及交审0.5–1。不是已实现承诺。当前探针先解决S1关键能力；macOS证据不能代替Linux/Windows，平台覆盖及MCP重连/TOCTOU仍需产品对抗验证。若锁定版本不支持准确WS或PID/profile，报告具体阻塞，不放宽归属证明。
+预计实现3–5有效工作日（新增独立填表协调屏障及平台证据余量）：绑定/启动0.5–1，所有调用者及子进程迁移1–1.5，四格/恢复/互斥0.5–1，真实本地fixture及交审0.5–1。不是已实现承诺。当前探针先解决S1关键能力；macOS证据不能代替Linux/Windows，平台覆盖及MCP重连/TOCTOU仍需产品对抗验证。若锁定版本不支持准确WS或PID/profile，报告具体阻塞，不放宽归属证明。
 
 不扩范围：R4 legacy资料跨目录及每用户授权、R5可靠最后提交、R6其余恢复闭环/N2、R8原生安装/发行/许可等仍各归其片。主规格§9业务标准保留，不把本片浏览器探针当完整B或公众验收。

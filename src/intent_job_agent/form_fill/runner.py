@@ -980,10 +980,10 @@ class FormFillRunner:
         """The applying Chrome's tabs when it already runs, None when it does not. It never starts Chrome: the tool
         server answers one call at a time, and a cold start copies the profile."""
         self.settings.require_external("open_tabs", self.data_dir, self.profile)
-        from ..vendor.applypilot.apply import chrome
+        from .. import browser_session
 
-        port = chrome.BASE_CDP_PORT  # worker 0, as ensure_chrome uses
-        return readback.list_targets(port) if apply_bridge.cdp_alive(port) else None
+        binding = browser_session.inspect(self.settings)
+        return browser_session.targets(binding) if binding is not None else None
 
     def fill(self, spec: apply_bridge.ApplySpec, **options) -> apply_bridge.ApplyOutcome:
         self.settings.require_external("fill", self.data_dir, self.profile)

@@ -28,7 +28,6 @@ import os
 import re
 import subprocess
 import tempfile
-import urllib.request
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
@@ -566,28 +565,25 @@ def letter_date() -> str:
 # --- running applications (adapted from ApplyPilot's launcher.run_job) -----------------------------------
 
 
-def cdp_alive(port: int) -> bool:
-    """Whether a Chrome answers on this debugging port (the form-fill module checks it without starting one)."""
+def cdp_alive(binding) -> bool:
+    """Compatibility predicate accepting only a verified binding, never a port."""
+    from . import browser_session
+
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1):
-            return True
-    except OSError:
+        browser_session.verify(binding)
+        return True
+    except browser_session.BrowserIdentityLost:
         return False
 
 
-def ensure_chrome(settings: Settings, worker_id: int = 0) -> int:
-    """Reuse the worker Chrome if it is running (its tabs may hold forms the user is checking); otherwise copy
-    the profile as ApplyPilot does, strip it, and start Chrome."""
+def ensure_chrome(settings: Settings, worker_id: int = 0):
+    """Start/adopt only the current coordinated workspace's dedicated browser."""
     settings.require_external("ensure_chrome")
-    from .vendor.applypilot.apply import chrome
+    from . import browser_session
 
-    port = chrome.BASE_CDP_PORT + worker_id
-    if cdp_alive(port):
-        return port
-    profile_dir = chrome.setup_worker_profile(worker_id)
-    strip_profile(profile_dir, settings.apply.chrome_profile_strip)
-    chrome.launch_chrome(worker_id, port)
-    return port
+    if worker_id != 0:
+        raise InvariantError("Only the single coordinated browser worker is supported")
+    return browser_session.ensure(settings)
 
 
 def run_application(

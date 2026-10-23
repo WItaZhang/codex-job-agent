@@ -38,3 +38,11 @@
 B已同步form-fill原文及R1b规格/计划/决定：不依赖领域数据，仅允许协调行/管理锁例外；kind=form_fill+runid识别self._form_fill_run。正常running及收尾不误kill；真正失联只清身份匹配的本运行进程并结束协调行，不走_close_interrupted、不写application/attempt/hold。other_session文案区分独立填表。三组事件屏障（running时apply_status kill0、正常结束恢复交错、真失联）和nonowner Target.attachToTarget/Runtime.evaluate调用0已入先红计划，**尚未实现或运行这些产品回归**。
 
 本次针对验证：系统Chrome合成探针成功，脚本ruff check/format通过，git diff --check及文档相对链接检查通过。按甲方要求不重复1627全套；先前f64140e阶段全套记录仍有效于当时代码，不冒充本轮新增产品测试。src/依赖/CI未改；等待甲方和Claude对A/B窄复核后再产品实现。
+
+## 产品实现阶段批准
+
+甲方与Claude已批准b2716f5（/tmp/public-r1b-spec-review.md末尾），进入计划1–9的全部产品实现。唯一编辑树public-r1b-browser；每个绿步提交，不推送/合并。预计3–5有效工作日，仅规划估计。最终必须分别给出macOS产品参数本地fixture和Linux CI证据，Windows未验证不回落。以下后续记录逐步追加红绿及最终交审结果。
+
+### 实现小步1：入口行为红与绑定基础
+
+新接口test_browser_binding先因模块缺失collection error（1 error）；这仅是接口不存在证据。现有入口独立test_browser_entry_boundary有效行为红为3 failed：ensure_chrome返回foreign固定9222；setup_worker_profile命中复制毒丸；open_tabs返回foreign标签。前两次测试夹具误用settings参数/修改冻结Storage导致失败，修正后才取得上述行为红，不混作产品证据。迁移ensure_chrome和open_tabs后，与5项绑定基础测试共8 passed。现阶段只完成基础，其他消费者/协调/四格仍待后续小步；不能宣称全入口已经封堵。
