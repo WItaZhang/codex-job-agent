@@ -44,7 +44,7 @@ R1 提供源码外初始化、包内运行资源、按用户工作区隔离的�
 
 首个实现提交 197e193；该检查点最终四项1600 passed/64.89s，direct与sdist往返制品通过。早审修复后的最终结果在下方追加，作为本次交审依据。
 
-待验证：协调者push后远端Linux CI；Windows/Linux原生安装路径与权限；公众UI/引导/真实provider运行时、独立用户授权、浏览器身份与可靠提交边界、ATS获准环境、恢复升级备份与公众发行。macOS当前本地证据不能替代这些验收。R1b紧随R1，盲连9222问题仍属下一片，不借R1运行真实浏览器。
+待验证：协调者push后远端Linux CI；Windows/Linux原生安装路径与权限；公众UI/引导/真实provider运行时、独立用户授权、浏览器身份与可靠提交边界、ATS获准环境、恢复升级备份与公众发行。macOS当前本地证据不能替代这些验收。R1整合后先独立修R1s，再立即R1b；盲连9222仍属R1b，不借R1运行真实浏览器。
 
 下一步：独立复核本次提交，协调者决定整合；未批准公众自动业务。无新增甲方决策需求。
 
@@ -64,8 +64,12 @@ Claude `/tmp/public-r1-final-review.md` 对f62c32c最终通过，无阻塞，确
 
 甲方要求补自动禁止发行回归：`tests/test_release_workflow.py` 只解析workflow YAML（BaseLoader保留on），只允许现有单一workflow/check job、contents:read和批准的checkout/setup/验证命令；合成上传artifact、Release、Pages、PyPI、shell追加发布、权限提升、额外job、release触发、删验证步骤均被拒。先以未实现校验器取得12失败/1通过（`/tmp/public-r1-ci-contract-red.log`），实现白名单后通过。它防意外配置漂移，不抵御恶意改测试/被信任脚本或任意shell；没有扩大CI安全框架。
 
-停止race只读定位已完成：`/tmp/public-r1-stop-race-analysis.md`、事件屏障探针 `/tmp/public-r1-stop-race-probe.py` 与结果JSON。确定性复现 `_sync_apply_results` 观察running后、DB事务前worker变stopped但activity未清理，导致held/interrupted；LIVE.launch=false，外部进程/网络sink均未执行。回放R1前_recover方法同样复现；无交错对照pending且无attempt。九个关键收尾/Live方法AST与基线相同，已证实旧竞态存在；原首轮临时DB已不在，不能把该次失败与此路径等同为完全证实。R1检查可能改变调度但不在该临界窗口增加扫描，未测概率。没有修改恢复代码/放宽断言，不用复跑绿抹除风险。建议R6修复，注意run锁→DB顺序，公众恢复验收前解决。
+停止race只读定位已完成：`/tmp/public-r1-stop-race-analysis.md`、事件屏障探针 `/tmp/public-r1-stop-race-probe.py` 与结果JSON。确定性复现 `_sync_apply_results` 观察running后、DB事务前worker变stopped但activity未清理，导致held/interrupted；LIVE.launch=false，外部进程/网络sink均未执行。回放R1前_recover方法同样复现；无交错对照pending且无attempt。九个关键收尾/Live方法AST与基线相同，已证实旧竞态存在；原首轮临时DB已不在，不能把该次失败与此路径等同为完全证实。R1检查可能改变调度但不在该临界窗口增加扫描，未测概率。没有修改恢复代码/放宽断言，不用复跑绿抹除风险。甲方已决定从R6提前此项：R1整合后独立R1s修复，再立即R1b；注意run锁→DB顺序。
 
 评审R-1（显式legacy资料引用marked workspace）按甲方决定归R4数据权限；不顺手纳入R1b。当前新workspace执行拒绝边界不因此解除。原四项1609结果及首轮失败记录保留；本轮仅文档和CI测试，按甲方要求不重跑无关整套。新增护栏会随下次协调者push在现有pytest步骤执行。
 
 本次CI小步验证：新增13项CI契约 + 原workspace/resources 48项 = **61 passed in 1.70s**（`/tmp/public-r1-ci-contract-green.log`）；与前文61项stuck模块是不同测试集合。新测试ruff check/format及git diff --check通过。workflow正文未变，业务实现未变，未重复全套或制品构建。
+
+## 甲方最终排期决定留底
+
+CI契约提交为5aac3c3，13项新增＋48项原定向共61通过，锁已释放后本次只为文档重新claim。甲方接受停止竞态证据强度：不阻塞R1，但作为明确缺陷，在R1整合后单独最小切片R1s提前修，再立即R1b；不提前全套R6、不混进当前R1。仓库内[缺陷证据](public-stop-race.evidence.md)保存关键交错、三组结果及首次失败未完全归因的限制；原首次失败、重测及CI红绿记录全部保留。本次只文档，不改实现/测试、不重跑大套、不触发CI、不开始下一片。远端CI结果由协调者管理，未在此宣称通过。
