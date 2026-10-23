@@ -4,7 +4,7 @@
 Hook mode (no arguments, PreToolUse JSON on stdin): refuses file edits that land on paths git does not
 ignore, git commands that move branches, commits, the index or the working tree, `uv add/remove/lock`, and
 shell writes (redirects, tee, rm/mv/cp/touch, sed -i) onto such paths, unless this session holds the lock
-of the checkout the change lands in. A checkout nobody has claimed takes no code changes at all. Commands
+of the checkout the change lands in. In development mode a checkout nobody has claimed takes no code changes. Fresh clones do not enable this mode. Commands
 that change what every checkout shares (push, branch, tag, worktree) and writes inside .git count as
 changes to the main checkout. Ignored paths (data/local/, logs/, .venv/ ...) stay writable for the daily
 sessions.
@@ -12,6 +12,7 @@ sessions.
 Each lock lives in its checkout's own git dir (.git for the main checkout, .git/worktrees/<name> for a
 worktree), so every worktree is claimed on its own and no lock is ever committed.
 
+  python3 .claude/hooks/code_owner.py enable-dev     opt this local repository into development locking
   python3 .claude/hooks/code_owner.py claim [label]   make this session the owner of the current checkout
   python3 .claude/hooks/code_owner.py status          every checkout, its branch and who owns it
   python3 .claude/hooks/code_owner.py release         free the current checkout (then nobody may change it)
@@ -26,6 +27,7 @@ import sys
 from pathlib import Path
 
 LOCK_NAME = "code-owner"
+DEV_MODE = "code-owner-development"
 FILE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 GIT_ALWAYS = {
     "add", "am", "apply", "checkout", "cherry-pick", "clean", "commit", "merge", "mv", "pull", "push",
@@ -292,6 +294,12 @@ def refusal(change, git_dir, common, lock):
     )
 
 
+def development_enabled(common):
+    """Local-only opt-in; an existing lock also identifies a legacy managed repository."""
+    return any((directory / DEV_MODE).exists() or (directory / LOCK_NAME).exists()
+               for directory, _ in checkouts(common))
+
+
 def hook():
     data = json.load(sys.stdin)
     cwd = data.get("cwd") or os.getcwd()
@@ -299,6 +307,8 @@ def hook():
     if not here:
         return 0
     common = here[2]
+    if not development_enabled(common):
+        return 0
     tool, args = data.get("tool_name", ""), data.get("tool_input") or {}
     if tool in FILE_TOOLS:
         target = args.get("file_path") or args.get("notebook_path") or ""
@@ -342,7 +352,14 @@ def cli(argv):
         return 1
     _, git_dir, common = here
     where, path = where_name(git_dir, common), git_dir / LOCK_NAME
-    if argv[0] == "claim":
+    if argv[0] == "enable-dev":
+        existing = read_lock(git_dir)
+        if existing and existing["session"] != session_id():
+            print("Development checkout belongs to another session", file=sys.stderr)
+            return 1
+        (git_dir / DEV_MODE).touch(exist_ok=True)
+        print("Local development lock enforcement enabled; claim before edits")
+    elif argv[0] == "claim":
         me = session_id()
         if not me:
             print("拿不到会话 id：请在 Claude Code 或 Codex 会话里运行。", file=sys.stderr)
@@ -359,12 +376,15 @@ def cli(argv):
             except FileExistsError:
                 print("代码锁已被其他会话创建；拒绝覆盖。", file=sys.stderr)
                 return 1
+        (git_dir / DEV_MODE).touch(exist_ok=True)
         print(f"{where}的代码锁归属：{label}（{me}）")
     elif argv[0] == "release":
         existing = read_lock(git_dir)
         if existing and existing["session"] != session_id():
             print("代码锁属于其他会话；拒绝解除。", file=sys.stderr)
             return 1
+        if existing:
+            (git_dir / DEV_MODE).touch(exist_ok=True)
         path.unlink(missing_ok=True)
         print(f"{where}的代码锁已解除：在有会话 claim 之前，谁都不能改{where}的代码。")
     elif argv[0] == "status":

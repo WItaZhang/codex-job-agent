@@ -28,3 +28,11 @@ README最短路径和依赖分层、专属Chrome、授权、子agent行为边界
 新增 tests/test_github_host_journey.py：24个合成岗位经真实旧 JobSpy 适配/Store 与 Toolbox，外部scrape返回合成表；实际标签、7+3、显式合成反馈/理解参数、proposal选择、意图版本2、JSON清单、求职信校验和普通/保护/登录门槛结果。socket.connect毒丸，fake仅测试文件；没有S2 runtime或生产解锁入口。初稿错误依次为无用NoModel导入不存在、清单路径应在files下、FormFillFake复用GateRunner的stop调用应按mode判保护，不计产品行为红。修正后单例1 passed/0.46s。
 
 scripts/check_host_checkout.py限定干净无data/local检出，实际使用两个宿主配置命令在根/子目录启动stdio，初始化仓库合成意图示例，列47工具/读意图；不调用外发业务。不把该脚本当宿主模型交互。固定提交后在独立clone实跑结果另记。
+
+## 基线评审收尾：开发模式/授权/文档（模块决定5）
+
+采纳 /tmp/github-host-release-baseline-review.md 的限定证据，基线1867/102.64s是评审方3fe87bc，不冒充本分支结果。新的hook实执行测试先2失败/1通过（普通clone被挡、enable-dev不存在）；修后 `uv run pytest -q tests/test_host_development_mode.py tests/test_tools.py tests/test_delegated_authority.py tests/test_github_host_journey.py` 84 passed/8.60s。覆盖普通clone配置/升级不claim、显式模式、原锁release后继续保护、共享新worktree拒绝、常见本地文件忽略；不更改其他开发树锁。当前检出已用enable-dev持久启用，本会话原锁保持。
+
+/apply新增一次范围判定：含糊调用只填，明确自动投递当前清单可直接构成授权，作者既有委托不重问。仍需实际宿主受控验证，不用静态文字称模型行为已通过。工具docstring明确从源码根写data/local路径；历史plan去个人标识并标弃用验证码服务设想；不修改历史决定正文。skill-creator apply quick_validate通过。
+
+固定2f11cbe干净含空格clone已完成uv sync --locked与scripts/check_host_checkout.py：四次真实stdio（两配置×根/子目录）47工具、合成示例初始化及读回、锁文件不变。/tmp/github-host-clean-protocol.json、.stderr和-install.log留底。安装利用本机现有Python/uv缓存，不当作全新OS/联网首次下载实证；没有真实宿主模型交互。

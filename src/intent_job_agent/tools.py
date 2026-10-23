@@ -494,7 +494,9 @@ class Toolbox:
 
     @_tool("prepare")
     def import_jobs(self, path: str) -> dict:
-        """Import a JSON array of postings from the data directory. Re-importing a posting is a no-op."""
+        """Import a JSON array from the configured data directory; re-import is a no-op. Relative paths
+        start at the MCP working directory (checkout root in shipped configs): use data/local/jobs.json,
+        not jobs.json. The resolved path must remain inside the data directory."""
         jobs = parse_jobs(inside(self.data_dir, path))
         new = [job for job in jobs if not self.store.has_job(job.id)]
         for job in new:
@@ -2947,7 +2949,9 @@ class Toolbox:
 
     @_tool("commit")
     def initialize_intent(self, path: str) -> dict:
-        """One-time setup from a YAML file in the data directory: intent, compensation and vocabulary."""
+        """One-time setup: intent, compensation and vocabulary. Paths are relative to the MCP process working
+        directory (the checkout root in shipped host configs), e.g. data/local/intent.yaml, not intent.yaml.
+        The resolved file must be inside the configured data directory."""
         try:
             data = yaml.safe_load(inside(self.data_dir, path).read_text(encoding="utf-8"))
             comp = Compensation.model_validate(data["compensation"]) if data.get("compensation") else None
