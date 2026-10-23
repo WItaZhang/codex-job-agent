@@ -98,3 +98,31 @@ def test_host_local_files_are_ignored_without_global_excludes(tmp_path):
             ["git", "-c", "core.excludesFile=/dev/null", "check-ignore", "-q", name], cwd=root, check=False
         )
         assert result.returncode == 0, name
+
+
+def test_development_mode_survives_removing_its_enabling_worktree(tmp_path):
+    for action in ("enable-dev", "claim"):
+        case = tmp_path / action
+        root, hook = repository(case)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=Synthetic",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-qm",
+                "synthetic",
+            ],
+            cwd=root,
+            check=True,
+        )
+        tree = case / "temporary-tree"
+        subprocess.run(["git", "worktree", "add", "-qb", "temporary", str(tree)], cwd=root, check=True)
+        assert invoke(tree, hook, action).returncode == 0
+        assert invoke(tree, hook, "release").returncode == 0
+        subprocess.run(["git", "worktree", "remove", str(tree)], cwd=root, check=True)
+        assert invoke(root, hook).returncode == 2
+        assert (root / ".git/code-owner-development").is_file()

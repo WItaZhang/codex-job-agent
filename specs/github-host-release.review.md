@@ -80,3 +80,7 @@ scripts/check_host_checkout.py限定干净无data/local检出，实际使用两�
 | 投递权限 | 现有公司名单/未知公司只填、实际用户范围 | 规则与合成回归通过 | 同上 | 不改变工具白名单/平台策略 | 非R4工具层绝对提交拦截；不承诺恶意宿主隔离 | 维持既有限制 |
 
 本次没有合入S2/R2、没有推送/合并，没有新增安装器/自建宿主。1885的产品代码与交审代码相同；最终文档差异只做链接/差异检查，不重复无关全套。
+
+## EN-1 / AU-1 最小收尾
+
+旧91f6dc3合成仓库真实enable-dev→release→worktree remove后，主检出Edit返回0，行为红见/tmp/github-host-en1-red.log。改用common git目录持久标记后，enable-dev和claim两条路径均保留保护；`uv run pytest -q tests/test_host_development_mode.py tests/test_host_launchers.py` 11 passed/1.68s，/tmp/github-host-en1-green.log。已有标记仍兼容，普通clone无标记不受管。授权证据仅当前会话/可用宿主历史，不新增存储。G03角色实际派生继续验收，不以先前只读定义代替。

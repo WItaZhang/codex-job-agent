@@ -357,7 +357,7 @@ def cli(argv):
         if existing and existing["session"] != session_id():
             print("Development checkout belongs to another session", file=sys.stderr)
             return 1
-        (git_dir / DEV_MODE).touch(exist_ok=True)
+        (common / DEV_MODE).touch(exist_ok=True)
         print("Local development lock enforcement enabled; claim before edits")
     elif argv[0] == "claim":
         me = session_id()
@@ -376,7 +376,7 @@ def cli(argv):
             except FileExistsError:
                 print("代码锁已被其他会话创建；拒绝覆盖。", file=sys.stderr)
                 return 1
-        (git_dir / DEV_MODE).touch(exist_ok=True)
+        (common / DEV_MODE).touch(exist_ok=True)
         print(f"{where}的代码锁归属：{label}（{me}）")
     elif argv[0] == "release":
         existing = read_lock(git_dir)
@@ -384,7 +384,7 @@ def cli(argv):
             print("代码锁属于其他会话；拒绝解除。", file=sys.stderr)
             return 1
         if existing:
-            (git_dir / DEV_MODE).touch(exist_ok=True)
+            (common / DEV_MODE).touch(exist_ok=True)
         path.unlink(missing_ok=True)
         print(f"{where}的代码锁已解除：在有会话 claim 之前，谁都不能改{where}的代码。")
     elif argv[0] == "status":

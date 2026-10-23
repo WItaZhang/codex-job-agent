@@ -120,7 +120,7 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 2. 本机需要：Chrome、Node.js（`npx`）、Claude Code 命令行。可选：Gmail MCP 授权（读邮箱验证码；填表 agent 只能搜索和读，不能发信）。
 3. 输入 `/apply`：
    - 先给这一批写求职信（子 agent 写，代码校验，打印成一页 PDF）。
-   - 先确定你授权的范围：明确“自动投递当前清单/这些岗位”即可，后续沿用至撤销。只有含糊/apply而无自动提交授权时，先准备材料和只填，展示具体批次及非保护公司范围供你一次选择。默认 review_first=0，已授权的非保护公司自动投递，无需人工抽查前 5 份。要只填不交，可显式 stop_before_submit=true；独立填表模块保持不提交。
+   - 先确定你授权的范围：明确“自动投递当前清单/这些岗位”即可，依据当前会话或宿主可用历史中的明确授权沿用至撤销；跨会话取决于宿主保留的上下文，项目不会自动记忆。没有可查授权证据、只有含糊/apply时，先准备材料和只填，展示具体批次及非保护公司范围供你一次选择。默认 review_first=0，已授权的非保护公司自动投递，无需人工抽查前 5 份。要只填不交，可显式 stop_before_submit=true；独立填表模块保持不提交。
      条款、隐私声明、"信息属实"这类必勾的框由 agent 勾，可选的营销短信不勾。
    - 公司名单命中、空/未知公司始终由填表模块填好并停下，等你本人确认、亲自提交；邮件投递也不能发送。名单缺失不能当作空名单。普通、重试和恢复都会重新检查保护，已有 careful 不自动升级。
    - 页面写明筛选题要本人作答、不许用 AI 时，agent 不答，停下这个岗位，把原文告诉你。
@@ -165,7 +165,7 @@ AGPL-3.0-only，来源说明见 [NOTICE.md](NOTICE.md)。
 
 ## 开发
 
-普通clone配置和升级无需claim。参与受管理开发时，在独立worktree运行 `python3 .claude/hooks/code_owner.py enable-dev`，再 `python3 .claude/hooks/code_owner.py claim <切片名>`；开发锁仅本地保存。已有锁/开发标记的共享仓库继续执行唯一编辑规则，release不关闭开发模式。Codex不执行Claude hook，仍须遵守同一约定。
+普通clone配置和升级无需claim。参与受管理开发时，在独立worktree运行 `python3 .claude/hooks/code_owner.py enable-dev`，再 `python3 .claude/hooks/code_owner.py claim <切片名>`；开发锁仅本地保存；开发模式标记在 common git 目录，删除 worktree 也不会关闭。旧仓库如果已无残留锁或标记，请显式执行 enable-dev。已有锁/开发标记的共享仓库继续执行唯一编辑规则，release不关闭开发模式。Codex不执行Claude hook，仍须遵守同一约定。
 
 ```text
 uv sync --locked
