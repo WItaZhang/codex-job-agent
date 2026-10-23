@@ -49,3 +49,7 @@
 修订固定HEAD `d7a622e73a26f088a57b89f846bdde850ba4cdd8` 四项全通过：uv sync --locked、ruff check src tests、ruff format --check src tests（98文件）、pytest **1753 passed/89.47s**。日志分别为`/tmp/public-r2b-plan-four-{sync,lint,format,full}.log`。四文档本地链接与diff检查通过；这是main23aa66b代码基线的验证，不含未合R2的1906项，也不证明新R2b契约已实现。后续仅本证据文档提交，不改实现，无需为同代码重复全套。
 
 甲方补充`/tmp/public-r2b-s1-config-review.md`仅作未来S1参考，不授权代码改动：独立runtime节，旧workspace缺节用包内默认资源唯一源，不回落legacy llm凭据；不碰R2 setup_drafts。实施前明确部分覆盖/嵌套合并语义并测试，禁止浅合并丢默认；避免config→runtime.config→config循环依赖，类型放置以实际依赖图验证。零重试等合法预算按语义允许0，不采纳机械所有字段正数的建议。合并顺序由协调者负责，不能承诺放在不同代码位置就一定无git冲突；必须实际集成验证。新字段对旧版读取的影响留R7兼容记录，不在此片实施迁移。S1具体范围仍待修订复审后正式授权。
+
+## S1正式实施准入
+
+规格cb05496已整合main d15f440（甲方合并四项1753/77.97s，CI39958072188由协调者跟进）。新树public-r2b-s1-runtime无人持锁，真实会话claim后ff-only main/sync locked成功。甲方正式批准S1，模块决定6/总决定31记录范围；未启动S2–S6。后续将分别记录首步语义红、实际实现绿、取消/过滤毒丸和完整四项/制品结果；当前不将获准当通过。
