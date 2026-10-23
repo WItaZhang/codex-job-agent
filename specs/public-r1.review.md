@@ -93,3 +93,10 @@ ps仅子进程环境：Linux LC_CTYPE=C.UTF-8；macOS保持UTF-8；LC_TIME=C/TZ=
 CI在sync后执行`uv run playwright install --with-deps chromium`，静态契约只增加此精确命令并验证缺失时失败。锁定Playwright1.56.0的实际CLI已核对--with-deps及chromium；[官方CI说明](https://playwright.dev/python/docs/ci)要求安装浏览器/系统依赖。只供既有本地合成网页集成测试；原enrichment测试未mock，未开放新workspace浏览器业务；不采用官方示例的artifact上传。
 
 定向：stuck_run/CI契约/applypilot **105 passed / 27.02s**（追加最后两项前）；随后Unicode/locale/竞态6通过、CI契约14通过。ruff检查/格式通过。环境无可用docker/podman，本地macOS不能代替Linux CI；不改主目录，不推送，协调者推新HEAD再交Claude复核三点。完整验证与制品结果另补。
+
+修复实现提交 **d004439306726259ea63aa50de47a606dacd57ba** 的最终本地验证：
+
+- 四项：`uv sync --locked`、`ruff check src tests`、`ruff format --check src tests`均通过；完整 **1627 passed in 65.97s**（`/tmp/public-r1-ci-fixed-full.log`），原失败断言保留。
+- 实际direct wheel、sdist→wheel及安装MCP/离线报告探针通过（`/tmp/public-r1-ci-fixed-package.log`）；editable资源修改/新增/删除刷新通过（`/tmp/public-r1-ci-fixed-editable.log`）。
+- 这是macOS本地结果；Linux新HEAD CI（包括C.UTF-8实际procps、with-deps Chromium安装）尚待协调者push后验证，旧run39916656829保持failure事实，不重跑碰运气。Claude需复核本次新增三点，f62c32c评审通过不覆盖本次实现。
+- 本记录后的提交只追加验证证据，未改实现。交审后release，工作区保持干净，不推送/合并、不自行启动R1b。
