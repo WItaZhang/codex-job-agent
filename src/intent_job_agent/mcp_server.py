@@ -17,6 +17,8 @@ SERVER_NAME = "intent-agent"
 
 INSTRUCTIONS = """Job-intent calibration tools. The user labels a few jobs a day; you help them keep their intent
 model accurate. Rules:
+- Work only within this user's explicit delegation. The repository author's decision25 delegation does not
+  authorize other users' business actions. Existing authorization persists; obey actual host approvals.
 - Show numbered choices. The delegated coordinator may choose from existing evidence; never invent user facts.
 - record_labels requires an actual user message, never inferred feedback. Actor/reference parameters are audit
   assertions, not authentication. Delegated proposal choices record delegated_coordinator; keep proposal IDs and

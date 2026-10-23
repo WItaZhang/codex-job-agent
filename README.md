@@ -5,7 +5,34 @@ agent 分析哪里没对上，给出几个修改选项；用户或授权协调�
 
 需求和规则见 [spec.md](spec.md)，开发约定见 [CLAUDE.md](CLAUDE.md)。
 
-当前交付目标是GitHub源码项目：clone后按README配置，在Codex或Claude Code使用共用skills/MCP。不是独立桌面或免配置投递服务；本轮验收见[源码双宿主规格](specs/github-host-release.md)。作者委托不构成其他用户授权，每位用户须在自己的宿主明确授予业务范围。后文接入与限制正在本片按实际代码核对，未验证事项不宣称通过。
+这是在 Codex 或 Claude Code 中运行的源码项目。先配置自己的求职意图，再使用发现、推荐和清单功能；投递需要另外准备资料与程序。每位用户须在自己的宿主明确授权业务范围，作者的开发委托不会随 clone 传给你。
+
+## 最短开始路径
+
+准备 Git、[uv](https://docs.astral.sh/uv/getting-started/installation/) 和一个已经可用的 Codex 或 Claude Code。宿主账户和模型费用由你自己的订阅或 API 配置承担。
+
+```sh
+git clone https://github.com/WItaZhang/codex-job-agent.git
+cd codex-job-agent
+uv sync --locked
+mkdir -p data/local
+cp docs/examples/intent.example.yaml data/local/intent.yaml
+cp docs/examples/searches.example.yaml data/local/searches.yaml
+```
+
+自行编辑这两个示例，核对词条、地点和搜索范围，然后从仓库根目录启动宿主。不要把示例偏好当成你的真实判断。首次对话可说：
+
+> 我已核对 data/local/intent.yaml。请初始化意图，检查搜索设置；本次只允许发现、打标签和推荐，不投递。
+
+如果先离线试用，可复制 [合成岗位示例](docs/examples/jobs.example.json)，让宿主导入并打标签，不运行抓取。要打开网页补全原文，另安装锁定 Playwright 对应的浏览器：
+
+```sh
+uv run playwright install chromium
+```
+
+Linux 还可能需要系统库；官方提供 `uv run playwright install --with-deps chromium`（涉及系统安装权限）。浏览器版本必须与 Python 包匹配，见 [Playwright 安装说明](https://playwright.dev/python/docs/browsers)。不要用关闭 sandbox 解决启动失败。
+
+这里使用项目提供的显式 `--config configs/default.yaml` 源码入口；不要改为 `init --workspace` 期待真实业务可用，后者目前仍是本地只读模式。
 
 ## 在 Codex 里使用
 
@@ -34,7 +61,7 @@ Codex 与 Claude Code 的项目配置仅放行指定的提交级工具，不扩�
 
 ## 在 Claude Code 里使用
 
-1. 安装依赖：`uv sync`，然后 `uv run playwright install chromium`（补全原文要用浏览器）
+1. 安装依赖：`uv sync --locked`，然后 `uv run playwright install chromium`（补全原文要用浏览器）
 2. 把个人文件放进 `data/local/`（已被 git 忽略）：
    - 意图初始文件：参照 [docs/examples/intent.example.yaml](docs/examples/intent.example.yaml)，存为 `data/local/intent.yaml`
    - 搜索设置：参照 [docs/examples/searches.example.yaml](docs/examples/searches.example.yaml)，存为 `data/local/searches.yaml`
@@ -56,8 +83,7 @@ Codex 与 Claude Code 的项目配置仅放行指定的提交级工具，不扩�
 
 打标签怎么省钱：代码先从地点、远程、雇佣类型、职级等字段读出预标签；明确违反硬约束的岗位（例如你只要美国，
 它在伦敦）先放一边，意图变了会重新判断；其余按当前意图粗排，按顺序打完整标签，每天最多 2000 个（`configs/default.yaml`
-里的 `tagging.daily_budget`），足够把每天新进的岗位打完。完整标签由便宜模型（haiku）的子 agent 并行完成，不需要 API key，
-子 agent 碰不到任何提交级工具。
+里的 `tagging.daily_budget`），这是上限，不保证当天抓取的岗位全部处理完。完整标签使用宿主子 agent：Claude 角色指定 haiku，Codex 默认继承主会话模型。此步骤不要求另配抓取 API key，但仍消耗宿主额度。角色定义限定只调用三个标签工具；Codex 原生子 agent 可能继承其他 MCP 工具，这份清单是行为约束，不是宿主强制工具隔离保证。
 
 ## 岗位从哪里来
 
@@ -69,9 +95,9 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 列成编号选项给你挑，选中的才写进 `boards.yaml`。招聘板抓取在后台运行，每家读完整个站点，只为新岗位打开详情页。
 
 - **LLM key（可选）**：只有 smartextract 和补全原文的最后一步需要。要用的话，自己在 `data/local/.env` 写一行
-  `GEMINI_API_KEY=...`（或 `OPENAI_API_KEY=...`、`LLM_URL=...`），不要把 key 贴进对话。不写也能用，这两步会跳过。
+  `GEMINI_API_KEY=...`（或 `OPENAI_API_KEY=...`、`LLM_URL=...`），不要把 key 贴进对话。不写时 smartextract 跳过；原文增强仍会尝试确定性提取，模型兜底不可用可能失败，查看来源报告，不把跳过或失败当成已补全。
 - **代理（可选）**：被限流或封 IP 时，设置环境变量 `INTENT_AGENT_PROXY=host:port`（或 `host:port:user:pass`）。
-- **风险**：这些网站的服务条款禁止自动抓取，可能被限流或封 IP，网站改版后可能失效。仅供个人求职使用。
+- **风险**：抓取可能被限流或封 IP，网站改版后可能失效。使用前自行核对目标站点的当前许可和使用条款，项目不替你取得访问许可。
 - 没有自己的 `employers.yaml`、`sites.yaml` 时使用 ApplyPilot 自带的列表（以加拿大雇主和站点为主）；
   只想搜美国岗位的话，可以写 `employers: {}` 和 `sites: []` 把它们关掉。
 
@@ -99,7 +125,7 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
    - 公司名单命中、空/未知公司始终由填表模块填好并停下，等你本人确认、亲自提交；邮件投递也不能发送。名单缺失不能当作空名单。普通、重试和恢复都会重新检查保护，已有 careful 不自动升级。
    - 页面写明筛选题要本人作答、不许用 AI 时，agent 不答，停下这个岗位，把原文告诉你。
    - 门槛交给你：登录和注册都不成、单点登录、验证码和"确认你是真人"、Gmail 里收不到的邮箱验证码，agent 停在那一页、标签页留着，
-     这个岗位"等你处理"，不算失败。系统从不破解验证码。一步做完时 Mac 弹一条通知；实际门槛解决后，协调者依据证据接着投，不必再授权（自动提交的照样自动提交）。自己交了就说"7 已投"，不想处理就说"7 不处理了"。
+     这个岗位"等你处理"，不算失败。系统从不破解验证码。一步做完时 Mac 弹一条通知；实际门槛解决后，在用户已授予的业务范围内依据证据继续；实际宿主审批仍须遵守。自己交了就说"7 已投"，不想处理就说"7 不处理了"。
    - 一步一定会结束：agent 5 分钟没有任何动静就算卡住，结束它和它启动的进程，接着做下一个。说"停下"随时能停：
      正在填、停在提交前的马上结束；正在自动提交的做完再停，免得打断提交。工具服务中途重启了，下次 /apply 会按已经记下的结果收尾，
      显式开启抽查时保留第一步失败作废规则；默认不抽查时直接执行普通批次；正在自动提交的那个可能已经交了，列在"等你处理"里请你看一眼。
@@ -107,12 +133,11 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
      多出或被关掉的标签页、Chrome 连不上，报告里会写"可能有人在用投递用的 Chrome"。
    - 问"这周达标了吗"：`apply_stats` 按每次尝试给出本周和上周的提交数、成功率和各类失败。
    - 不要求项目逐步批准；仲裁协议、SSN、银行卡或申请费，agent 会停下并告诉你。结束时给一张检查单：每个岗位打开过的其他网站、发出的邮件。
-4. 风险：自动提交撤不回；招聘网站可能封号；投递用的 Chrome 带着你日常的登录状态
-   （已删掉保存的密码、银行卡和自动填充，屏蔽了邮箱、网银等网站，但屏蔽名单不是严格的安全边界）。
+4. 投递使用工作区自己的专属 Chrome profile：首次新建空目录，同工作区后续复用，需在该浏览器重新登录。不会复制日常 Chrome 资料，不接管已有固定 9222 端口。自动提交撤不回，网站可能封号；专属 profile 不是凭据加密或恶意同用户进程隔离保证。
 
 ## 全权委托与保护公司
 
-开发阶段和日常业务由授权协调者自主推进。记录 label 必须有用户真实判断，缺失个人事实不能编造；意图修改仍通过 proposal、版本及摘要校验，代理选择记为 delegated_coordinator，不冒称用户本人批准。
+作者对协调者的开发委托仅适用于本项目开发；新用户的业务委托由该用户在自己的宿主明确给出，未授权范围不得自行执行。已有明确委托内可由协调者推进。记录 label 必须有用户真实判断，缺失个人事实不能编造；意图修改仍通过 proposal、版本及摘要校验，代理选择记为 delegated_coordinator，不冒称用户本人批准。
 
 唯一保留的业务批准边界是明确“提交前确认”的公司真正提交。本项目不提供解锁该公司的自动提交入口；填好后由用户检查并亲自提交。保守匹配包含通用法人后缀和已合并岗位的公司名，不猜母子公司。名单只能按用户明确命令维护。
 
@@ -120,7 +145,13 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 
 ## 升级
 
-`git pull` 只更新代码，`data/local/` 里的意图、label 和历史不受影响。pull 之后运行 `uv sync`，并在 Claude Code 里用 `/mcp` 重连服务（或重启）。
+先停止抓取/投递并退出 MCP，备份自己的完整 data/local 和自定义配置，再更新源码、运行 `uv sync --locked`、重启宿主/MCP。Git 忽略个人数据不代表升级不会迁移数据库；旧版本不一定能打开新库，项目尚无完整安装器升级/回滚保证。不要同时让新旧版本操作同一数据库。备份含私人资料，由你自己保管，不上传到仓库或对话。
+
+## 支持与验证范围
+
+当前本机开发与合成验证为 macOS arm64；Linux CI 覆盖合成测试、浏览器及包检查，不等于已验证所有 Linux 桌面宿主/投递安装。Windows 未验证，当前启动脚本和进程管理依赖 POSIX，暂不承诺可用。真实招聘网站、邮件、验证码和账户权限随用户环境而异。
+
+本片的固定版本、命令、通过项与尚未验证项记录在[交付证据](specs/github-host-release.review.md)。协议握手、合成流程与已登录宿主交互是不同层级，不把测试通过称为真实投递效果达标。
 
 ## 许可证
 
@@ -139,7 +170,7 @@ uv run python -m pytest -q
 
 ## R1 内部工作区与制品检查（不是公众发行）
 
-本仓库源码公开。R1 的“内部预发布”表示成熟度，不表示仓库私有；CI只在runner中构建、安装和测试，不上传可安装wheel，不创建Release/Pages/PyPI发行物。完整公众目标仍须UI、独立授权、运行时和可靠提交边界等后续验收。
+本仓库源码公开。R1 的“内部预发布”表示成熟度，不表示仓库私有；CI只在runner中构建、安装和测试，不上传可安装wheel，不创建Release/Pages/PyPI发行物。当前使用入口是上述源码加宿主流程；这段仅说明保留的本地工作区与包检查能力，不是另一套必装步骤。
 
 安装开发制品后，可用 `intent-job-agent init --workspace /absolute/path` 创建空工作区，再用
 `intent-job-agent-mcp --workspace /absolute/path` 启动本地只读MCP。省略workspace选择平台用户应用目录中的默认工作区，尚未初始化时会提示init。初始化不复制Chrome、不生成个人档案或授权；重复运行保留已有文件。

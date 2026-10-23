@@ -2,12 +2,10 @@
   "mcpServers": {
     "intent-agent": {
       "type": "stdio",
-      "command": "uv",
+      "command": "sh",
       "args": [
-        "run",
-        "intent-job-agent-mcp",
-        "--config",
-        "configs/default.yaml"
+        "-c",
+        "cd \"$(git rev-parse --show-toplevel)\" && exec uv run --locked intent-job-agent-mcp --config configs/default.yaml"
       ]
     }
   }
