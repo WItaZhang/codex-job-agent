@@ -25,3 +25,7 @@ B：独立填表不依赖领域数据，唯一例外是apply_running协调行与
 ## 4：绑定早审E1–E7（总决定29）
 
 甲方采纳ab1063d早审：首次空专属profile后持久复用登录，generation为实例，不是每次丢资料；澄清原“每次空”歧义。只读SQLite协调查询不构造Store；绑定kind+唯一runid，比较调用方独立期望root/db；原子session、损坏不覆盖、有界管理锁内重读owner；同连接验PID再读白名单元数据。补真实边界fake与最终disconnect浏览器仍活/Linux包装PID实证，Windows不回落。
+
+## 5：实现验收与平台证据（总决定29）
+
+b2716f5阶段批准后已完成实现，系统Chrome有头与Playwright Chromium headless均采用产品launch_arguments的本地合成fixture；配置显式选择binary/headless、锁与启动上限，默认系统Chrome有头，任何配置都不豁免local_only或身份验证。LinuxCI增同一产品fixture命令且不上传制品；Windows未验证拒绝管理。固定Node顶层包和实际传递依赖分别记录，无升级。公开产品的授权/可靠提交仍归R4/R5，R1b不解除公众外发门槛。

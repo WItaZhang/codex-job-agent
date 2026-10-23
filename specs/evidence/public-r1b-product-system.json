@@ -1,0 +1,53 @@
+{
+  "synthetic": true,
+  "platform": "Darwin",
+  "os_version": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+  "binary": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "headless": false,
+  "browser_version": "155.0.8059.85",
+  "python_playwright": "1.56.0",
+  "navigator_webdriver_observed": true,
+  "launch_args": [
+    "--remote-debugging-port=0",
+    "--remote-debugging-address=127.0.0.1",
+    "--user-data-dir=<owned-profile>",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-sync",
+    "about:blank"
+  ],
+  "product_ensure_connect_metadata_readback_checkpoint_watchdog": true,
+  "cdp_disconnect_keeps_browser_alive": true,
+  "restart_keeps_profile_new_generation": true,
+  "popen_os_cdp_pid_match": true,
+  "wrong_guid_python_refused": true,
+  "mcp": {
+    "package": "@playwright/mcp@0.0.83",
+    "installed_package_version": "0.0.83",
+    "server_version": "1.64.0-alpha-1790635538000",
+    "exact_ws_tabs": true,
+    "wrong_guid_tool_error": null,
+    "synthetic_title_absent": null,
+    "resolved_playwright_packages": {
+      "playwright": "1.64.0-alpha-1790635538000",
+      "playwright-core": "1.64.0-alpha-1790635538000"
+    }
+  },
+  "mcp_wrong_guid": {
+    "package": "@playwright/mcp@0.0.83",
+    "installed_package_version": "0.0.83",
+    "server_version": "1.64.0-alpha-1790635538000",
+    "exact_ws_tabs": false,
+    "wrong_guid_tool_error": true,
+    "synthetic_title_absent": true,
+    "resolved_playwright_packages": {
+      "playwright": "1.64.0-alpha-1790635538000",
+      "playwright-core": "1.64.0-alpha-1790635538000"
+    }
+  },
+  "navigation": "about:blank",
+  "business_tools_called": false,
+  "windows_verified": false
+}

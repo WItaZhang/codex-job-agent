@@ -12,16 +12,25 @@ from .apply_fakes import synthetic_binding
 from .conftest import settings
 
 
+@pytest.mark.parametrize("listener_fails", [False, True])
 @pytest.mark.parametrize("mode", ["submit", "stop"])
 @pytest.mark.parametrize("launched", [False, True])
 @pytest.mark.parametrize("stopped", [False, True])
-def test_identity_loss_launch_cells_and_stop_priority(tmp_path, monkeypatch, mode, launched, stopped):
+def test_identity_loss_launch_cells_and_stop_priority(tmp_path, monkeypatch, mode, launched, stopped, listener_fails):
     s = settings()
     monkeypatch.setattr(config, "APP_DIR", tmp_path)
     monkeypatch.setattr(config, "APPLY_WORKER_DIR", tmp_path)
     monkeypatch.setattr(apply_bridge, "build_prompt", lambda *a: "synthetic")
     monkeypatch.setattr(browser_session, "validate_owner", lambda *a, **k: None)
     monkeypatch.setattr(watchdog, "LIVE", watchdog.Live())
+    if listener_fails:
+
+        def failed_listener(*args):
+            if stopped:
+                watchdog.LIVE.stop("synthetic", modes=("stop", "submit"))
+            raise browser_session.BrowserIdentityLost("identity changed while recording child")
+
+        monkeypatch.setattr(watchdog.LIVE, "spawned", failed_listener)
     spawned = []
 
     class Watch:

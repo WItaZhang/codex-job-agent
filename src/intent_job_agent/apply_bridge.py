@@ -635,6 +635,7 @@ def run_application(
     # The working directory holds only the files to upload (ApplyPilot copies them to apply-workers/current),
     # so Playwright MCP's default file-access limit to the working directory still allows those uploads.
     stop = watchdog.LIVE.begin(spec.job_id, spec.mode)  # from here a stop is heard, before the agent starts
+    proc = None
     try:
         chrome = watchdog.ChromeWatch(
             binding,
@@ -646,7 +647,6 @@ def run_application(
         )
         browser_session.validate_owner(binding, expected=browser_session.scope(settings))
         chrome.check()  # the tabs open before the agent starts (spec section 10 item 114)
-        proc = None
 
         def start_agent():
             browser_session.validate_owner(binding, expected=browser_session.scope(settings))
@@ -672,7 +672,28 @@ def run_application(
             watchdog.LIVE.spawned(stop, proc.pid)
     except browser_session.BrowserIdentityLost as error:
         watchdog.LIVE.end(stop)
+        if proc is not None:
+            watchdog.Tree(proc.pid).kill(alive=proc.poll() is None)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            proc.stdout.close()
+            status, reason = ("held", "interrupted") if spec.mode == "submit" else ("failed", "browser_identity_lost")
+            return ApplyOutcome(status, reason, [str(error)])
         return ApplyOutcome("pending", "browser_identity_lost_before_launch", [str(error)])
+    except Exception as error:
+        watchdog.LIVE.end(stop)
+        if proc is None:
+            raise
+        watchdog.Tree(proc.pid).kill(alive=proc.poll() is None)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        proc.stdout.close()
+        status, reason = ("held", "interrupted") if spec.mode == "submit" else ("failed", "runner_interrupted")
+        return ApplyOutcome(status, reason, [f"After launch: {type(error).__name__}: {error}"])
     except BaseException:
         watchdog.LIVE.end(stop)
         raise
@@ -707,6 +728,8 @@ def run_application(
         chrome.check()  # how the agent left the tabs
     except browser_session.BrowserIdentityLost:
         why = "browser_identity_lost"
+    except Exception:
+        why = "runner_interrupted"
     finally:  # whatever ended the run: the agent and everything it started (spec section 10 item 107)
         tree.kill(alive=proc.poll() is None)
         try:
@@ -718,14 +741,14 @@ def run_application(
     seen = audit(events, spec.url)
     used = chrome.report(events, pages)
     output = "\n".join(texts)
-    if why == "browser_identity_lost":
+    if why in ("browser_identity_lost", "runner_interrupted"):
         # A reliable result already emitted before disconnect wins; otherwise never retry a launched submit.
         if parse_result(output) == "failed:already_applied" or (
             spec.mode == "submit" and parse_result(output) == "applied"
         ):
             status, reason = outcome_status(spec.mode, parse_result(output))
         else:
-            status, reason = ("held", "interrupted") if spec.mode == "submit" else ("failed", "browser_identity_lost")
+            status, reason = ("held", "interrupted") if spec.mode == "submit" else ("failed", why)
         return ApplyOutcome(
             status,
             reason,

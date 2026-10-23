@@ -127,7 +127,7 @@ apply:                            # 投递（spec 4.10）
     - mcp__gmail__list_filters
     - mcp__gmail__get_filter
     - mcp__gmail__delete_filter
-  chrome_profile_strip:           # 复制日常 Chrome 资料后删掉：保存的密码、银行卡、表单自动填充
+  chrome_profile_strip:           # legacy解析兼容；R1b不再复制资料，此列表不参与启动
     - Login Data
     - Login Data-journal
     - Login Data For Account

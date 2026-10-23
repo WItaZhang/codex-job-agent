@@ -313,11 +313,6 @@ def ensure(settings):
         old = _read_record(path)
         if old is not None:
             _workspace(old, expected)
-            if watchdog.alive(old.pid, old.started):
-                verify(old, expected=expected)
-                binding = BrowserBinding(**{**old.dump(), **owner})
-                _atomic(path, binding.dump())
-                return binding
         profile = folder / "profile"
         marker = folder / "owned-profile.json"
         _plain(profile)
@@ -334,6 +329,12 @@ def ensure(settings):
                 raise BrowserIdentityLost("Owned profile is missing; inspect records before retrying")
             profile.mkdir(mode=0o700)
             _atomic(marker, {"root": root, "db_path": db_path, "profile": str(profile)})
+        if old is not None:
+            if watchdog.alive(old.pid, old.started):
+                verify(old, expected=expected)
+                binding = BrowserBinding(**{**old.dump(), **owner})
+                _atomic(path, binding.dump())
+                return binding
         # No live process using this profile may be displaced, including an unknown stale session.
         if any(f"--user-data-dir={profile}" in p.command for p in watchdog.processes().values()):
             raise BrowserIdentityLost("A live process still uses this profile; leave it untouched")

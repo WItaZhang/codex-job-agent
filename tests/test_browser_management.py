@@ -185,16 +185,17 @@ def test_live_unknown_process_on_owned_profile_preserves_active_port(managed):
     assert active.read_bytes() == before and len(launched) == 1
 
 
-@pytest.mark.parametrize("damage", ["marker", "missing-profile"])
+@pytest.mark.parametrize("damage", ["marker", "missing-profile", "live-marker"])
 def test_ownership_damage_does_not_modify_profile(managed, damage):
     from pathlib import Path
 
     cfg, _, procs, launched = managed
     b = bs.ensure(cfg)
-    procs.pop(b.pid)
+    if damage != "live-marker":
+        procs.pop(b.pid)
     marker = Path(b.root) / "browser/owned-profile.json"
     profile = Path(b.profile)
-    if damage == "marker":
+    if damage in ("marker", "live-marker"):
         marker.write_text('{"root":"foreign"}')
     else:
         profile.rename(profile.with_name("preserved-profile"))

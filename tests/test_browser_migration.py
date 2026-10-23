@@ -52,3 +52,24 @@ def test_checkpoint_identity_failure_never_says_carry_on():
         assert "Carry on" not in answer
     finally:
         worker.stop()
+
+
+def test_pdf_renderer_always_uses_a_fresh_empty_profile(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from intent_job_agent.vendor.applypilot import config
+
+    seen = []
+    monkeypatch.setattr(config, "get_chrome_path", lambda: "synthetic-chrome")
+
+    def render(args, **kwargs):
+        path = Path(next(a.split("=", 1)[1] for a in args if a.startswith("--user-data-dir=")))
+        assert not path.exists()
+        assert path.parent.is_dir() and path.parent != tmp_path
+        seen.append(path)
+        (tmp_path / "letter.pdf").write_bytes(b"%PDF synthetic")
+
+    monkeypatch.setattr(apply_bridge.subprocess, "run", render)
+    monkeypatch.setattr(apply_bridge, "pdf_page_count", lambda _: 1)
+    apply_bridge.render_letter_pdf("synthetic", tmp_path / "letter.pdf", "Synthetic", "2026-10-23")
+    assert len(seen) == 1 and not seen[0].parent.exists()

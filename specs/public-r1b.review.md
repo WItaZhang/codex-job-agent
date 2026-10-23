@@ -1,6 +1,6 @@
-# R1b 规格与能力探针交审记录
+# R1b 实现与验证交审记录
 
-状态：规格/计划/独立合成探针完成，等待甲方及Claude正式复核；**未实现产品代码**。本次不是R1b最终验收或公众发布验收。总决定29；[规格](public-r1b.md)、[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)。
+状态：产品实现及本地验证完成，待独立代码复核和协调者推送后的Linux CI；不推送/合并，不宣称公众发布验收完成。总决定29；[规格](public-r1b.md)、[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)。以下早期阶段记录为历史证据，其“未实现/等待批准”只描述当时状态，最终结果见末尾。
 
 ## 基线和历史
 
@@ -58,3 +58,29 @@ ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防
 迁移过程中首组消费者回归86 failed/116 passed/16 errors（整数fake和旧checkpoint schema等），后续逐项迁移，未放宽业务断言。整套首次15 failed/1658 passed/76.13s：尚未迁移的readback裸port测试、ChromeRunner测试接口、恢复fixture缺generation；随后针对消费者236 passed/31.40s、checkpoint36 passed/16.88s、剩余197 passed/14.33s。新旧generation另有明确回归，旧记录不得靠补默认generation接管。完整最终验证仍在后面记录。
 
 系统Chrome产品fixture已跑通：产品ensure/精确连接、metadata、readback、checkpoint、watchdog、Python/MCP错误GUID、disconnect后浏览器PID仍活、持久profile重启新generation。实际navigator.webdriver=true，未加enable-automation且不宣称规避检测；仅about:blank合成页面。最终平台/参数/Node依赖JSON随最终交付保存，LinuxCI尚待协调者推送。
+
+### 真实fixture与收尾边界补充
+
+最终产品路径系统Chrome与headless Chromium本地探针均通过（准确参数见仓库JSON）；Linux同命令已加入只读权限CI步骤与静态允许清单，禁止上传发行制品不变。CI契约先1 failed/13 passed，再14 passed。新探针增加版本校验时曾有局部变量version遮蔽导入导致启动前失败，改名后通过，未升级依赖。
+
+活实例marker不符补测先1 failed/2 passed，调整先验profile所有权再adopt后15管理测试通过。Popen已返回但spawned身份记录失败补测先4 failed/16 passed，修复为已启动submit held/interrupted、fill待修复失败后20 passed；不会以未启动pending吞掉已启动的不确定结果。后续异常同样保守收尾。
+
+## 最终本地交审结果
+
+产品代码集中四项通过：`uv sync --locked`、`uv run ruff check src tests`、`uv run ruff format --check src tests`；`uv run python -m pytest -q` **1688 passed in 80.48s，无skip**。保留上述首次失败记录，不以最后一轮绿抹去迁移失败。此后仅把独立fill正常结束测试改为屏障内running→done，并给真失联增加显式线程屏障；相同5项定向测试全部通过，ruff两项再次通过，产品代码未再变。三组分别覆盖运行中apply_status不kill、正常收尾与恢复交错、失联确认前kill0及确认后只结束协调记录。
+
+制品验证：`scripts/check_package.py` direct wheel及sdist→wheel均通过，安装后MCP47工具、full/scheduled、资源闭包、cwd独立及form-fill缺运行参数检查通过；local_only外发调用仍拒绝。`scripts/check_editable_resources.py`的修改配置、修改/新增/删除reference四种uv run/sync资源更新通过。无上传制品/Release/Pages/PyPI发布。
+
+实际产品fixture：[系统Chrome有头](evidence/public-r1b-product-system.json)、[Chromium headless](evidence/public-r1b-product-headless.json)，复现脚本为`scripts/probe_product_browser.py`（系统Chrome加`--system-chrome`）。两者均使用产品启动参数、全新临时专属profile和about:blank合成页面，验证精确WS/OS PID-start-profile/CDP PID、metadata/readback/checkpoint/watchdog、Python及MCP正确/错误GUID、`browser.close()`仅disconnect且浏览器仍活、同profile重启保留合成标记且generation更新。实际webdriver=true，不承诺规避检测。Python1.56.0、MCP0.0.83及实际Node1.64.0-alpha-1790635538000分别留证，没有升级。
+
+| 范围 | 验证入口/证据 |
+| --- | --- |
+| 旧ensure_chrome/open_tabs反证 | test_browser_entry_boundary：原行为3红，foreign9222不复用、vendor复制/端口kill毒丸 |
+| 归属、原子记录、锁、关闭 | test_browser_management/binding：expected root/db、runid、损坏记录、锁超时、活profile不删ActivePort、marker不符/目录缺失不创建、SIGKILL前重验及PID复用kill0 |
+| 连接及只读元数据 | test_browser_migration及真实fixture：同连接先PID后Target，非owner无attach/evaluate，checkpoint失效STOP，无整数端口回落 |
+| 启动及恢复 | test_browser_identity_outcome（20项）、form_fill_owner（5项）、generation与既有stuck/gate回归：未launch不造attempt，已launch未知submit保守held，旧generation安全重开 |
+| 隔离和发行 | 既有workspace回归与制品探针：local_only先拒绝；test_release_workflow允许产品合成fixture但禁止发行步骤 |
+
+**尚待证据**：本机两种模式都是macOS，不能充当Linux包装PID/进程身份实证。相同产品fixture已加入Linux CI，需协调者推送新HEAD后取得结果；Windows未验证，管理入口明确拒绝。精确WS及CDP自报不是恶意同用户进程认证；浏览器后台网络削减参数不是网络沙箱。本片不构成保护公司最终提交技术边界或公众上市验收，R4授权/资料边界、R5可靠提交、R6其他恢复、R8发行仍保留。未访问真实招聘/邮箱，未读取个人profile.json/.env或复制日常Chrome。
+
+本地实现阶段完成，交独立复核；不推送/合并。预计后续为一次独立代码复核及一次远端CI窗口，耗时取决于队列和发现的问题，不作上线承诺。

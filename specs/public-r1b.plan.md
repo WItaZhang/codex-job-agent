@@ -2,7 +2,7 @@
 
 [现行规格](public-r1b.md) · [模块决定](public-r1b.decisions.md) · [交审证据](public-r1b.review.md)。基线main8530523；唯一编辑检出public-r1b-browser。b2716f5已获甲方及Claude阶段批准，现按1–9测试先行产品实现；不推送，不改owner/main或旧R1树。
 
-## 当前阶段
+## 已完成的规格与能力探针阶段（历史）
 
 1. 读取甲方B1/B2/S1/S2取舍，写原规格与决定（总决定29）。
 2. `scripts/probe_browser_binding.py`：锁定Python Playwright1.56.0、MCP0.0.83，分别记录此前headless Chromium证据及实际系统Google Chrome有头模式，均为自己的全新临时空profile，只about:blank。验证DevToolsActivePort精确WS、SystemInfo browserPID=Popen PID、OS started稳定、OS命令行profile参数一致，不调用CDP Browser.getBrowserCommandLine、不加enable-automation、MCP列到同一合成标题，错误GUID拒绝。只处理自己Popen，不kill端口。

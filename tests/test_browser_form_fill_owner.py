@@ -18,7 +18,7 @@ def box(tmp_path):
 def test_known_fill_running_or_finishing_is_not_killed(box, monkeypatch, status):
     owner = box._owner()
     box.store.begin_activity(owner, "form_fill", run_id="synthetic-fill")
-    box._form_fill_run = {"run_id": "synthetic-fill", "status": status, "closed": False}
+    box._form_fill_run = {"run_id": "synthetic-fill", "status": "running", "closed": False}
     reached, release = threading.Event(), threading.Event()
     original = box._sync_apply_results
 
@@ -53,11 +53,33 @@ def test_known_fill_running_or_finishing_is_not_killed(box, monkeypatch, status)
 def test_lost_fill_only_ends_its_coordination_record(box, monkeypatch):
     box.store.begin_activity((999999, "dead"), "form_fill", run_id="lost-fill")
     called = []
-    monkeypatch.setattr(watchdog, "alive", lambda *a: False)
+    reached, release = threading.Event(), threading.Event()
+
+    def dead(*args):
+        reached.set()
+        assert release.wait(3)
+        return False
+
+    monkeypatch.setattr(watchdog, "alive", dead)
     monkeypatch.setattr(watchdog, "kill_agent", lambda *a: called.append(a))
     monkeypatch.setattr(watchdog, "kill_orphans", lambda *a: None)
     monkeypatch.setattr(box, "_close_interrupted", lambda *a: pytest.fail("not an application"))
-    box._recover()
+    errors = []
+
+    def recover():
+        try:
+            box._recover()
+        except BaseException as error:
+            errors.append(error)
+
+    worker = threading.Thread(target=recover)
+    worker.start()
+    assert reached.wait(3)
+    assert called == []
+    assert box.store.activity()["run_id"] == "lost-fill"
+    release.set()
+    worker.join(3)
+    assert not worker.is_alive() and not errors
     assert len(called) == 1
     assert box.store.activity() is None
     assert box.store.apply_attempts() == []

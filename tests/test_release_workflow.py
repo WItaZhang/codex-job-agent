@@ -26,6 +26,7 @@ def validate_workflow(document):
         {"run": "uv run ruff check src tests"},
         {"run": "uv run ruff format --check src tests"},
         {"run": "uv run python -m pytest -q"},
+        {"run": "uv run python scripts/probe_product_browser.py"},
         {"run": "uv run python scripts/check_package.py"},
         {"run": "uv run python scripts/check_editable_resources.py"},
     ]

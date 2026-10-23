@@ -1,6 +1,6 @@
 # R1b：浏览器归属与空专属资料
 
-本规格定义R1b目标，当前处于规格/探针评审阶段，产品实现尚未开始。[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)、[证据](public-r1b.review.md)互链；总决定29。
+本规格定义R1b目标，已获甲方/Claude阶段批准并完成产品实现，正在集中验证和独立交审。[计划](public-r1b.plan.md)、[决定](public-r1b.decisions.md)、[证据](public-r1b.review.md)互链；总决定29。
 
 ## 1. 范围与已交付基线
 
