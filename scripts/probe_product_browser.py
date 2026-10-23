@@ -58,6 +58,11 @@ def main():
                 page.set_content(
                     f'<title>{TITLE}</title><label>First Name<input value="Synthetic"></label><button>Next</button>'
                 )
+                sandbox = {"observed": False, "reason": "Linux-only evidence"}
+                if platform.system() == "Linux":
+                    from probe_linux_sandbox import collect
+
+                    sandbox = collect(browser, binding)
                 webdriver = page.evaluate("navigator.webdriver")
                 browser_version = browser.version
                 target = next(t for t in bs.targets(binding, expected=expected) if t["title"] == TITLE)
@@ -127,6 +132,7 @@ def main():
                             "navigation": "about:blank",
                             "business_tools_called": False,
                             "windows_verified": False,
+                            "linux_sandbox": sandbox,
                             "compatibility_flags_effects_verified": False,
                             "compatibility_flags_note": (
                                 "Launch arguments and product identity flow verified; "

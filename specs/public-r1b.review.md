@@ -106,3 +106,19 @@ ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防
 后续由协调者推送新HEAD取得Linux stderr，优先判读明确错误文本及退出状态，再安排针对修复。官方[AppArmor/userns说明](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md)说明了可能机制及按路径策略，但不证明本次故障来源。若确证，评估仅ephemeral CI、精确实际二进制路径的最小必要许可或保留sandbox的helper；不照抄文档通配路径，不全局sysctl关闭限制，不在产品加no-sandbox，不在用户Mac/日常系统改策略。password-store=basic不构成磁盘秘密保护，R4仍需独立验收。
 
 状态：诊断待Linux取证，R1b仍未签收；预计取得日志后一个诊断/修复小步，具体估时取决于实际原因。不重跑旧CI、不自行push/合并。
+
+## CI39928342793确诊与精确userns许可交审
+
+诊断实际二进制为`/home/runner/.cache/ms-playwright/chromium-1194/chrome-linux/chrome`，stderr明确`FATAL No usable sandbox!`、退出-6；AppArmor enabled Y/restrict_unprivileged_userns 1/unprivileged_userns_clone 1。该轮 **4 failed/1685 passed/17 errors**，fixture/制品未运行。按甲方决定采用官方按路径userns方案，而不是全局sysctl或no-sandbox。
+
+`scripts/ci_browser_userns.py`仅在GitHub-hosted Linux准备/always清理步骤调用：Playwright固定1.56.0的实际executable_path必须规范realpath、所有祖先无symlink、可执行普通文件，路径语法只接收既定cache布局和数字revision，拒绝特殊字符/通配/转义/其他位置；双引号精确attachment。本次run/attempt数字构成固定前缀profile名，不从路径派生；不覆盖已有文件。root:root/0644安装后核对内容/权限，单profile加载；清理核对归属和内容后单profile移除。CLI用参数列表无shell；没有sysctl、停用AppArmor、no-sandbox或其他权限。路径许可仍不能阻止拥有相同文件写权限的人替换二进制，不外推到用户系统。脚本不进wheel，实际sdist检查也已证实排除；不提供用户安装步骤。
+
+官方依据：[Chromium按路径userns说明](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md)、[Ubuntu单profile加载说明](https://documentation.ubuntu.com/server/how-to/security/apparmor/index.html)、[AppArmor parser](https://www.apparmor.net/man/master/apparmor_parser/)。Ubuntu manpage直接抓取曾超时，官方搜索结果及上述文档核对-r/-R语义；Linux实际加载仍须本轮CI验证，未冒称本机已执行策略。
+
+新增Linux产品fixture组合证据：专属连接读取`chrome://sandbox`状态，CDP browser PID必须等于绑定PID，renderer必须沿OS父链属于该browser，并记录Seccomp/NoNewPrivs和可读namespace inode。必须有Chromium Namespace/Seccomp均Yes、renderer Seccomp2/NoNewPrivs1，缺任一项失败；单一Seccomp值或端点出现均不足。结果在验证前输出，namespace不可读明确记录错误。此真实Linux分支本机无法执行，目前只有合成验证器拒绝缺失/单项/foreign证据的测试，不能算Linuxsandbox已验证。产品参数禁no-sandbox/disable-setuid-sandbox/disable-namespace-sandbox有独立回归；旧Playwright launch测试默认行为不当作产品ensure证明。R1b真实checkpoint/readback fixture已走ensure，不泛称所有测试都自行launch。
+
+状态规格同步：public-release §1/§3 P1/P2/P10更新R1 main8530523及CI39919661089；P5区分R1b待整合分支实测与Linux待验证，R4凭据未完成。公众不通过结论、R8安装器/干净OS/签名及用户Linux策略缺口不变。
+
+红绿：新CI策略接口先10项因脚本不存在失败（接口缺失证据）；workflow新增步骤先1 failed/13 passed。实现后精确策略文本、注入/异常路径、runid、hosted环境、symlink/非可执行文件、sdist排除、禁止全局放宽、产品sandbox参数、组合证据及既有T1/诊断/CI护栏定向通过。没有修改产品src、跳过测试或放宽旧断言。构建direct wheel/sdist往返、安装MCP47工具/full/scheduled、local_only拒绝再次通过；独立检查sdist无CI策略安装脚本。新workflow只有install/remove两步，原诊断/pytest/fixture/制品顺序和只读权限、禁止发行保持。
+
+本轮本地四项：uv sync --locked、ruff check/format均通过；完整pytest **1719 passed/78.49s，0skip**。此后仅补独立产品sandbox禁止参数测试及runid反例，策略文件13项定向通过（包含该新增测试）；合计46项相关定向先前通过，未改产品src。脚本独立ruff通过。Linux安装/卸载策略及sandbox实际观测仍未执行，必须等协调者push新HEAD后的完整CI，不能用本地绿代替。交审时保持工作区锁释放，不自行push/合并。

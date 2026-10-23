@@ -37,3 +37,11 @@ b2716f5阶段批准后已完成实现，系统Chrome有头与Playwright Chromium
 ## 7：Linux CI启动失败先取证（总决定29）
 
 甲方报告141c582的CI39926377064：4 failed/1667 passed/17 errors，全部在ensure未产生端点，后续fixture/制品未执行。stderr原被丢弃，目前不能归因。当前Mac未发现docker/podman/colima/limactl/orb/nerdctl可用入口，先提交CI窄合成启动诊断：最终参数、空临时profile、有界stderr/退出码、相关内核状态只读；真实测试不跳过。Chromium官方AppArmor/userns文档仅排查线索，未授权修改用户机器策略，不照抄通配路径/全局禁用方案。
+
+## 8：已证实无可用sandbox，限CI精确路径许可（总决定29）
+
+CI39928342793明确stderr FATAL No usable sandbox、exit=-6，AppArmor enabled=Y、restrict_unprivileged_userns=1、unprivileged_userns_clone=1；pytest4 failed/1685 passed/17 errors。选择Chromium官方按路径userns许可方案，仅GitHub托管Linux临时runner，固定Playwright版本实际二进制路径，无通配workspace；root拥有的本次run专属AppArmor配置只含userns，按单profile加载/移除。flags=(unconfined)沿官方语义，不是关闭Chromium自己的sandbox。拒绝异常路径/符号链接/非文件，策略不写入产品配置、不进入用户安装流程；不设置no-sandbox、不全局sysctl、不改用户系统。精确路径仍不能抵御能替换该文件的同权限恶意进程，只适用临时CI测试范围。通过新CI前Linux修复保持待验证。
+
+同时按甲方要求把public-release现状从ef8dbd3刷新：R1 P1/P2及CI引用8530523/39919661089；安装器/干净OS/签名仍缺，P5只按R1b实测平台记录，Linux待验证、R4凭据未完成。公众发布仍不通过，历史证据留review/decisions。
+
+决定8补充：采纳Claude最新清单，Linux产品fixture用Chromium自身sandbox页加OS父链/Seccomp/NoNewPrivs的组合观测，缺证据不通过。历史Playwright自行launch测试的默认sandbox选项不替代产品ensure路径证据；R1b真实checkpoint/readback fixture现已通过product ensure启动，其他旧launch测试按各自原实现保留，不据其成功宣称产品sandbox通过。CI策略脚本从sdist排除，wheel无此入口；不作为用户安装步骤。

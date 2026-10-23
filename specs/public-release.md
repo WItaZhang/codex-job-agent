@@ -1,16 +1,16 @@
 # 公众交付规格（决定 27）
 
-本规格是 [总规格 §1/1.1/2](../spec.md) 的公众目标及验收依据；原因见[总决定 27](../spec.decisions.md)，本轮计划见 [public-release.plan.md](public-release.plan.md)，证据与交审见 [public-release.review.md](public-release.review.md)。这是一份已批准目标的规格，不是实现完成声明。
+本规格是 [总规格 §1/1.1/2](../spec.md) 的公众目标及验收依据；原因见[总决定 27](../spec.decisions.md)，本轮计划见 [public-release.plan.md](public-release.plan.md)，证据与交审见 [public-release.review.md](public-release.review.md)。当前状态更新原因见[模块决定](public-release.decisions.md)。这是一份已批准目标的规格，不是实现完成声明。
 
 ## 1. 产品与发布判断
 
 产品是可安装、本地优先、面向非开发者的完整求职工具。用户通过界面完成初始化、资料/意图输入、岗位发现、反馈/校准、清单、求职信、填表、本人确认或按个人授权提交、停止/恢复、历史、备份与升级。保持 A/B 数据边界和真实性；不以让用户自行写 YAML、使用 MCP/CLI 或全手工填表替代完整目标。公众运行不得依赖用户手装/登录 Claude Code；R2b 负责可替换真实 provider、确定性受限编排和用户可见服务配置。不默认建设多租户云。
 
-**当前结论：公众发布不通过。** 核心领域及恢复有合成回归，安装资源、UI、每用户授权、可靠提交执行边界等仍有阻塞。以下状态基于 main ef8dbd3 和交审所列证据；“待验证”不等于通过，也不把尚未发现的风险写成已发生事故。
+**当前结论：公众发布不通过。** R1安装资源/工作区/制品CI已在main8530523交付，UI、每用户授权、可靠提交执行边界与最终安装发行仍有阻塞。以下状态基于main8530523及R1b当前交审证据；R1b尚未整合，Linux启动修复仍待新CI验证；“待验证”不等于通过，也不把尚未发现的风险写成已发生事故。
 
 §9 的每周 200、成功率、每日人工时间和连续两周业务目标原样保留；met 只表示数量/成功率。工程回归通过、完整 B 业务验收、公众发布验收分别记录。公众发布必须有全部阻塞项完成的证据、完整用户旅程及独立验收，不能仅凭本地测试数量、制品可构建或个人委托通过。真实业务指标未证实不得宣传为已达标；本规格不授权真实投递或采集个人数据。
 
-首发支持平台须在制品验收后声明版本/架构范围；现有证据只有本机 macOS、已有 Python 的隔离 venv，不能称为干净 OS 安装验证。可以分平台发布，不能因缩小平台范围删掉完整业务功能。UI 采用桌面壳或本地服务的具体技术选型留在 R2；若使用本地 HTTP，也要验证仅本机访问、请求来源和会话隔离。
+首发支持平台须在制品验收后声明版本/架构范围；现有证据包括本机macOS、已有Python的隔离venv和R1 Linux CI制品验证；R1b macOS浏览器实证另见P5。没有最终安装器的干净OS验证，不能称为非开发者安装通过。可以分平台发布，不能因缩小平台范围删掉完整业务功能。UI 采用桌面壳或本地服务的具体技术选型留在 R2；若使用本地 HTTP，也要验证仅本机访问、请求来源和会话隔离。
 
 ## 2. 用户和执行边界
 
@@ -38,16 +38,16 @@
 
 | ID / 交付条件 | 已实现与定位证据 | 测试/实测证据 | 缺失与发布状态 | 完成所需证据 / 切片 |
 | --- | --- | --- | --- | --- |
-| P1 脱离源码初始化和资源 | pyproject.toml 包和 MCP script；mcp_server.py main、form_fill/cli.py main 均默认 configs/default.yaml；tools.py DEFAULT_LETTER_SKILL 推导源码路径 | wheel 77 文件；安装 49 依赖、help 成功；/tmp 无参数报 FileNotFoundError，未开始应用/DB；显式合成配置 EOF 退出0且真实 initialize/list_tools 得47工具 | 包能启动，但默认初始化、skill 及 cwd 独立性明确缺陷，阻塞 | 实际 wheel 外部目录初始化、握手、资源闭包、两个入口回归；R1 |
-| P2 数据工作区隔离 | config.py Settings.load 只解析；storage 默认相对 data/local，vendor APP_DIR 也是相对路径 | test_slice6 有只读目录/资料缺失拒绝；现有不等于多工作区证明 | 换 cwd 数据分散的路径缺陷；两个工作区/无覆盖待验证，阻塞 | 所有可写输出在所选工作区；权限/损坏失败不回落、双 cwd/双工作区，R1 |
+| P1 脱离源码初始化和资源 | R1 workspace初始化、包资源接口、MCP/form_fill定位与缺失诊断已实现，默认配置和求职信SKILL/references唯一源打包 | main8530523；CI39919661089四项1627 passed/122.49s、0skip，wheel/sdist/editable通过；包外MCP握手47工具 | R1原默认配置/skill缺失已修复；最终图形安装器与干净OS用户旅程仍缺，非公众完成 | 保留R1制品回归；R2/R8无Python环境安装启动及引导验收 |
+| P2 数据工作区隔离 | R1 workspace canonical路径、独立目录/标记、symlink与legacy降级拒绝已实现 | main8530523 / CI39919661089；双cwd/工作区、损坏/覆盖、直接入口local_only及资源回归通过 | 原cwd分散缺陷已修复；每用户生效授权/凭据与legacy资料引用标记workspace边界仍归R4 | 保留目录隔离回归；R4实际授权和资料访问范围对抗 |
 | P3 非开发者完整旅程 | tools.py 领域闭环、skills、JSON/CSV/报告；MCP stdio，无公众 UI | test_tools full_day、apply/form_fill fake 测试 | 安装器、向导、资料编辑、可访问界面和完整 A/B 旅程缺失，阻塞 | 无开发环境账户安装；非开发者按界面完成旅程、错误引导和键盘操作，R2/R3/R8，真实验收待验证 |
 | P4 每用户授权 | 决定25个人默认、宿主配置；tools.start_applying 等没有独立公众用户授权检查 | test_delegated_authority 验证个人规则，不验证陌生用户许可；wheel 不携带宿主配置 | 直接服务端调用缺少个人授权边界，X7 明确缺陷，阻塞 | 未授权、撤销、跨工作区、过期/伪造声明、直接调用底层均拒绝副作用；R4/R5 |
-| P5 浏览器/凭据隔离 | apply_bridge.ensure_chrome 遇 cdp_alive 即返回；vendor chrome BASE_CDP_PORT=9222、setup_worker_profile 复制资料 | test_slice6 删除复制库/限制读目录；尚无归属验证 | X3 盲连9222和复制日常资料明确缺陷；邮箱全局凭据 X6 待核实，不能当事实。阻塞 | 假9222不接入、双工作区不串、归属丢失停机、日常资料读函数调用即失败仍通过；专属登录、secret 生命周期/账号绑定，R1b/R4 |
+| P5 浏览器/凭据隔离 | R1b分支BrowserBinding、专属持久profile、精确WS/PID-start-profile/run身份和所有调用者迁移已实现，未合main | 4fe693 T1/F1独立窄复核通过；macOS系统Chrome155有头/Chromium141无头产品fixture通过；Linux CI39928342793 No usable sandbox，修复待新CI | 原X3修复在待交审分支；Linux仅锁定构建headless+CI专用许可待实证，不能宣称系统Chrome或公众Linux安装支持；凭据R4未完成，邮箱X6仍待核实 | R1b新CI须全绿及sandbox组合证据；R4专属登录/secret生命周期/账号绑定；R8用户安装策略，Windows未验证 |
 | P6 保护公司的最终提交 | applicant.careful、store 观察名单快照、tools 逐路重查；configs form_fill 禁止列表仍允许 evaluate/click/key | test_delegated_authority 路由/中途新增/未知/留底/解除回归 | X5 提交旁路能力存在；真实最终动作无硬边界，launch blocker | 直接入口/旧批次/恢复重试/中途变化；click、Enter、requestSubmit、fetch/XHR、beacon、新窗及邮件对抗，未授权接收数0；本人有效确认后仅目标动作，另需E2/E3实际ATS许可环境证据，R5 |
 | P7 故障恢复/重复风险 | store 尝试记录、tools held/resuming/recovery/watchdog；合并岗位去重 | test_stuck_run、test_gate_handoff、test_slice5b 多场景合成回归 | 公众恢复界面/跨工作区、真实结果不明待验证；N2 锁争用可整步安全失败是已知缺陷 | 收到请求后掉线不重投、不冒称成功，停止/崩溃/锁争用/双恢复可诊断，R6 |
 | P8 外发、日志、凭据 | recording redaction、runner restricted/strict-mcp、个人路径约束 | test_slice6 和 form_fill 脱敏合成覆盖 | 全链路日志/支持包秘密扫描、删除、外发告知和凭据隔离待验证，阻塞 | 合成秘密跨日志/报告零泄露，按范围外发/撤销及安全诊断；R4/R6/R8 |
 | P9 升级备份卸载 | store 局部 ALTER，README git pull/uv sync | 无完整跨版本恢复证据 | 应用数据/保护审计/资料/状态的一致备份和迁移回滚缺失，阻塞 | 升级中断/磁盘满/损坏备份拒绝，恢复后保护不丢、不重投；卸载数据选择，R7 |
-| P10 CI/制品/支持平台 | uv.lock、四项本地检查、uv build 成功 | main ef8dbd3 四项通过1561/63.38s；包探针只本机 venv | CI及实际安装器、签名/校验、平台矩阵证据缺失，阻塞 | R1 起内部预发布 wheel CI，不发用户下载渠道；R8 干净OS安装/更新/卸载、版本来源及依赖故障演练，待验证 |
+| P10 CI/制品/支持平台 | 已有只读权限内部制品CI、四项及wheel/sdist/editable验证，不发布安装制品 | R1 main8530523 CI39919661089全通过（1627/122.49s、0skip）；R1b新Linux浏览器验证仍待通过 | CI不再缺失；最终安装器、签名/校验、干净OS及升级卸载/平台矩阵仍缺，公众发布阻塞 | 保留内部CI；R8干净OS安装/更新/卸载、签名/版本来源及故障演练；不增加用户下载渠道 |
 | P11 依赖/许可/告知 | LICENSE、NOTICE.md、pyproject AGPL；固定 npm 顶层版本，运行依赖 npx/Chrome/Claude | wheel 含许可，但未完成分发组件逐项核验 | npm/浏览器/宿主及服务条款、隐私/风险/费用告知待验证，发行阻塞；非违法结论 | 实际发行依赖清单、源码获取/许可入口、外发/提交不可撤回说明，R8；必要专业审查不冒充工程测试 |
 | P13 宿主无关运行时 | llm.py make_client 仅fake/host，其余NotImplementedError；skills靠宿主，apply_bridge启动claude | 领域fake回归存在，没有公众真实provider及独立编排实证 | 运行时明确缺失，不能要求非开发者安装Claude Code，发布阻塞 | 无Claude机器fake完整旅程+真实provider契约/受控合成实证、缺钥匙与注入拒绝，R2b/R4/R5 |
 | P12 业务与上市表述 | apply_fill.week_stats assessment、spec §9/§10.96 | 统计8新增回归，main已含决定26 | 人工时间及连续两周仍未证实；L1舍入/L2未结束周提示列后续 | 界面不以 met 显示整体达标；真实 B 证据独立记录，R3/R8，不伪造采集 |
@@ -85,11 +85,11 @@ R1已修复远端CI39916656829暴露的三个既有问题：Chromium测试依赖
 
 责任文件候选：llm.py/provider适配、独立orchestrator及受限工具注册、config/UI配置、apply_bridge/form_fill接口适配和provider/注入契约测试；不重写打分/回放领域规则。skills仍唯一维护源，流程迁移需逐步映射及行为回归；涉及skill正文时按skill-creator验证。具体文件拆分在该片计划确定，本片不实现。
 
-## 5. 下一实现片 R1：具体契约、样例及文件责任
+## 5. 已交付 R1：持续验收契约、样例及文件责任
 
 **范围**：脱离源码的初始化、运行资源定位、用户数据目录隔离、实际制品回归及CI。初始化为本地操作，不访问网络、不启动浏览器/MCP外部工具/投递、不读作者档案；不设计 consent.json 或实现授权系统。R1新workspace在R4/R5发布门槛完成前仅本地初始化/本地读/合成测试可用；服务端对真实模型外发、网站/浏览器、邮件、投递及恢复入口明确拒绝，直接调用也必须拒绝，不能仅靠review_first、提示或隐藏UI。显式legacy config保持开发者兼容而非公众默认，不能由新workspace自动降级到legacy绕过；外部legacy配置的data_dir/db_path及直接适配入口实际路径若解析到标记workspace或其后代也拒绝。CI产物标内部预发布，不上用户下载渠道。R1通过仍不能公开自动业务。
 
-**拟定最小接口**（后续实现按此写失败测试）：`intent-job-agent init [--workspace PATH]` 创建空工作区并报告绝对路径及“尚未配置个人资料/业务权限”；省略路径使用平台用户应用数据目录下默认工作区。MCP新增 `--workspace PATH`，不带定位参数使用同一默认工作区；未初始化时报可操作的初始化提示、非零退出，无 traceback/静默回落。form_fill report 同样支持 `--workspace`；无对应录制只报缺失，不访问网站。界面未来复用这些初始化/定位服务，用户不需掌握命令行。
+**已实现接口**（R1持续回归契约）：`intent-job-agent init [--workspace PATH]` 创建空工作区并报告绝对路径及“尚未配置个人资料/业务权限”；省略路径使用平台用户应用数据目录下默认工作区。MCP新增 `--workspace PATH`，不带定位参数使用同一默认工作区；未初始化时报可操作的初始化提示、非零退出，无 traceback/静默回落。form_fill report 同样支持 `--workspace`；无对应录制只报缺失，不访问网站。界面未来复用这些初始化/定位服务，用户不需掌握命令行。
 
 **兼容语义**：保留显式 `--config` 旧入口，config 参数相对路径仍相对调用 cwd，旧配置里的相对路径仍保留既有 cwd 意义，不隐式迁移。新 workspace 模式全部路径锚定工作区，与 cwd 无关；生成配置使用绝对可写路径，包内默认资源只读。`--config` 与 `--workspace` 同传报歧义错误。已有 form_fill `--data-dir` 显式覆盖保留原语义，测试说明其优先级；用户主动指定的外部目录不能被称为默认隔离保证。不得凭目录名猜测作者 data/local；不修改显式旧配置。运行时写入包目录禁止。
 

@@ -68,3 +68,7 @@ R4：legacy applicant跨目录资料权限、每用户授权/账号凭据；R5�
 ## Linux启动失败的窄诊断
 
 CI在真实pytest前单独用产品最终launch_arguments、Playwright实际二进制、全新临时空profile和about:blank做启动诊断。限时并有界捕获stderr与退出码、端点是否出现；只读记录OS及相关userns/AppArmor状态，不修改系统策略。诊断报告不是测试通过证明，即使未启动也继续原有pytest，以保留真实失败；不跳测试、不用fake替代。诊断仅scripts/CI入口，不让普通产品浏览器输出潜在私人stderr。没有根因日志前不判定sandbox、AppArmor或依赖问题；不加入no-sandbox或全局sysctl变更。若确证环境策略原因，另按证据评估短生命周期CI中精确二进制路径许可，不扩展产品权限/支持范围。
+
+已取得CI39928342793的No usable sandbox/-6及AppArmor限制证据。CI准备步骤只在GitHub托管Linux临时runner对锁定Playwright实际Chromium的精确规范路径安装本次run专属userns AppArmor规则；拒绝通配符、转义、变量插值、符号链接及非预期目录。配置root:root/0644，单profile加载，always清理且核对内容，不改全局sysctl、不加no-sandbox、不向公众安装器传播。Chrome自身sandbox保持开启；按路径许可不证明同权限文件防篡改。新CI需取得启动诊断、完整pytest、产品fixture和制品证据，未绿之前Linux仍待验证。
+
+Linux产品fixture另读取本专属浏览器的chrome://sandbox内部状态，结合SystemInfo的browser/renderer PID、/proc父链、renderer Seccomp=2和NoNewPrivs=1验证；namespace inode可读时一并记录，不可读则明确标注原因。必须有Chromium自身Namespace/Seccomp状态及进程组合证据，不把单一Seccomp值/端点出现当全部sandbox证明。缺证据使fixture失败，结果在断言前输出便于诊断；只访问内部页/合成本地页。此证据仅锁定CI构建headless，公众Linux安装仍由R8验证。
