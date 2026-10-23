@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="title desc">
+<title id="title">投递边界：自动处理与本人确认</title><desc id="desc">已明确授权的普通公司可以自动填表、上传并提交；保护名单命中或公司信息未知的岗位填表核对后停在提交前，由用户亲自提交。没有自动提交授权时，先准备材料并确认范围。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#90958B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<g font-family="-apple-system, BlinkMacSystemFont, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif">
+<rect x="1" y="1" width="1198" height="438" rx="24" fill="#FCFCFA" stroke="#E0E2DB"/>
+<text x="52" y="62" font-size="29" font-weight="650" fill="#202B2A" text-anchor="start">每一份投递，都有明确边界。</text>
+<text x="52" y="99" font-size="19" font-weight="400" fill="#69716C" text-anchor="start">未明确授权自动提交时，先准备材料，并展示范围供你选择。</text>
+<rect x="52" y="134" width="532" height="232" rx="18" fill="#E7F5EE" stroke="#0B6B58"/>
+<rect x="616" y="134" width="532" height="232" rx="18" fill="#FBEDE5" stroke="#A54625"/>
+<text x="80" y="177" font-size="25" font-weight="650" fill="#0B6B58" text-anchor="start">已授权的普通公司</text>
+<text x="644" y="177" font-size="25" font-weight="650" fill="#A54625" text-anchor="start">保护公司 / 公司信息未知</text>
+<rect x="80" y="213" width="148" height="54" rx="10" fill="#FCFCFA" stroke="#B9DCCE"/>
+<text x="154" y="247" font-size="18" font-weight="550" fill="#0B6B58" text-anchor="middle">填写表单</text>
+<path d="M231 240 L240 240" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="244" y="213" width="148" height="54" rx="10" fill="#FCFCFA" stroke="#B9DCCE"/>
+<text x="318" y="247" font-size="18" font-weight="550" fill="#0B6B58" text-anchor="middle">上传材料</text>
+<path d="M395 240 L404 240" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="408" y="213" width="148" height="54" rx="10" fill="#FCFCFA" stroke="#B9DCCE"/>
+<text x="482" y="247" font-size="18" font-weight="550" fill="#0B6B58" text-anchor="middle">自动提交</text>
+<rect x="644" y="213" width="148" height="54" rx="10" fill="#FCFCFA" stroke="#E9C5B5"/>
+<text x="718" y="247" font-size="18" font-weight="550" fill="#A54625" text-anchor="middle">填写表单</text>
+<path d="M795 240 L804 240" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="808" y="213" width="148" height="54" rx="10" fill="#FCFCFA" stroke="#E9C5B5"/>
+<text x="882" y="247" font-size="18" font-weight="550" fill="#A54625" text-anchor="middle">逐栏核对</text>
+<path d="M959 240 L968 240" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="972" y="213" width="148" height="54" rx="10" fill="#FCFCFA" stroke="#E9C5B5"/>
+<text x="1046" y="247" font-size="18" font-weight="550" fill="#A54625" text-anchor="middle">停在提交前</text>
+<text x="80" y="309" font-size="19" font-weight="400" fill="#0B6B58" text-anchor="start">记录提交结果，汇总待处理事项。</text>
+<text x="644" y="309" font-size="22" font-weight="650" fill="#A54625" text-anchor="start">由你检查并亲自提交。</text>
+<text x="80" y="340" font-size="16" font-weight="400" fill="#0B6B58" text-anchor="start">遇到登录或验证码等门槛，暂停等你处理。</text>
+<text x="644" y="340" font-size="16" font-weight="400" fill="#A54625" text-anchor="start">重试和恢复也遵守同一份确认名单。</text>
+<text x="52" y="409" font-size="17" font-weight="400" fill="#69716C" text-anchor="start">可随时要求停止；已进入自动提交的岗位完成当前提交后再停。</text>
+</g></svg>
