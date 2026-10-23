@@ -175,6 +175,24 @@ llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null
   api_key_env: null
+runtime:                         # public R2b S1; independent of legacy llm credentials
+  protocol_version: 1
+  provider:
+    name: fake
+    model: null
+    credential_ref: null
+  budgets:                       # bounded defaults; per-run scope, synthetic S1 only
+    max_requests: 8
+    max_retries: 0                # no retry; first request remains allowed
+    backoff_seconds: 0.0         # no backoff delay
+    request_timeout_seconds: 30.0
+    total_timeout_seconds: 120.0
+    max_input_bytes: 65536
+    max_output_bytes: 32768
+    max_depth: 12
+    max_output_tokens: 4096
+    max_tool_calls: 1
+    concurrency: 1
 storage:
   db_path: data/local/agent.sqlite
   data_dir: data/local            # 导入岗位、初始化意图时只读取这个目录下的文件

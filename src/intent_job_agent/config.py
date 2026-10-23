@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _Section(BaseModel):
@@ -162,6 +162,15 @@ class Settings(_Section):
     form_fill: FormFill
     llm: LLM
     storage: Storage
+    runtime: dict | None = None
+
+    @field_validator("runtime")
+    @classmethod
+    def validate_runtime(cls, value: dict | None) -> dict | None:
+        from .runtime.config import effective_runtime
+
+        effective_runtime(value)
+        return value
 
     @classmethod
     def load(cls, path: str | Path) -> "Settings":
