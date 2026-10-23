@@ -139,3 +139,11 @@ Codex：/tmp/github-host-native-codex-connect.py创建全新无凭据CODEX_HOME/
 |GitHub双宿主|源码启动、共用skills/roles、合成推荐、恢复报告保护、持久开发模式|代码稳定，交审；未宣称整片验收|产品356fa04，后续仅README/证据文档|四项1886/92.22s；干净clone四握手47工具；002角色/7+3；原生无模型连接|G10实际执行未测；G02分层证据及Codex子返回报告强度待独立裁决|协调者裁决最小G10方案；不推送合并|
 
 R3/R5 README已按代码补数据去向、运行时下载/费用和审批策略审阅；没有声称所有标签发送完整个人资料。当前远端尚非本分支，协调者后续负责整合推送、远端clone和CI。本次文档不改变356fa04已四项通过的产品代码；不重复全套或扩大验收为商业产品。
+
+## G10实施准入与无模型预演
+
+协调者批准决定7，先无模型后单场Claude持久两轮。新增tests/host_apply_acceptance.py仅包外测试启动器，复用真实Toolbox与既有GateRunner/FormFillFake及合成资料，不是生产fake开关。显式临时目录标记、防覆盖；禁socket connect/connect_ex及真实browser/agent/renderer，子进程仅保留owner身份所需ps。预演first只填4岗，再普通3模拟submit+Stripe stop；另后台同批第二个submit停在Event，真实apply_status轮询才释放假runner。没有把这些预演参数注入付费模型。
+
+`uv run pytest -q tests/test_host_apply_acceptance.py tests/test_github_host_journey.py tests/test_gate_handoff.py`：107 passed/8.10s，/tmp/github-g10-dry-validation.log。首次独立dry run exit0/8次假runner，/tmp/github-g10-dry.log；网络毒丸正控一次且正常流程无额外触发。宿主实际两轮尚未运行，此处不能算G10通过。
+
+G02分层发现/连接已由协调者签收；无模型不等于无网络：Codex app-server曾尝试401预连接，未调用模型turn，不宣称全进程零网络。Codex002缺spawn/child trace，独立审查不签收G03，仅父报告不能补证。已批准G10后再一次非ephemeral合成持久线程测试，按确切父/child ID取事件，不遍历私人历史。
