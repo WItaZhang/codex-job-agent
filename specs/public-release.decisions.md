@@ -11,3 +11,8 @@ P5更新CI39929809213：精确许可安装/移除、端点及1720测试通过，
 ## 最终CI证据更新（总决定29）
 
 甲方确认429a735的CI39930613311全绿（1747/126.40s），product fixture/package/editable/remove均完成。现行规格更新为限定Linux CI已实证而非待验证；仅hosted ubuntu-latest+锁定Chromium build1194 headless+精确路径userns许可，不外推公众安装。历史失败决定/报告保留，R4/R8缺口及公众不通过不变；文档交付后待Claude最终签收与整合。
+
+
+## 总决定32：公众路线停止作为当前交付门槛
+
+按用户明确新目标，现行public-release改写为暂停路线状态和仍有效的边界；旧矩阵/估时/原因留git历史和本记录，不假称通过。当前源码验收转github-host-release；已合R1契约保留，R2/S2分支保留，不继续公众实现。

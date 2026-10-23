@@ -1,5 +1,7 @@
 # R2b 宿主无关模型运行时与确定性编排
 
+当前状态（总决定32）：本文件所述公众路线已暂停，不是当前实施授权或交付门槛。S1已合main3fe87bc，S2分支保留8e5c06d；后文为该暂停路线的契约/历史规划，不继续实现。当前任务见[GitHub双宿主规格](github-host-release.md)。
+
 依据[公众规格§4.1](public-release.md#41-r2b-运行时验收与责任)及[总决定27](../spec.decisions.md)，配套[计划](public-r2b.plan.md)、[模块决定](public-r2b.decisions.md)、[交审](public-r2b.review.md)。这是已批准完整规划，不是能力已交付声明。总决定31/模块决定6已批准S1核心契约实施，S2–S6未批准。决定30属于R2，不是R2b实现编号。
 
 ## 1. 目标、现状和边界
