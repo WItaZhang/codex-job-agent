@@ -33,3 +33,7 @@ b2716f5阶段批准后已完成实现，系统Chrome有头与Playwright Chromium
 ## 6：最终评审T1/F1（总决定29）
 
 甲方采纳141c582最终评审两项：普通超时与明确身份失败分型；在重核身份一致后ChromeWatch连续N次只报告超时，恢复清计数，ensure/connect仍不建立未验证授权。恢复规格所列vendor非归属参数，不恢复复制/固定端口/kill，不声称参数具有权限隔离保证。最终参数重跑两种产品fixture并更新证据，Linux支持仅按实际CI模式记录。决定5的“产品参数”证据只描述旧参数，最新兼容参数以本决定和新fixture为准。
+
+## 7：Linux CI启动失败先取证（总决定29）
+
+甲方报告141c582的CI39926377064：4 failed/1667 passed/17 errors，全部在ensure未产生端点，后续fixture/制品未执行。stderr原被丢弃，目前不能归因。当前Mac未发现docker/podman/colima/limactl/orb/nerdctl可用入口，先提交CI窄合成启动诊断：最终参数、空临时profile、有界stderr/退出码、相关内核状态只读；真实测试不跳过。Chromium官方AppArmor/userns文档仅排查线索，未授权修改用户机器策略，不照抄通配路径/全局禁用方案。

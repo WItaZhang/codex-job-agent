@@ -94,3 +94,15 @@ ab1063d早审采纳。E1已改只读SQLite，再补ensure/owner/connect测试防
 本轮第一套1703 passed/80.28s；在其运行期间新增扩展帧断开回归及异常分类，所以还需最终整套覆盖该新增项，结果在下方另记。制品首次wheel/sdist往返通过，同样在最终代码上复验。记录文档的第一次Python追加命令遇到UTF-8解析错误，未写入文件；改用直接文本追加，不影响产品测试。
 
 最终四项全部通过：uv sync --locked、ruff check src tests、ruff format --check src tests；pytest **1704 passed in 78.83s，无失败/skip**。最终代码的 direct wheel / sdist→wheel再次通过，安装MCP47工具、full/scheduled、资源闭包/cwd独立及local_only拒绝保持。产品探针脚本另经ruff check/format通过；仅增加JSON限制说明，不改变已执行的fixture逻辑。没有改资源构建机制，本轮未重复无关editable变更探针，上一轮通过证据保留。交协调者安排Claude T1/F1窄复核与新HEAD CI；本会话不推送/合并。
+
+## Linux CI 39926377064：窄启动诊断交接
+
+甲方提供的141c582远端日志显示 **4 failed / 1667 passed / 17 errors**，失败均在浏览器未发布端点；pytest之后的产品fixture/制品未执行。此日志没有浏览器stderr，**根因尚未证实**，不能把AppArmor、缺依赖、sandbox或参数任一项写成既定原因。甲方随后确认Claude对4fe693的T1/F1窄复核通过，本轮不重做它们。
+
+本机Darwin，PATH未找到docker/podman/colima/limactl/orb/nerdctl；未取得本地隔离Linux环境。新增`scripts/probe_browser_startup.py`，CI在pytest前运行：Playwright实际Chromium二进制、产品最终参数、全新临时空profile、about:blank、20秒启动上限；持续排空stderr，只保留末16KiB及总字节数，记录启动退出码/超时/端点和清理后的退出码，清理仅自己的Popen子进程。只读固定Linux kernel状态清单，不dump环境，不读取用户配置/既有profile，不改变策略。报告仅诊断，不以其退出成功冒充验证通过；原pytest及产品fixture仍是必须的门槛，无skip/fake替代，无制品上传。
+
+先红：采集器两项因脚本缺失失败（接口缺失证据）；workflow新步骤先1 failed/13 passed。实现后16项定向通过（0.15s）：合成子进程100000字节stderr与exit7保留、有界截断；超时子进程清理；CI只读/禁止发行契约。ruff初次一处长行，经format后src/tests及新脚本check/format均通过，diff检查通过。macOS真实空profile诊断：endpoint=true、未超时、退出前仍运行、清理后exit0、stderr98字节、0.519秒；这仅证明诊断管道可用，不证明Linux根因。没有产品代码改动，沿用4fe693四项1704通过记录，本轮不重复无关全套。
+
+后续由协调者推送新HEAD取得Linux stderr，优先判读明确错误文本及退出状态，再安排针对修复。官方[AppArmor/userns说明](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md)说明了可能机制及按路径策略，但不证明本次故障来源。若确证，评估仅ephemeral CI、精确实际二进制路径的最小必要许可或保留sandbox的helper；不照抄文档通配路径，不全局sysctl关闭限制，不在产品加no-sandbox，不在用户Mac/日常系统改策略。password-store=basic不构成磁盘秘密保护，R4仍需独立验收。
+
+状态：诊断待Linux取证，R1b仍未签收；预计取得日志后一个诊断/修复小步，具体估时取决于实际原因。不重跑旧CI、不自行push/合并。

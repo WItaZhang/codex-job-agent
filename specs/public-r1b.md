@@ -64,3 +64,7 @@ R4：legacy applicant跨目录资料权限、每用户授权/账号凭据；R5�
 启动保留原vendor非归属行为参数：window-size=1024,768、profile-directory=Default、disable-session-crashed-bubble、disable-features=InfiniteSessionRestore,PasswordManagerOnboarding、hide-crash-restore-bubble、noerrdialogs、password-store=basic、disable-save-password-bubble、disable-popup-blocking、use-fake-device-for-media-stream、use-fake-ui-for-media-stream、deny-permission-prompts、disable-notifications。它们是兼容性参数，不是秘密/权限硬边界；现代Chrome是否忽略某flag不能仅凭启动成功断言。保留新专属profile/动态端口0/精确WS及既有后台联网削减参数，不恢复复制资料/固定端口/端口kill，不加enable-automation。
 
 平台证据只覆盖实测二进制/模式：Linux CI拟验证Playwright Chromium无头，不代表发行版系统Chrome包装脚本（尤其fork包装）已支持；无法核对PID的启动仍失败关闭。
+
+## Linux启动失败的窄诊断
+
+CI在真实pytest前单独用产品最终launch_arguments、Playwright实际二进制、全新临时空profile和about:blank做启动诊断。限时并有界捕获stderr与退出码、端点是否出现；只读记录OS及相关userns/AppArmor状态，不修改系统策略。诊断报告不是测试通过证明，即使未启动也继续原有pytest，以保留真实失败；不跳测试、不用fake替代。诊断仅scripts/CI入口，不让普通产品浏览器输出潜在私人stderr。没有根因日志前不判定sandbox、AppArmor或依赖问题；不加入no-sandbox或全局sysctl变更。若确证环境策略原因，另按证据评估短生命周期CI中精确二进制路径许可，不扩展产品权限/支持范围。
