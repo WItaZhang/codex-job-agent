@@ -5,7 +5,7 @@
 ## 当前阶段
 
 1. 读取甲方B1/B2/S1/S2取舍，写原规格与决定（总决定29）。
-2. `scripts/probe_browser_binding.py`：锁定Python Playwright1.56.0、MCP0.0.83，启动自己的空profile Chromium，只about:blank。验证DevToolsActivePort精确WS、SystemInfo browserPID=Popen PID、OS started稳定、OS/CDP profile参数一致、MCP列到同一合成标题，错误GUID拒绝。只处理自己Popen，不kill端口。
+2. `scripts/probe_browser_binding.py`：锁定Python Playwright1.56.0、MCP0.0.83，分别记录此前headless Chromium证据及实际系统Google Chrome有头模式，均为自己的全新临时空profile，只about:blank。验证DevToolsActivePort精确WS、SystemInfo browserPID=Popen PID、OS started稳定、OS命令行profile参数一致，不调用CDP Browser.getBrowserCommandLine、不加enable-automation、MCP列到同一合成标题，错误GUID拒绝。只处理自己Popen，不kill端口。
 3. 保存可复现脚本和精简JSON证据；故障区分探针脚手架问题与能力不支持，不因失败退HTTP裸端口。能力成立后不用强制lsof；不把GUID/CDP自报当恶意同用户身份认证。
 4. 更新基线记录、规格互链、未实现状态，交甲方/Claude；本轮不修改src产品代码、业务权限或CI，不为local_only加例外。
 
@@ -23,7 +23,7 @@
 | config.py/configs/default.yaml/workspace.py | 专属目录/必要超时配置与路径约束；旧chrome_profile_strip仅兼容解析，不再是复制资料的保证；local_only仍先拒绝 |
 | tests及文档 | 更新所有裸port fake；迁移test_slice6/form_fill runner/checkpoint/readback/stuck_run/gate_handoff/workspace/apply_fakes；src之外探针不成为产品入口；不改vendor正文 |
 
-产品连接只接收BrowserBinding或受限序列化引用。精确端点来自本次profile记录，核验OS PID/start/profile并连接后检查CDP browserPID/profile；每次新连接/重连验证，长连接断开即失效，不按端口重新发现。只读非owner最多列标签元数据，不页面attach/执行JS；owner及其checkpoint受限子服务才读回。
+产品连接只接收BrowserBinding或受限序列化引用。精确端点来自本次profile记录，核验OS PID/start/profile并连接后检查SystemInfo browserPID；每次新连接/重连验证，长连接断开即失效，不按端口重新发现。只读非owner最多列标签元数据，不页面attach/执行JS；owner及其checkpoint受限子服务才读回。
 
 旧profile不采用/迁移/删除，不允许legacy临时选择采用；重新登录为已接受兼容变化。新generation不接管旧tab，但继续既有重开地址→核查已提交/安全重填路线，不把接着做堵死。已launch submit结果不明held/interrupted；确定未launch保持原状态无attempt；fill已launch身份失效要修复失败，提交证据优先。详细stop优先序以规格四格为准。
 
@@ -34,9 +34,10 @@
 3. **调用迁移**：checkpoint子进程、延迟readback、ChromeWatch重连、MCP参数均核同一generation；AST/静态清单检查非vendor产品CDP连接无裸整数端口回落，不能仅改fake端口为随机数骗绿。
 4. **四格事件屏障**：submit/fill × 确定未launch/已launch，各与用户stop交错；未launch无interrupted，已launch submit结果不明held；fill失败；已有成功不回退、maybe_submitted保守held。R1正常收尾竞态、真实owner失联held和close幂等全部保留。
 5. **恢复/互斥**：旧无generation、不同generation、同profile重启都不操作旧tab而走安全重开；同generation沿id/唯一URL匹配。独立start_form_fill与apply/resume跨会话竞争只一个能启动，启动失败正确清自己的owner。
-6. **清理**：结束agent树不杀独立browser；PID变更/foreign port不kill；PDF临时空profile；reader退出只disconnect；旧离线报告可读、旧port-only执行配置拒绝。
-7. **真实本地fixture**：批准后空profile、about:blank/127.0.0.1；正确绑定完成列标签/checkpoint/readback/watchdog，错误实例拒绝，退出只处理自己进程。无招聘/邮箱/真实申请。导航限制不等同于浏览器后台零联网，不虚称网络隔离。
-8. 四项、必要制品及独立评审。若CI增加探针命令，须更新已批准静态workflow契约，不上传制品/Release/Pages/PyPI。当前阶段不改CI。
+6. **独立填表协调三组事件屏障**：kind=form_fill+runid匹配self._form_fill_run；running期间调用apply_status等恢复入口，kill0且运行继续；正常结束与_recover交错，收尾完成前不误kill、不抢清记录；真失联才清理身份匹配的本运行进程并结束协调行。三组都断言_close_interrupted调用0、applications/apply_attempts/holds无写入。其他会话展示独立填表类型/runid；非owner只取元数据，Target.attachToTarget/Runtime.evaluate调用0。
+7. **清理**：结束agent树不杀独立browser；PID变更/foreign port不kill；PDF临时空profile；reader退出只disconnect；旧离线报告可读、旧port-only执行配置拒绝。
+8. **真实本地fixture**：批准后空profile、about:blank/127.0.0.1；正确绑定完成列标签/checkpoint/readback/watchdog，错误实例拒绝，退出只处理自己进程。无招聘/邮箱/真实申请。导航限制不等同于浏览器后台零联网，不虚称网络隔离。
+9. 四项、必要制品及独立评审。若CI增加探针命令，须更新已批准静态workflow契约，不上传制品/Release/Pages/PyPI。当前阶段不改CI。
 
 ## 依赖、估时及缺证据项
 

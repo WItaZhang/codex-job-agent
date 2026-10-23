@@ -12,4 +12,12 @@ S2只做小型管理锁＋已有apply_running owner，不做lease/心跳；独�
 
 ## 2（2026-10-23）：S1本地实证与MCP错误GUID对照（总决定29）
 
+> 证据外推范围及必需校验组合已被决定3取代；历史实测结果保留。
+
 同一MCP0.0.83正确WS列出about:blank合成标题；错误GUID实际调用browser_tabs返回工具错误且标题不可见，Python连接错误GUID也拒绝。PID/start/profile证据成立，当前macOS环境采用S1而不强制lsof；其他平台和产品迁移仍待验证。Python Playwright1.56.0与MCP自报及实际Node依赖1.64.0-alpha-1790635538000分开记录，没有升级依赖。探针不证明恶意同用户认证或所有未来重连场景。详见同名review及仓库JSON。
+
+## 3（2026-10-23）：正式评审A/B收敛（总决定29）
+
+甲方采纳A(a)：本profile端点记录+精确WS+OS PID/started/profile命令行+连接后SystemInfo browserPID；删除必需CDP命令行核验及enable-automation。已有headless Chromium探针保留但限于原模式；另跑系统Google Chrome有头模式的空profile本地探针，记录平台/OS/binary/headless/启动参数及Python/MCP正确错误GUID对照。不得宣称无webdriver标志或规避检测。尚未验证平台不外推。
+
+B：独立填表不依赖领域数据，唯一例外是apply_running协调行与管理锁。kind=form_fill+runid与self._form_fill_run匹配；正常运行和收尾不误kill，真失联只清自己的进程及协调行，不走_close_interrupted，不写application/attempt/hold。other_session区分填表。三组事件屏障及nonowner元数据无attach/evaluate回归入计划。本次仍只规格/探针，交甲方/Claude窄复核后才产品实现。

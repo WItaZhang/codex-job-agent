@@ -14,7 +14,9 @@ R1b只修浏览器实例归属、空专属profile、必要跨会话互斥及身�
 
 绑定至少含canonical工作区/data root、专属profile真实路径、generation、browser PID+稳定started、精确browser WebSocket端点及控制owner(pid+started)。每次启动使用动态端口0和非默认空profile；只从本次启动profile的DevToolsActivePort读取完整WS路径，不扫描/探活固定端口。拒绝过期/损坏/软链/越界记录，不覆盖不明文件，不按端口kill。
 
-S1在macOS的锁定包探针已成立（见[证据](public-r1b.review.md)），其他平台待验证，不要求强制lsof。必需证据组合为：本profile的端点记录＋精确WS实例＋OS进程PID/started及profile启动参数＋连接后的CDP browser PID/命令行核验。GUID仅防实例串接，CDP自报不是恶意同用户进程认证；不宣称抵御完全控制本用户文件/进程的攻击者。若锁定MCP0.0.83/Python Playwright1.56.0不支持这些能力，报告具体限制，不能退HTTP裸端口；探针成功才去除lsof强制条件。
+S1证据按二进制/模式分别记录（见[证据](public-r1b.review.md)），不能把headless Chromium外推为系统Google Chrome有头模式；其他平台待验证。系统Google Chrome155有头、无enable-automation的macOS26.5.1探针已通过；该环境不要求强制lsof。必需证据组合为：本profile的端点记录＋精确WS实例＋OS进程PID/started及profile启动参数＋连接后的SystemInfo.getProcessInfo browser PID核验。GUID仅防实例串接，CDP自报不是恶意同用户进程认证；不宣称抵御完全控制本用户文件/进程的攻击者。若锁定MCP0.0.83/Python Playwright1.56.0不支持这些能力，报告具体限制，不能退HTTP裸端口；探针成功才去除lsof强制条件。
+
+不要求CDP Browser.getBrowserCommandLine，不为归属验证引入--enable-automation。OS命令行中的专属profile仍是必需核验项。不承诺navigator.webdriver为false或规避网站检测；动态端口/自动化本身的可观察行为如实说明。
 
 所有新连接/重连都使用准确WS，并在连上后再次核验PID/start/profile；断开则绑定失效，不按原端口重新发现。长连接无法在agent每次工具调用前插入校验：ChromeWatch旁路及checkpoint负责发现身份变化；不把轮询称为每次调用硬拦截。身份失效触发第4节结果与受控停止，不吞成普通ChromeDown后继续。
 
@@ -24,7 +26,9 @@ S1在macOS的锁定包探针已成立（见[证据](public-r1b.review.md)），�
 
 工作区内一把小型跨进程管理锁，仅用于启动、接管、关闭及owner原子检查；进程退出自动释放。控制身份复用Store.apply_running的owner(pid+started)，不新增心跳/续租系统。独立start_form_fill也必须登记同一owner并与start_applying/resume_applying互斥，跨Toolbox/进程同时竞争只能一个成功；退出和启动失败必须清理本owner，不能清别人行。
 
-不是owner的会话仅可列已验证实例的标签元数据；不能attach到页面、读回执行JS或启动agent。只读inspect/open_tabs不启动浏览器。当前owner发起的checkpoint子进程持有受限绑定引用，重新核验同一owner及generation，不独占第二份控制权。readback退出只disconnect，不关闭浏览器；agent进程树结束不能误杀独立进程组的浏览器。关闭仅针对仍符合绑定身份的本次浏览器，不按端口kill foreign进程。
+独立填表协调行明确为kind=form_fill和runid；_recover按runid匹配self._form_fill_run，正常running及尚未完成收尾的已知运行由本运行负责，不能误kill。真正失联时只清理身份仍匹配的本运行agent/driver并结束协调行，不走_close_interrupted，不写applications/apply_attempts/holds。_refuse_other_session和other_session文案区分独立填表与投递，展示运行类型及runid，不要求去处理不存在的投递批次。
+
+不是owner的会话仅可列已验证实例的标签元数据（如Target.getTargets），回归必须断言Target.attachToTarget及Runtime.evaluate调用为0；不能attach到页面、读回执行JS或启动agent。只读inspect/open_tabs不启动浏览器。当前owner发起的checkpoint子进程持有受限绑定引用，重新核验同一owner及generation，不独占第二份控制权。readback退出只disconnect，不关闭浏览器；agent进程树结束不能误杀独立进程组的浏览器。关闭仅针对仍符合绑定身份的本次浏览器，不按端口kill foreign进程。
 
 ## 4. 身份失效四种结果与停止优先序
 

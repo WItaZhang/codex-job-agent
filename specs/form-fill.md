@@ -1030,7 +1030,7 @@ data/local/form-fill/
   - `get_form_fill_report(run, id)`，读级：返回报告，联系方式打码。
   - `get_redacted_resume(resume_id)`，读级：返回按 5.6 打码后的简历文本，起草标准答案时用（2.3）。`get_resume` 不变，仍返回原文。
 - 对话里的入口是项目 skill `/form-fill`（在 Codex 里是 `$form-fill`），它只编排上面这些工具。
-- **不依赖数据库**：输入都是文件；输出是标签页、文件和工具返回值。不读也不写岗位、意图、label 和投递状态。
+- **不依赖领域数据**：输入都是文件；输出是标签页、文件和工具返回值。不读也不写岗位、意图、label、applications、apply_attempts、holds。唯一例外是跨会话互斥和失联收尾所需的运行协调行apply_running及管理锁（决定38、[R1b](public-r1b.md)）。独立填表登记kind=form_fill及runid；恢复按runid匹配self._form_fill_run，正常running/收尾不误kill；真失联只清自己进程并结束协调记录，不走_close_interrupted，不写投递领域状态。other_session按独立填表显示，不误称投递批次。
 - **和 /apply 共用的部分**：投递用的Chrome（空专属profile、generation/PID/start/profile归属和精确WS绑定）、MCP 的固定版本、打不开的网站名单、受限读文件。这些都从 `apply_bridge.py` 复用，不改 vendor。
   - `apply_bridge.mcp_config` 和 `claude_command` 现在固定加载 Gmail 服务，放行名单读的是 `apply.allowed_tools`。
   - 本模块要给它们加参数，传入：

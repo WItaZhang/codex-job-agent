@@ -624,3 +624,5 @@
 ## 2026-10-23 决定38：R1b归属与独立填表互斥（总决定29）
 
 按[public-r1b.md](public-r1b.md)统一空专属profile、精确WS及身份绑定；替代固定9222/复制资料的共用方式。独立start_form_fill与投递/恢复共用owner互斥；断连/身份失效不再作为普通tab_lost继续，按四格保留未launch状态或记录要修复失败，提交证据优先。旧离线报告兼容；旧generation不接管tab但保留安全重开。当前仅规格与探针，产品实现需交审通过。
+
+决定38正式评审B收敛：不依赖领域数据，协调行/管理锁为唯一例外；kind=form_fill+runid与self._form_fill_run匹配，正常running/收尾不误kill，真失联只清本运行并结束协调行，不走_close_interrupted、不写application/attempt/hold；other_session文案适配独立填表。三组事件屏障和nonowner元数据无attach/evaluate测试见R1b计划。

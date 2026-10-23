@@ -1,13 +1,16 @@
 """R1b explicit local-only capability probe; not a product entrypoint or authorization bypass.
 
-Starts only its own fresh temporary Chromium profile and about:blank. Requires installed
-Playwright 1.56.0 browser and npx for the pinned MCP 0.0.83; package download is possible.
+Starts only its own fresh temporary profile and about:blank. Default: Playwright Chromium
+headless; --system-chrome: macOS system Google Chrome headed. Requires Python Playwright
+1.56.0 and npx for pinned MCP 0.0.83; package download is possible.
 No applicant data, login, job site, mail, existing Chrome profile or product Toolbox calls.
 """
 
+import argparse
 import asyncio
 import json
 import os
+import platform
 import subprocess
 import tempfile
 import time
@@ -74,6 +77,9 @@ async def check_mcp(endpoint: str, temp: Path, *, wrong_guid: bool = False) -> d
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--system-chrome", action="store_true", help="Use macOS system Google Chrome, headed")
+    args = parser.parse_args()
     assert version("playwright") == "1.56.0"
     with tempfile.TemporaryDirectory(prefix="synthetic-r1b-browser-") as directory:
         temp = Path(directory)
@@ -81,23 +87,27 @@ def main():
         profile.mkdir(mode=0o700)
         assert not list(profile.iterdir())
         with sync_playwright() as pw:
-            executable = pw.chromium.executable_path
+            executable = (
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                if args.system_chrome
+                else pw.chromium.executable_path
+            )
             assert Path(executable).is_file(), "Install the pinned Playwright Chromium before this explicit probe"
+            launch_args = [
+                executable,
+                *([] if args.system_chrome else ["--headless=new"]),
+                "--remote-debugging-port=0",
+                "--remote-debugging-address=127.0.0.1",
+                f"--user-data-dir={profile}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-background-networking",
+                "--disable-component-update",
+                "--disable-sync",
+                "about:blank",
+            ]
             proc = subprocess.Popen(
-                [
-                    executable,
-                    "--headless=new",
-                    "--remote-debugging-port=0",
-                    "--remote-debugging-address=127.0.0.1",
-                    f"--user-data-dir={profile}",
-                    "--enable-automation",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--disable-background-networking",
-                    "--disable-component-update",
-                    "--disable-sync",
-                    "about:blank",
-                ],
+                launch_args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
@@ -119,8 +129,6 @@ def main():
                 processes = cdp.send("SystemInfo.getProcessInfo")["processInfo"]
                 browser_pids = [int(p["id"]) for p in processes if p["type"] == "browser"]
                 assert browser_pids == [proc.pid], browser_pids
-                arguments = cdp.send("Browser.getBrowserCommandLine")["arguments"]
-                assert f"--user-data-dir={profile}" in arguments
                 assert f"--user-data-dir={profile}" in identity.command
                 assert watchdog.processes()[proc.pid].started == identity.started
                 page = browser.contexts[0].pages[0]
@@ -158,6 +166,17 @@ def main():
                     json.dumps(
                         {
                             "synthetic": True,
+                            "platform": platform.system(),
+                            "os_version": platform.mac_ver()[0]
+                            if platform.system() == "Darwin"
+                            else platform.release(),
+                            "architecture": platform.machine(),
+                            "binary": executable,
+                            "headless": not args.system_chrome,
+                            "launch_args": [
+                                a.replace(str(profile), "<temporary-empty-profile>") for a in launch_args[1:]
+                            ],
+                            "cdp_command_line_required": False,
                             "playwright": version("playwright"),
                             "browser": browser.version,
                             "empty_profile": True,
@@ -166,7 +185,6 @@ def main():
                             "cdp_browser_pid_matches_popen": True,
                             "started_stable": True,
                             "os_profile_argument_matches": True,
-                            "cdp_profile_argument_matches": True,
                             "wrong_guid_refused": True,
                             "mcp": mcp,
                             "mcp_wrong_guid": mcp_wrong,
