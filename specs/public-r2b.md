@@ -1,6 +1,6 @@
 # R2b 宿主无关模型运行时与确定性编排
 
-依据[公众规格§4.1](public-release.md#41-r2b-运行时验收与责任)及[总决定27](../spec.decisions.md)，配套[计划](public-r2b.plan.md)、[模块决定](public-r2b.decisions.md)、[交审](public-r2b.review.md)。这是待评审的完整目标规格，不是能力已交付声明。当前只批准四文档，未批准实现。决定30属于R2，不是R2b实现编号。
+依据[公众规格§4.1](public-release.md#41-r2b-运行时验收与责任)及[总决定27](../spec.decisions.md)，配套[计划](public-r2b.plan.md)、[模块决定](public-r2b.decisions.md)、[交审](public-r2b.review.md)。这是已批准完整规划，不是能力已交付声明。总决定31/模块决定6已批准S1核心契约实施，S2–S6未批准。决定30属于R2，不是R2b实现编号。
 
 ## 1. 目标、现状和边界
 
@@ -45,11 +45,11 @@ strict适配不静默降级：只做可证明保持语义的schema转换，不�
 
 ### 2.2 面向消费者的协议版本
 
-S1定义事件、命令、错误、usage、取消统一封套protocol_version=1、request/run/node/revision关联与能力声明。版本不是权限。v1拒绝未知命令/字段/错误枚举和不支持版本，不静默执行或降级；消费者显示固定“不支持的协议版本，请更新兼容组件”，不猜状态。新增可选字段也需发布方与消费者显式支持版本/能力并有兼容测试；破坏性语义变更升主版本，持久化旧事件只能用明确适配读取，不重放副作用。缺版本、跨版本及旧revision作为合成消费者反例。旧LLMClient/FakeClient/NoModelClient与MCP host接口保留独立兼容路径，不把旧接口强行当新v1。
+S1定义事件、命令、错误、usage、取消统一封套protocol_version=1、request/run/node/revision关联与能力声明。命令仅structured/tool_turn/cancel/status，消费者由可信代码绑定workspace/run/revision；wire只引用登记的schema/tool ID，不能导入代码、注册能力或授权。控制命令在执行预算耗尽后仍可查询/停止既有请求。非对象输入固定schema_violation；completed/running与local=stopped矛盾，必须拒绝，不能仅逐字段验证。版本不是权限。v1拒绝未知命令/字段/错误枚举和不支持版本，不静默执行或降级；消费者显示固定“不支持的协议版本，请更新兼容组件”，不猜状态。新增可选字段也需发布方与消费者显式支持版本/能力并有兼容测试；破坏性语义变更升主版本，持久化旧事件只能用明确适配读取，不重放副作用。缺版本、跨版本及旧revision作为合成消费者反例。旧LLMClient/FakeClient/NoModelClient与MCP host接口保留独立兼容路径，不把旧接口强行当新v1。
 
 ## 3. 错误、取消、用量及重试
 
-固定错误至少包括missing_credential、invalid_credential、unsupported_model、schema_unsupported、schema_violation、refused、incomplete、timeout、rate_limited、network、permission_denied、stale、budget_exhausted、internal。错误返回固定中文原因/相关配置项/下一步，不含key、原始响应、个人正文、任意异常路径。缺key只针对真实适配，fake无需key；不回退作者环境、宿主登录或其他账号。
+固定错误至少包括missing_credential、invalid_credential、unsupported_model、schema_unsupported、schema_violation、refused、incomplete、timeout、rate_limited、network、permission_denied、stale、budget_exhausted、not_configured、internal。错误返回固定中文原因/相关配置项/下一步，不含key、原始响应、个人正文、任意异常路径。缺key只针对真实适配，fake无需key；不回退作者环境、宿主登录或其他账号。
 
 取消是多维事实而非互斥成功标签：例如`local=stopped, transport=aborted, remote=unknown`同时成立。远端已确认取消需要provider实际确认，传输中断不是确认，远端取消也不回滚已经发生的工具副作用。重复停止幂等；模型后续结果丢弃，停止后不发新节点。纯理解节点可重新请求但费用仍可能发生；工具已launch且结果不明按既有held/interrupted/maybe_submitted核查，不回pending自动重投。未launch不能伪造已执行。stop与身份失效优先序、R1b generation/归属和恢复已提交核查继续有效。
 
@@ -87,7 +87,7 @@ usage包含provider/model返回标识、request_id、尝试次数、输入/输�
 
 ## 5. 样例与退出矩阵
 
-全部例子使用synthetic岗位、资料、workspace和接收端；尚无以下新测试执行结果。
+全部例子使用synthetic岗位、资料、workspace和接收端。S1已实现并验证C01–C07中的模型契约/过滤/协议范围，固定结果见交审；业务工具launch/提交恢复、完整A/B、真实provider与UI部分仍未实现，不能将局部通过算整表通过。
 
 | ID | 输入/反例 | 期望输出和证据 |
 | --- | --- | --- |
@@ -113,3 +113,11 @@ usage包含provider/model返回标识、request_id、尝试次数、输入/输�
 合成确认控制器、合成提交sink和任意synthetic解锁入口不得进入公众生产包；以包清单/入口检查及外挂测试驱动器注入受限替身验证。允许的fake provider仍可在生产包中存在，但只模拟模型输出，不能解锁真实业务，也不携带确认/提交测试后门。合成提交接口仅由确定性编排器调用，必须有测试作用域且只接合成接收端；不是模型工具，不复用为真实提交许可。R4/R5前公众真实执行始终拒绝。P01用后续明确获准测试账号，隔离开发探针和合成payload；本片无此授权/凭据，不能为了实证改local_only或读现有key。真实provider选型/SDK/模型/endpoint/留存/费率及数据政策均待实施片核对，至少一家真实适配是硬出口，不以fake替代。禁止任意自定义endpoint暗送秘密，支持范围按选型规格明确。
 
 R2b整体退出：以上矩阵、四项、独立制品无宿主fake完整旅程、真实provider受控实证、R2集成可见配置实测，以及供R3消费的已定义协议和合成消费者契约验证均有证据。R3依赖R2b，R2b不依赖尚未实施的R3页面；完整A/B fake旅程在无宿主制品测试驱动器中完成。R2b自己的服务/模型/凭据状态/费用/停止配置必须接R2并实测，不能用合成消费者替代。R2真实键盘/E12等出口仍独立；R4/R5/R8未通过不公开自动业务。§9业务数量/两周/人工时间不由本片合成结果代替。
+
+## 6. S1实施契约（实现已交审，独立签收待定）
+
+S1不发网络请求、不新增SDK、不启动浏览器、不读取真实凭据。新runtime只实现fake执行和真实provider配置状态；旧llm/host行为不改。runtime独立配置节缺失时从包内default.yaml补全，映射递归覆盖、标量和列表整体替换、未知字段拒绝、合并后完整类型/交叉约束验证；显式null不能替代必填子节。模型模块不反向import Settings，避免循环。公共默认只在configs/default.yaml，旧workspace无需重写。
+
+预算语义：max_retries>=0，0允许首次请求但不重试；backoff_seconds>=0，0不等待；max_requests/max_input_bytes/max_output_bytes/max_depth/max_output_tokens/max_tool_calls/concurrency允许0，代表相应容量禁用，返回budget_exhausted且不发送请求；max_tool_calls=0仅禁止tool_turn，structured不消耗工具容量；request_timeout_seconds/total_timeout_seconds必须大于0。默认provider=unconfigured，未配置明确失败，fake仅显式选择并标为模拟，不自动回落。执行时限取单次时限与剩余总时限的较小值，总时限允许短于单次时限。预算耗尽不发新请求，超时是timeout，总预算耗尽为budget_exhausted。S1工具调用仅返回经封闭schema校验的提议，不执行工具；工具schema由可信代码登记且禁止权限/文件/任意执行能力。取消不依赖provider合作才生效，迟到响应仅接受合法usage，不再接受业务value；当前scope失效同理。并发/预算与请求ID唯一性在执行器内校验。
+
+单Runtime绑定一个(workspace,run_id)，首次通过输入/权限校验并接纳请求时原子绑定，其他scope固定stale且不消耗本实例预算。总时限从首次实际发送起算，构造后的空闲不计；同run请求间隔/重试计入，旧实例不能重置预算，新run由未来S2建立新Runtime。仅外层执行线程或内层传输线程确实启动失败时回滚未发送占位，internal/drained；普通已接纳请求即使发送前取消、失效或预算耗尽，也只释放并发槽，保留scope/request_id审计身份，不允许跨run接管或重复ID重投。不能吞并发槽或伪造发送/usage。S1只能停止本地接纳结果，不强杀Python线程；S5真实adapter必须有传输超时与结束机制，未具备不得交付。
