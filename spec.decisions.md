@@ -482,3 +482,7 @@ R1增加确定性拒绝边界调整为3–4日，R2b为6–10日，R5增加证�
 #### Decision 28 — accepted R1 boundary review refinements
 
 External legacy configurations cannot address marked workspace storage (resolved data and DB paths, including ancestors); direct Settings entrypoints enforce the same rule. Keep decision25 local protection snapshot writes as an explicit local-read audit exception without granting authorization or changing feedback. Empty setup reads expose missing-file/uninitialized state without private-file or program inspection. Editable resource refresh uses uv cache inputs and disposable-source change probes; installed wheels never fall back to source. Explicit offline --data-dir overrides remain intentional and outside default workspace isolation. These refine R1 without opening business mutations or adding a consent system.
+
+#### 决定28：最终验收CI静态契约补充
+
+甲方采纳独立评审F1–F5通过，但要求R1-07禁止发行自动校验：用最小workflow静态回归限定contents:read和已批准的CI动作/验证命令；合成上传/发布步骤必须被拒，R1-08的CI pytest自动执行该护栏。不扩展CI安全框架，不声称能抵御恶意代码或任意shell。原CI排队期间不启动重复run，协调者后续推送本提交验证。显式legacy资料引用marked workspace（评审R-1）归后续R4数据权限，不放入R1b。正常停止被恢复误判held的已证实竞态归R6候选修复，保留原失败关联未完全证实的限制与分析证据。

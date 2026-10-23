@@ -57,3 +57,15 @@ R1 提供源码外初始化、包内运行资源、按用户工作区隔离的�
 | 切片 | 产品行为 | 状态 | 提交证据 | 验证结果 | 阻塞/待核实 | 下一步及估时 |
 | --- | --- | --- | --- | --- | --- | --- |
 | R1 / decision28 | 源码外初始化、包资源、本地workspace拒绝副作用、显式legacy兼容 | 实现完成，交独立复核 | 首步197e193；本交审文件随最终修复提交，HEAD由提交后回报 | 1609全套；48定向；61停止模块；两种wheel与editable变更探针通过 | 首次非稳定失败根因未定位；远端Linux CI待跑；非公众发布通过 | 协调者安排Claude定向复核；主目录持锁推此分支触发CI（不先合main），通过后决定整合；审阅/CI耗时依执行环境，不承诺已通过 |
+
+## 最终独立评审与最小CI契约补充
+
+Claude `/tmp/public-r1-final-review.md` 对f62c32c最终通过，无阻塞，确认F1–F5解决；该结论不冒称已审阅后续CI测试提交。远端原CI仍由协调者跟踪，本会话没有触发第二个run或推送。
+
+甲方要求补自动禁止发行回归：`tests/test_release_workflow.py` 只解析workflow YAML（BaseLoader保留on），只允许现有单一workflow/check job、contents:read和批准的checkout/setup/验证命令；合成上传artifact、Release、Pages、PyPI、shell追加发布、权限提升、额外job、release触发、删验证步骤均被拒。先以未实现校验器取得12失败/1通过（`/tmp/public-r1-ci-contract-red.log`），实现白名单后通过。它防意外配置漂移，不抵御恶意改测试/被信任脚本或任意shell；没有扩大CI安全框架。
+
+停止race只读定位已完成：`/tmp/public-r1-stop-race-analysis.md`、事件屏障探针 `/tmp/public-r1-stop-race-probe.py` 与结果JSON。确定性复现 `_sync_apply_results` 观察running后、DB事务前worker变stopped但activity未清理，导致held/interrupted；LIVE.launch=false，外部进程/网络sink均未执行。回放R1前_recover方法同样复现；无交错对照pending且无attempt。九个关键收尾/Live方法AST与基线相同，已证实旧竞态存在；原首轮临时DB已不在，不能把该次失败与此路径等同为完全证实。R1检查可能改变调度但不在该临界窗口增加扫描，未测概率。没有修改恢复代码/放宽断言，不用复跑绿抹除风险。建议R6修复，注意run锁→DB顺序，公众恢复验收前解决。
+
+评审R-1（显式legacy资料引用marked workspace）按甲方决定归R4数据权限；不顺手纳入R1b。当前新workspace执行拒绝边界不因此解除。原四项1609结果及首轮失败记录保留；本轮仅文档和CI测试，按甲方要求不重跑无关整套。新增护栏会随下次协调者push在现有pytest步骤执行。
+
+本次CI小步验证：新增13项CI契约 + 原workspace/resources 48项 = **61 passed in 1.70s**（`/tmp/public-r1-ci-contract-green.log`）；与前文61项stuck模块是不同测试集合。新测试ruff check/format及git diff --check通过。workflow正文未变，业务实现未变，未重复全套或制品构建。

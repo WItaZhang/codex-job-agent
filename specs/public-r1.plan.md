@@ -76,3 +76,7 @@ Local reads may append the actual observed company protection snapshot (decision
 Explicit form_fill --data-dir takes precedence over workspace data root for offline reporting. This deliberate override is outside the default workspace isolation guarantee; its selected directory still bounds local applicant paths. Legacy override semantics remain unchanged.
 
 交审证据与入口/sink矩阵见 [public-r1.review.md](public-r1.review.md)。
+
+### 最终验收补充：CI静态发行护栏
+
+按甲方决定补最小测试：仓库仅已批准check workflow；contents:read，限定批准的checkout/setup与验证命令，不允许额外job/step/权限/发布触发。合成插入artifact、Release、Pages、PyPI及任意附加shell命令应失败。测试只读YAML、不执行步骤；这是防意外改动的契约回归，不防恶意改测试、被信任脚本的任意shell或供应链攻击。先红再实现，定向验证，不重跑无关大套、不触发重复CI。
