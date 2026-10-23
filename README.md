@@ -1,65 +1,38 @@
-# 岗位挖掘 Agent
+<div align="center">
 
-**在 Codex 或 Claude Code 里，从找岗位、筛选推荐，到准备材料和投递。**
+<h1>岗位挖掘 Agent</h1>
 
-告诉它你想找什么工作，每天查看 **7 个推荐岗位 + 3 个探索岗位**。用一句话反馈哪些合适、哪些不合适，逐步调整求职偏好，再把选中的岗位整理成清单、准备求职信并按你的授权投递。
+<p><strong>找到适合你的机会，把求职流程交给助手。</strong></p>
+<p>在 Codex 或 Claude Code 中，完成岗位发现、推荐反馈、材料准备与授权投递。</p>
 
-适合已经使用 Codex 或 Claude Code、愿意在本机配置求职资料的用户。
+<p>
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#日常命令">日常命令</a> ·
+  <a href="#投递如何执行">投递规则</a> ·
+  <a href="docs/usage.md">完整使用指南</a>
+</p>
 
-[快速开始](#快速开始) · [日常命令](#日常命令) · [投递规则](#投递如何执行) · [完整使用指南](docs/usage.md)
+</div>
 
-## 产品能做什么
+![产品流程：发现与筛选岗位 → today 推荐及反馈 → apply-list 导出清单 → apply 准备材料、填表和按授权投递。橙色代表用户选择，绿色代表自动处理，灰色代表流程交接。](docs/assets/product-overview.svg)
 
-```mermaid
-flowchart TB
-    U["你的求职助手"]
-    U --> A["① 岗位发现<br/>多来源搜索与导入<br/>提取岗位标签<br/>按硬约束筛选"]
-    U --> B["② 个性化推荐<br/>7 推荐＋3 探索<br/>反馈与原因分析<br/>按选择调整偏好"]
-    U --> C["③ 投递准备<br/>导出投递清单<br/>按规则选择简历<br/>求职信校验与 PDF"]
-    U --> D["④ 投递与跟进<br/>填表和上传材料<br/>授权后提交或只填<br/>结果与异常处理"]
-    classDef discover fill:#eaf2ff,stroke:#5379b8,color:#172b4d;
-    classDef recommend fill:#e9f7ef,stroke:#438a63,color:#173d29;
-    classDef prepare fill:#fff5df,stroke:#b58b37,color:#503a12;
-    classDef apply fill:#f3ecff,stroke:#8864b2,color:#392052;
-    class A discover;
-    class B recommend;
-    class C prepare;
-    class D apply;
-```
+每天查看 **7 个推荐岗位 + 3 个探索岗位**，用反馈调整求职偏好，再把合适的机会整理成投递清单。你可以只用找岗位和推荐，也可以准备好资料后启用投递。
 
-岗位来源包括 Indeed、LinkedIn、Glassdoor、ZipRecruiter、Google Jobs，以及可选的 Workday、Greenhouse、Lever、Ashby、Avature 等招聘站点。也可以导入自己的岗位 JSON。各来源的可用性取决于网站、地区和访问条件，详见[来源配置](docs/usage.md#岗位从哪里来)。
+支持多个招聘来源与岗位 JSON 导入，包括 Indeed、LinkedIn、Glassdoor、ZipRecruiter、Google Jobs，以及可选的 Workday、Greenhouse、Lever、Ashby、Avature 等站点。来源可用性取决于网站、地区与访问条件。[查看来源配置 →](docs/usage.md#岗位从哪里来)
 
-## 一次完整的使用流程
-
-```mermaid
-flowchart LR
-    A["配置求职偏好<br/>职位 · 地点 · 要求"] --> B["发现岗位<br/>fetch-jobs"]
-    B --> C["查看 7 + 3<br/>today"]
-    C --> D["反馈是否合适<br/>或指出信息错误"]
-    D -->|"想投 / 不想投"| E["选择调整方案<br/>更新求职偏好"]
-    D -->|"岗位信息读错了"| T["修正岗位标签"]
-    T --> C
-    E --> C
-    C --> F["生成投递清单<br/>apply-list"]
-    F --> G["准备材料与投递<br/>apply"]
-    G --> H["查看投递结果<br/>处理阻塞事项"]
-```
-
-你可以只使用找岗位、推荐和清单功能；准备好投递资料后，再启用投递。
-
-**对话示例（示意）：**
+## 日常怎么用
 
 > **你：** 我想找美国的机器学习工程师岗位，优先远程。先帮我找岗位，不投递。
 >
-> **你：** 查看今天的推荐。
+> **助手：** 列出今天的 7 个推荐和 3 个探索岗位。
 >
 > **你：** `1+ 2-坐班 3- 5+ 6?地点不对`
 >
-> **助手：** 根据反馈分析原因，给出调整选项。
+> **助手：** 根据反馈分析原因，给出偏好调整选项；读错的岗位信息单独修正。
 >
-> **你：** 选择合适的方案，然后生成投递清单。
+> **你：** 选好方案，再生成投递清单。
 
-`+` 表示想投，`-` 表示不想投，`?` 表示岗位信息读错了。未反馈的岗位不会被当作偏好信号。
+*以上为对话示意。`+` 想投，`-` 不想投，`?` 信息读错了。未反馈的岗位不作为偏好信号。*
 
 ## 快速开始
 
@@ -120,18 +93,7 @@ uv run playwright install chromium
 
 投递是可选功能。**即使在 Codex 中使用，当前投递后端也需要 Claude Code CLI、Google Chrome 和 Node.js。** 按[投递配置指南](docs/usage.md#投递)准备简历、个人资料、标准答案和提交前确认的公司名单。
 
-```mermaid
-flowchart TB
-    A["请求投递"] --> B["准备投递材料"]
-    B --> C{"允许自动提交？"}
-    C -->|"未授权或只要求填表"| D["先准备或只填<br/>由你选择范围"]
-    C -->|"已明确授权"| E{"公司需确认？"}
-    E -->|"名单命中或公司信息未知"| F["填表并核对<br/>停在提交前"]
-    F --> G["你检查并亲自提交"]
-    E -->|"已授权的普通公司"| H["自动填表与提交"]
-    H --> I["记录结果<br/>列出待处理事项"]
-    G --> I
-```
+![投递边界：普通公司按授权自动提交；保护公司或未知公司停在提交前，由你亲自提交。](docs/assets/application-boundaries.svg)
 
 - **你的确认名单始终有效**：缺少名单不能开始投递；重试与恢复也不会绕过保护。
 - **遇到登录、验证码等门槛会停下**，留给你处理，不破解验证码。
