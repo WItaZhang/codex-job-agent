@@ -41,3 +41,7 @@ S1–S5可按依赖另审前置实施，S6依赖R2及前述片；R3依赖R2b，R
 ## 8. S1协议范围修复
 
 3513cb1有Event消费但缺版本化命令解析，Python调用不等于v1命令。本片补structured/tool_turn/cancel/status闭合集合，可信登记schema/tool引用，绑定workspace/run/revision，不动态导入、不授权、不做业务编排。consume非对象必须固定schema_violation；完成/运行与本地停止矛盾拒绝。执行预算耗尽不阻止查询/取消既有请求。原固定HEAD验证保持历史，新修复另定向及四项，不把旧绿当新代码验证。
+
+## 9. 执行器X1–X4能力预算与生命周期
+
+甲方选择按能力计费：工具容量0只禁止tool_turn，structured仍可用。单Runtime首次有效接纳请求时原子绑定workspace/run，其他scope拒绝stale不计预算；时钟从首次实际发送开始，空闲构造不计，后续间隔/重试计入，同实例不能重置。线程启动失败回滚未发送占位、internal且drained，后续请求可用；真实adapter的传输结束机制仍为S5硬出口，S1不声称强杀线程或远端取消。模块决定7的“零容量”按相应能力解释，完整目标不变。

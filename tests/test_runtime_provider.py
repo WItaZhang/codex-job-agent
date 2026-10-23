@@ -50,7 +50,6 @@ def test_default_unconfigured_no_send():
     "field",
     [
         "max_requests",
-        "max_tool_calls",
         "max_input_bytes",
         "max_output_bytes",
         "max_depth",

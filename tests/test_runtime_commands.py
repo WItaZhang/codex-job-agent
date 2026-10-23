@@ -201,7 +201,7 @@ def test_tool_reference_is_closed_and_no_wire_schema():
     assert c.wait("r", 2).value["tool_calls"][0]["name"] == "fill_field"
 
 
-def test_public_event_roundtrip_includes_late_usage_without_value():
+def test_completed_event_roundtrip():
     c = consumer()
     c.dispatch(command())
     response = c.wait("r", 2)

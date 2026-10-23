@@ -122,7 +122,9 @@ class Runtime:
         self.config = config
         self.provider = provider if provider is not None else ScriptedProvider()
         self._lock = Lock()
-        self._started = time.monotonic()
+        self._started: float | None = None
+        self._scope: tuple[str, str] | None = None
+        self._closed = False
         self._requests = 0
         self._active = 0
         self._ids: set[str] = set()
@@ -169,6 +171,8 @@ class Runtime:
             raise RuntimeFault("schema_violation")
         with self._lock:
             key = (workspace, run_id)
+            if self._scope is not None and self._scope != key:
+                raise RuntimeFault("stale")
             previous = self._revisions.get(key)
             if previous is not None and revision <= previous:
                 raise RuntimeFault("stale")
@@ -180,6 +184,7 @@ class Runtime:
     def close(self):
         """Stop locally; return without waiting for uncooperative transport threads."""
         with self._lock:
+            self._closed = True
             for w, run, handle in self._handles:
                 self._invalid.add((w, run))
                 handle.cancel()
@@ -217,6 +222,7 @@ class Runtime:
         stopped: bool = False,
     ) -> Handle:
         handle = Handle(request_id, run_id, node, revision)
+        reserved = False
         try:
             if stopped:
                 handle.cancel()
@@ -238,10 +244,11 @@ class Runtime:
                     "max_output_bytes",
                     "max_depth",
                     "max_output_tokens",
-                    "max_tool_calls",
                     "concurrency",
                 )
             ):
+                raise RuntimeFault("budget_exhausted")
+            if tools and b.max_tool_calls == 0:
                 raise RuntimeFault("budget_exhausted")
             if type(history) not in (tuple, list):
                 raise RuntimeFault("schema_violation")
@@ -268,6 +275,9 @@ class Runtime:
             prepared["max_output_tokens"] = b.max_output_tokens
             body = privacy.bounded_json(prepared, b.max_input_bytes, b.max_depth)
             with self._lock:
+                key = (workspace, run_id)
+                if self._closed or (self._scope is not None and self._scope != key):
+                    raise RuntimeFault("stale")
                 if request_id in self._ids or (workspace, run_id) in self._invalid:
                     raise RuntimeFault("stale")
                 if self._active >= b.concurrency or self._requests >= b.max_requests or self._remaining() <= 0:
@@ -275,16 +285,26 @@ class Runtime:
                 key = (workspace, run_id)
                 if key in self._revisions and self._revisions[key] != revision:
                     raise RuntimeFault("stale")
+                self._scope = key
                 self._revisions[key] = revision
                 self._ids.add(request_id)
                 self._active += 1
                 self._handles.append((workspace, run_id, handle))
+                reserved = True
             Thread(target=self._run, args=(handle, body, schema, tools), daemon=True).start()
         except RuntimeFault as exc:
-            handle.finish("failed", exc.code)
+            handle.finish("failed", "internal" if reserved else exc.code)
+            if reserved:
+                with self._lock:
+                    self._active -= 1
+                    self._rollback_unsent(handle)
             handle.drained.set()
         except Exception:
-            handle.finish("failed", "schema_violation")
+            handle.finish("failed", "internal" if reserved else "schema_violation")
+            if reserved:
+                with self._lock:
+                    self._active -= 1
+                    self._rollback_unsent(handle)
             handle.drained.set()
         return handle
 
@@ -295,28 +315,45 @@ class Runtime:
         return True
 
     def _remaining(self):
+        if self._started is None:
+            return self.config.budgets.total_timeout_seconds
         return self.config.budgets.total_timeout_seconds - (time.monotonic() - self._started)
+
+    def _rollback_unsent(self, handle):
+        """Called under runtime lock after releasing a failed unsent reservation."""
+        if handle.snapshot().attempts == 0:
+            self._ids.discard(handle.snapshot().request_id)
+            self._handles = [(w, run, h) for w, run, h in self._handles if h is not handle]
+            if not self._handles and self._started is None:
+                self._scope = None
 
     def _run(self, handle, body, schema, tools):
         try:
             b = self.config.budgets
             for attempt in range(b.max_retries + 1):
-                with self._lock:
-                    if self._requests >= b.max_requests or self._remaining() <= 0:
-                        raise RuntimeFault("budget_exhausted")
-                    if not handle.sent():
-                        return
-                    self._requests += 1
-                deadline = time.monotonic() + min(b.request_timeout_seconds, max(0, self._remaining()))
-                done = Signal()
-                outcome = []
+                done, ready = Signal(), Signal()
+                outcome, timing = [], {}
 
-                def call(outcome=outcome, done=done):
+                def call(outcome=outcome, done=done, ready=ready, timing=timing):
                     try:
+                        with self._lock:
+                            if handle.cancel_signal.is_set():
+                                return
+                            if self._requests >= b.max_requests or self._remaining() <= 0:
+                                raise RuntimeFault("budget_exhausted")
+                            if not handle.sent():
+                                return
+                            # This point is reached only by a successfully started transport worker.
+                            now = time.monotonic()
+                            if self._started is None:
+                                self._started = now
+                            self._requests += 1
+                            timing["deadline"] = now + min(b.request_timeout_seconds, max(0, self._remaining()))
+                        ready.set()
                         raw = self.provider.send(body, handle.cancel_signal)
                         privacy.bounded_json(raw, b.max_output_bytes, b.max_depth)
                         reply = Reply.model_validate(raw)
-                        handle.observed(reply)  # late usage is allowed, late value is not
+                        handle.observed(reply)  # late usage allowed, late value forbidden
                         outcome.append((reply, time.monotonic()))
                     except RuntimeFault as exc:
                         outcome.append((Reply(error=exc.code), time.monotonic()))
@@ -325,19 +362,25 @@ class Runtime:
                     except Exception:
                         outcome.append((Reply(error="internal"), time.monotonic()))
                     finally:
+                        ready.set()
                         done.set()
 
                 Thread(target=call, daemon=True).start()
-                timeout = max(0, deadline - time.monotonic())
-                # Wait in a coordinator: local cancellation need not wait for the provider.
-                if not done.wait(timeout):
+                if not ready.wait(b.request_timeout_seconds):
+                    handle.finish("failed", "timeout", stop=True)
+                    done.wait()  # no new slot until this worker really ends
+                    return
+                deadline = timing.get("deadline")
+                if deadline is not None and not done.wait(max(0, deadline - time.monotonic())):
                     handle.finish("failed", "budget_exhausted" if self._remaining() <= 0 else "timeout", stop=True)
-                    done.wait()  # retain the slot until the uncooperative call really exits
+                    done.wait()
                     return
                 if handle.cancel_signal.is_set():
+                    # If ready was set before send, retain the slot for any outstanding work.
+                    done.wait()
                     return
                 reply, completed_at = outcome[0]
-                if completed_at > deadline:
+                if deadline is not None and completed_at > deadline:
                     raise RuntimeFault("budget_exhausted" if self._remaining() <= 0 else "timeout")
                 try:
                     if reply.usage.output_tokens is not None and reply.usage.output_tokens > b.max_output_tokens:
@@ -346,10 +389,9 @@ class Runtime:
                         raise RuntimeFault(reply.error)
                     if reply.value is None:
                         raise RuntimeFault("schema_violation")
-                    if tools:
-                        value = self._tools(reply.value, tools)
-                    else:
-                        value = validate_value(schema, reply.value).model_dump()
+                    value = (
+                        self._tools(reply.value, tools) if tools else validate_value(schema, reply.value).model_dump()
+                    )
                     handle.finish("completed", value=value)
                     return
                 except RuntimeFault as exc:
@@ -364,6 +406,7 @@ class Runtime:
         finally:
             with self._lock:
                 self._active -= 1
+                self._rollback_unsent(handle)
             handle.drained.set()
 
     def _tools(self, value, tools):

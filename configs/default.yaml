@@ -181,7 +181,7 @@ runtime:                         # public R2b S1; independent of legacy llm cred
     name: unconfigured
     model: null
     credential_ref: null
-  budgets:                       # bounded defaults; per-run scope, synthetic S1 only
+  budgets:                       # bounded defaults; one Runtime per workspace/run; clock starts on first send
     max_requests: 8
     max_retries: 0                # no retry; first request remains allowed
     backoff_seconds: 0.0         # no backoff delay

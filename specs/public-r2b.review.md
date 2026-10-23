@@ -75,3 +75,11 @@
 3513cb1fc683c454424ba1ea060745d1528fb2e0四项通过：sync、lint、format（109文件），pytest **1833 passed/96.80s**，日志`/tmp/public-r2b-s1-four-{sync,lint,format,full}.log`。`/tmp/public-r2b-s1-package.log`记录direct wheel和sdist→wheel均通过；包外运行验证独立runtime默认/旧快照/部分覆盖、实际fake请求打码，原47工具握手、full/scheduled真实副作用拒绝均通过，未上传。此结果仅该固定HEAD。
 
 甲方发现S1命令协议缺口，确认原实现未满足；另consume(None/[]/'x'/1)泄漏AttributeError、completed+local stopped未拒绝。新增测试先红18项：前5项是实际consumer语义失败，其余命令模块尚缺，不混记；日志`/tmp/public-r2b-s1-commands-red.log`。修复加入commands.py封闭解析与可信引用/作用域校验，无动态导入或业务权限，Event跨字段验证；定向98项先通过，再补命令在途取消/revision和tool引用屏障。四项旧轮未中断或盲重跑。模块决定8记录，当前稳定修复继续固定交审。
+
+### X1–X4执行器范围修复
+
+a6f0bbc命令修复固定HEAD的中间四项1854 passed/83.59s，lint/format/sync及direct wheel/sdist通过（`/tmp/public-r2b-s1-final-*.log`），不作为后续X修复通过。根静态认可命令方向，普通完成roundtrip测试已准确改名，不再名为迟到usage实证。
+
+依据`/tmp/public-r2b-s1-runtime-review.md`及甲方裁决，模块决定9同步现态：max_tool_calls=0仅禁tool_turn；单Runtime首次有效接纳时绑定scope，其他scope固定stale，不占预算；总时钟在成功启动的provider worker实际调用send前起算，同run间隔计入，构造空闲不计。两个线程层级启动失败均回滚未发送占位，internal/drained且发送计数0，后续可使用槽位。后续S2必须新run新Runtime，不提供命令重置预算。S5传输必须有自己的时限/结束机制，S1不强杀不合作线程；其槽位保留到实际返回，不宣称远端取消。
+
+`/tmp/public-r2b-s1-x-red.log`为5项真实产品语义失败，非ImportError；相同断言修复后105项定向通过，再补首次scope并发竞争及非法输入不绑定的屏障。修复后新HEAD另跑全量/包契约，原中间结果保留。
