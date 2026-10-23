@@ -1,50 +1,53 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1220" viewBox="0 0 1200 1220" role="img" aria-labelledby="title desc">
-<title id="title">从首次设置到日常使用</title><desc id="desc">先配置并初始化。日常查看推荐、选择是否反馈；反馈调整偏好或修正标签。投递按需独立进入，清单不限于今日推荐，可自行投递或授权助手执行。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1020" viewBox="0 0 1200 1020" role="img" aria-labelledby="title desc">
+<title id="title">产品流程：岗位发现、推荐反馈与按需投递</title><desc id="desc">首次配置并初始化后，抓取、预筛和标签形成候选岗位池。每日推荐用于浏览和可选反馈；投递清单按当前偏好、想投反馈及状态单独生成，不限于今日推荐。反馈可用于调整偏好或修正岗位标签，影响后续排序和清单。清单可用于自行投递或委托助手；apply 自动生成清单，不要求先手动调用 apply-list。</desc>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#90958B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 <g font-family="-apple-system, BlinkMacSystemFont, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif">
-<rect x="1" y="1" width="1198" height="1218" rx="24" fill="#FCFCFA" stroke="#E0E2DB"/>
-<text x="60" y="65" font-size="20" font-weight="650" fill="#0B6B58" text-anchor="start">岗位挖掘 Agent</text>
-<text x="1140" y="65" font-size="18" font-weight="500" fill="#69716C" text-anchor="end">Codex / Claude Code</text>
-<text x="60" y="122" font-size="34" font-weight="650" fill="#202B2A" text-anchor="start">先设置一次，再按自己的节奏求职。</text>
-<rect x="60" y="162" width="1080" height="112" rx="16" fill="#F1F0EA" stroke="#DADDD5"/>
-<text x="84" y="199" font-size="23" font-weight="650" fill="#202B2A" text-anchor="start">首次设置 · 只做一次</text>
-<text x="84" y="240" font-size="23" font-weight="400" fill="#69716C" text-anchor="start">安装并接入宿主  →  配置求职偏好与搜索条件  →  检查并初始化</text>
-<text x="60" y="325" font-size="27" font-weight="650" fill="#202B2A" text-anchor="start">日常：看机会，按需反馈</text>
-<rect x="60" y="354" width="690" height="112" rx="16" fill="#E7F5EE" stroke="#0B6B58"/>
-<text x="84" y="393" font-size="24" font-weight="650" fill="#0B6B58" text-anchor="start">查看今日推荐  /today</text>
-<text x="84" y="428" font-size="20" font-weight="400" fill="#0B6B58" text-anchor="start">按需抓取 → 去重预筛 → 打标签、排序 → 展示推荐</text>
-<text x="84" y="452" font-size="16" font-weight="400" fill="#0B6B58" text-anchor="start">默认 7 个推荐 + 3 个探索；可配置，岗位不足时少于此数。</text>
-<path d="M405 467 L405 503" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
-<rect x="60" y="516" width="690" height="146" rx="16" fill="#FBEDE5" stroke="#A54625"/>
-<text x="84" y="555" font-size="24" font-weight="650" fill="#A54625" text-anchor="start">只浏览也可以；愿意时再给反馈</text>
-<text x="84" y="592" font-size="20" font-weight="400" fill="#A54625" text-anchor="start">想投 / 不想投 → 分析原因 → 选择偏好调整方案</text>
-<text x="84" y="627" font-size="20" font-weight="400" fill="#A54625" text-anchor="start">信息读错 → 修正岗位标签，不改变偏好</text>
-<path d="M60 590 H28 V410 H57" fill="none" stroke="#90958B" stroke-width="2" marker-end="url(#arrow)"/>
-<rect x="790" y="354" width="350" height="308" rx="16" fill="white" stroke="#DADDD5"/>
-<text x="814" y="396" font-size="24" font-weight="650" fill="#202B2A" text-anchor="start">推荐是一个小样本</text>
-<text x="814" y="435" font-size="19" font-weight="400" fill="#69716C" text-anchor="start">帮助你发现机会、校准偏好。</text>
-<text x="814" y="465" font-size="19" font-weight="400" fill="#69716C" text-anchor="start">反馈会影响后续排序和清单，</text>
-<text x="814" y="495" font-size="19" font-weight="400" fill="#69716C" text-anchor="start">不是每次都必须完成的任务。</text>
-<path d="M814 518 L1116 518" fill="none" stroke="#DADDD5" stroke-width="1" stroke-linecap="round"/>
-<text x="814" y="554" font-size="21" font-weight="600" fill="#202B2A" text-anchor="start">只想更新岗位库？</text>
-<text x="814" y="591" font-size="20" font-weight="400" fill="#0B6B58" text-anchor="start">单独运行 /fetch-jobs。</text>
-<text x="814" y="628" font-size="18" font-weight="400" fill="#69716C" text-anchor="start">不必当场查看推荐或给反馈。</text>
-<path d="M60 704 L1140 704" fill="none" stroke="#DADDD5" stroke-width="1" stroke-linecap="round"/>
-<text x="60" y="750" font-size="27" font-weight="650" fill="#202B2A" text-anchor="start">按需：整理清单，选择如何投递</text>
-<text x="60" y="785" font-size="19" font-weight="400" fill="#69716C" text-anchor="start">可以直接进入，不必先完成当天推荐与反馈。</text>
-<rect x="60" y="813" width="1080" height="100" rx="16" fill="#F1F0EA" stroke="#DADDD5"/>
-<text x="84" y="852" font-size="24" font-weight="650" fill="#202B2A" text-anchor="start">当前投递清单  /apply-list</text>
-<text x="84" y="888" font-size="20" font-weight="400" fill="#69716C" text-anchor="start">符合当前偏好的岗位 + 标记想投的岗位，经清单规则过滤；不限于今日推荐。</text>
-<path d="M330 914 L330 952" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
-<path d="M870 914 L870 952" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
-<rect x="60" y="964" width="510" height="164" rx="16" fill="white" stroke="#DADDD5"/>
-<text x="84" y="1004" font-size="24" font-weight="650" fill="#202B2A" text-anchor="start">自行投递</text>
-<text x="84" y="1041" font-size="20" font-weight="400" fill="#69716C" text-anchor="start">导出 JSON / CSV，自己完成申请。</text>
-<text x="84" y="1080" font-size="20" font-weight="400" fill="#69716C" text-anchor="start">投完告诉助手：哪些已投、哪些跳过。</text>
-<rect x="600" y="964" width="540" height="164" rx="16" fill="#E7F5EE" stroke="#0B6B58"/>
-<text x="624" y="1004" font-size="24" font-weight="650" fill="#0B6B58" text-anchor="start">委托助手  /apply</text>
-<text x="624" y="1041" font-size="20" font-weight="400" fill="#0B6B58" text-anchor="start">配置申请资料 → 求职信 → 填表与上传</text>
-<text x="624" y="1077" font-size="18" font-weight="400" fill="#0B6B58" text-anchor="start">按授权提交，记录结果；保护公司停在提交前。</text>
-<text x="624" y="1106" font-size="17" font-weight="400" fill="#0B6B58" text-anchor="start">会自动生成当前清单，无需先手动 /apply-list。</text>
-<text x="60" y="1177" font-size="18" font-weight="400" fill="#69716C" text-anchor="start">图中 /命令用于 Claude Code；Codex 使用同名 $命令。</text>
+<rect x="1" y="1" width="1198" height="1018" rx="24" fill="#FCFCFA" stroke="#E0E2DB"/>
+<text x="64" y="64" font-size="29" font-weight="650" fill="#202B2A" text-anchor="start">从找岗位到投递</text>
+<text x="1136" y="62" font-size="18" font-weight="500" fill="#69716C" text-anchor="end">Codex / Claude Code</text>
+<rect x="64" y="96" width="1072" height="102" rx="18" fill="#F1F0EA" stroke="#DADDD5"/>
+<text x="88" y="134" font-size="23" font-weight="650" fill="#202B2A" text-anchor="start">首次设置</text>
+<text x="88" y="173" font-size="23" font-weight="400" fill="#69716C" text-anchor="start">描述求职需求 → 助手整理配置 → 核对摘要 → 初始化</text>
+<path d="M600 199 L600 232" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="248" y="246" width="704" height="104" rx="18" fill="#E7F5EE" stroke="#0B6B58"/>
+<text x="600" y="280" font-size="25" font-weight="650" fill="#0B6B58" text-anchor="middle">岗位库与当前偏好</text>
+<text x="600" y="313" font-size="20" font-weight="400" fill="#0B6B58" text-anchor="middle">抓取或导入 · 去重预筛 · 标签与排序</text>
+<text x="600" y="338" font-size="16" font-weight="400" fill="#0B6B58" text-anchor="middle">/fetch-jobs 更新岗位，/today 按需调用</text>
+<path d="M600 351 V378 H319 V405 M600 378 H881 V405" fill="none" stroke="#90958B" stroke-width="2"/>
+<path d="M319 394 L319 405" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M881 394 L881 405" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="64" y="418" width="510" height="428" rx="20" fill="#FCFCFA" stroke="#DADDD5"/>
+<text x="88" y="462" font-size="24" font-weight="650" fill="#202B2A" text-anchor="start">看机会，调整偏好</text>
+<text x="550" y="461" font-size="19" font-weight="600" fill="#0B6B58" text-anchor="end">/today</text>
+<rect x="88" y="488" width="462" height="104" rx="16" fill="#E7F5EE" stroke="#0B6B58"/>
+<text x="319" y="529" font-size="24" font-weight="650" fill="#0B6B58" text-anchor="middle">今日推荐 + 探索</text>
+<text x="319" y="566" font-size="20" font-weight="400" fill="#0B6B58" text-anchor="middle">默认最多 7 + 3 个，先看一组机会</text>
+<path d="M319 593 L319 627" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="88" y="640" width="462" height="116" rx="16" fill="#FBEDE5" stroke="#A54625"/>
+<text x="112" y="680" font-size="23" font-weight="650" fill="#A54625" text-anchor="start">按需反馈</text>
+<text x="112" y="712" font-size="19" font-weight="400" fill="#A54625" text-anchor="start">想投 / 不想投 → 按需分析与调整</text>
+<text x="112" y="740" font-size="19" font-weight="400" fill="#A54625" text-anchor="start">信息读错 → 修正岗位标签</text>
+<text x="88" y="799" font-size="19" font-weight="400" fill="#69716C" text-anchor="start">可以只浏览；反馈用于后续排序与清单。</text>
+<rect x="626" y="418" width="510" height="428" rx="20" fill="#FCFCFA" stroke="#DADDD5"/>
+<text x="650" y="462" font-size="24" font-weight="650" fill="#202B2A" text-anchor="start">整理待投机会</text>
+<text x="1112" y="461" font-size="19" font-weight="600" fill="#0B6B58" text-anchor="end">/apply-list</text>
+<rect x="650" y="488" width="462" height="104" rx="16" fill="#F1F0EA" stroke="#DADDD5"/>
+<text x="881" y="529" font-size="24" font-weight="650" fill="#202B2A" text-anchor="middle">当前投递清单</text>
+<text x="881" y="566" font-size="20" font-weight="400" fill="#69716C" text-anchor="middle">按偏好、想投反馈与状态筛选</text>
+<path d="M881 593 V614 H760 V635 M881 614 H1002 V635" fill="none" stroke="#90958B" stroke-width="2"/>
+<path d="M760 624 L760 635" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M1002 624 L1002 635" fill="none" stroke="#90958B" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="650" y="648" width="220" height="108" rx="14" fill="white" stroke="#DADDD5"/>
+<text x="760" y="686" font-size="23" font-weight="650" fill="#202B2A" text-anchor="middle">自行投递</text>
+<text x="760" y="721" font-size="18" font-weight="400" fill="#69716C" text-anchor="middle">导出 JSON / CSV</text>
+<rect x="892" y="648" width="220" height="108" rx="14" fill="#E7F5EE" stroke="#0B6B58"/>
+<text x="1002" y="686" font-size="23" font-weight="650" fill="#0B6B58" text-anchor="middle">委托助手</text>
+<text x="1002" y="721" font-size="21" font-weight="550" fill="#0B6B58" text-anchor="middle">/apply</text>
+<text x="650" y="799" font-size="19" font-weight="400" fill="#69716C" text-anchor="start">不限于今日推荐，也不必先完成反馈。</text>
+<path d="M88 698 H35 V298 H244" fill="none" stroke="#90958B" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="52" y="281" font-size="17" font-weight="400" fill="#69716C" text-anchor="start">调整偏好 / 修正标签</text>
+<rect x="64" y="885" width="1072" height="86" rx="16" fill="#E7F5EE" stroke="#0B6B58"/>
+<text x="88" y="921" font-size="23" font-weight="600" fill="#0B6B58" text-anchor="start">委托投递：求职信 PDF → 填表与上传 → 按授权提交 → 记录结果</text>
+<text x="88" y="953" font-size="19" font-weight="400" fill="#0B6B58" text-anchor="start">/apply 会自动生成当前清单；需要提交前确认的公司只填不交，由你本人提交。</text>
+<text x="64" y="1000" font-size="16" font-weight="400" fill="#69716C" text-anchor="start">图中 /命令为 Claude Code 入口；Codex 使用同名 $命令。</text>
 </g></svg>
