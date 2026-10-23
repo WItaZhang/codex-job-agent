@@ -33,3 +33,7 @@ Claude 原启动配置未使用 --locked，且从子目录执行时默认配置�
 ## 7. G10真实skill两轮合成行为验收
 
 协调者批准：仅测试文件/包外启动器，真实Toolbox与既有GateRunner/FormFillFake、全合成材料。先无模型验证材料/runner/网络毒丸，再一场Claude持久会话分两轮输入，实际加载apply skill；不预填模型的stop_before_submit/授权模式。无既有授权的含糊调用和明确当前范围授权以实际工具参数、runner及数据库判断，同批后续只通过状态轮询推进，不再索要相同授权。保护公司每次stop。测试调度屏障只控制假runner完成时机，不改变产品权限或分派逻辑；无生产fake开关。其他宿主不重复测试。
+
+## 8. Codex持久角色证据与本次合成线程读取
+
+独立审查不接受002的空wait事件及父自述补足G03。协调者批准G10之后仅一次003：现有登录、--ignore-user-config、不使用--ephemeral；两角色各一次fork_turns=none，完整定义回退，无岗位/业务。先无模型确认确切thread/read及skills/list接口；仅从本次父线程返回的child ID读取对应记录，不扫描私人历史、不复制凭据或改全局配置。完整定义读取、spawn参数、child收到的任务与实际返回分别核验；若宿主将message保存为encrypted_content，不读取密钥/尝试破解，报告无法明文逐字比较，不以父自述代替。G02分层证据已获签收，app-server曾401预连接的事实保留，不宣称全进程无网络。

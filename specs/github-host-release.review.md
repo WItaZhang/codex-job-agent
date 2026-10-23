@@ -136,7 +136,7 @@ Codex：/tmp/github-host-native-codex-connect.py创建全新无凭据CODEX_HOME/
 
 |切片|产品行为|状态|提交证据|验证结果|阻塞/待裁决|下一步及估时|
 |---|---|---|---|---|---|---|
-|GitHub双宿主|源码启动、共用skills/roles、合成推荐、恢复报告保护、持久开发模式|代码稳定，交审；未宣称整片验收|产品356fa04，后续仅README/证据文档|四项1886/92.22s；干净clone四握手47工具；002角色/7+3；原生无模型连接|G10实际执行未测；G02分层证据及Codex子返回报告强度待独立裁决|协调者裁决最小G10方案；不推送合并|
+|GitHub双宿主|源码启动、共用skills/roles、合成推荐、恢复报告保护、持久开发模式|产品代码冻结，G10/003新证据交审|产品356fa04；验收启动器6beef2c|原四项1886/92.22s；G10预演107及持久两轮；003真实spawn/child返回|G03回退实际运行已获协调者验收；保留加密正文比对限制，G10独立审查及整片验收待协调者|完成本轮四项/文档提交交审；不再追加付费会话，不推送合并|
 
 R3/R5 README已按代码补数据去向、运行时下载/费用和审批策略审阅；没有声称所有标签发送完整个人资料。当前远端尚非本分支，协调者后续负责整合推送、远端clone和CI。本次文档不改变356fa04已四项通过的产品代码；不重复全套或扩大验收为商业产品。
 
@@ -147,3 +147,34 @@ R3/R5 README已按代码补数据去向、运行时下载/费用和审批策略�
 `uv run pytest -q tests/test_host_apply_acceptance.py tests/test_github_host_journey.py tests/test_gate_handoff.py`：107 passed/8.10s，/tmp/github-g10-dry-validation.log。首次独立dry run exit0/8次假runner，/tmp/github-g10-dry.log；网络毒丸正控一次且正常流程无额外触发。宿主实际两轮尚未运行，此处不能算G10通过。
 
 G02分层发现/连接已由协调者签收；无模型不等于无网络：Codex app-server曾尝试401预连接，未调用模型turn，不宣称全进程零网络。Codex002缺spawn/child trace，独立审查不签收G03，仅父报告不能补证。已批准G10后再一次非ephemeral合成持久线程测试，按确切父/child ID取事件，不遍历私人历史。
+
+## G10固定6beef2c实际两轮（交独立审阅）
+
+包外命令和两条真实输入在/tmp/github-g10-host-driver.py、github-g10-session.json；每轮command/stdout/stderr/result/db分别为/tmp/github-g10-round-{1,2}.*。同一持久session 2032bfed-20f2-47b5-8d3d-15c7e0517cce，exit0/12.67s、exit0/14.51s。没有重置两轮之间的数据库、没有替模型填模式。仅读取这一新session的确切记录，/tmp/github-g10-exact-session.jsonl中实际command-message=apply与完整skill正文展开逐字一致；这是原生斜杠展开，不是额外Skill工具调用。
+
+第一轮用户仅/apply：实际apply_status→get_apply_setup→prepare_apply_batch(stop_before_submit=true)；返回全只填批次和一次具体范围选择，无start、无runner、无提交。未实际填表，不能写成“第一轮完成四份填表”。第二轮明确同清单非保护公司自动投递：实际prepare_apply_batch({})取得新批次及准确summary→start_applying→两次apply_status→apply_stats；普通j00/j02/j03各一次假submit，Stripe j01经FormFillFake只stop、持久waiting。第二个普通submit在测试Event停住，状态轮询释放后继续至done；无重复授权问题。它是同一个rest阶段的继续，不宣称测试了另一个逻辑批次/恢复阶段的授权。
+
+真实Store记录4次attempt、3applied+1waiting，零重复。MCP进程两个启动各做一次网络毒丸正控，合计2次sink_refused均匹配正控，业务路径无额外触发；不等于宿主模型传输零网络。测试器/资料全合成、真实业务sink未调用。离线审计/tmp/github-host-evidence-audit.py断言这些结果，简明结果、原始文件SHA256留[证据JSON](github-host-release.evidence.json)，不将模型最终文案里的“已提交”作为真实业务证据。
+
+## Codex003：真实派生、明确子线程与剩余日志限制
+
+源6beef2c，/tmp/github-host-codex-roles-003.py、*.command.json/stdout/stderr/result.json；唯一新增模型会话exit0/32.98s，现有登录、--ignore-user-config、read-only、没有--ephemeral、无模型/推理档位覆盖、零岗位。未调用MCP/业务，父只cat两个定义。无模型preflight通过thread/start→thread/read及thread/items/list取得确切新ID/path，空无turn线程尚未落盘；这不是日志失败或模型执行。skills/list(forceReload)独立发现六个enabled repo skills，含四个日常入口，来源为本检出的唯一.claude/skills源。
+
+真正模型会话父ID 01a16ab5-8147-7501-ac0d-be6404df97f5。通过thread/read取得实际rollout及subAgentActivity的明确child ID，再仅按这两个ID读子线程：
+
+- job-tagger：01a16ab5-b73e-7772-8ee7-a2a80b4adb27，/root/zero_job_tagger；
+- cover-letter-writer：01a16ab5-dd4a-7790-adfc-d610f029470b，/root/zero_cover_letter_writer。
+
+父rollout两次实际spawn_agent参数均fork_turns=none，无模型覆盖；子session_meta.parent_thread_id均匹配、started/completed事件成立。两个child独立实际final返回角色及工具边界，均零工具；不是父摘要。/tmp/github-host-read-exact-thread.py与*.exact-read.json、*.parent.rollout.jsonl、*.child-<ID>.jsonl留证，无thread/list或目录遍历。第一次只读脚本误把exec专用--ignore-user-config放app-server顶层，CLI解析拒绝，修正为正常app-server后无模型读取成功；不计产品红、不重开模型会话。
+
+**剩余具体限制**：父cat返回与两个源定义逐字一致；但宿主将spawn.message及子NEW_TASK正文存为encrypted_content。审计能断言父spawn密文与对应child收到的密文字节完全一致，不能独立解密核对它是否含完整定义。没有访问任何解密密钥、没有用父自述填补，也没有再启动付费测试。003比002新增真实spawn/child返回充分原始记录，但“完整定义明文逐字投递”这一强度仍交协调者裁决。exec JSONL自身仍只显示空wait，不能单独作派生证据。
+
+原001/002测试器错误和证据限制不删除；本轮没有产品/角色权限变更。G02签收范围和401预连接事实维持。
+
+## 协调者最终证据口径与main同步
+
+003完整源定义读取、真实spawn、父子加密载荷一致、明确child/parent及独立返回获协调者验收为“回退路径实际运行”；加密消息中完整定义明文未独立比对不宣称通过，不解密、不再新增模型会话。G10及003独立审查记录由协调者收尾。本仓库证据JSON仅包含必要合成输入/状态、确切测试线程引用、工具/角色返回、日志摘要哈希；不提交原始宿主rollout、账户ID、凭据或私人宿主元数据。
+
+本树执行git merge main：Already up to date，main=3fe87bc1db26e997d7cbc3ae4fb934323820612e；没有新的主线代码，当前运行的四项覆盖同一稳定代码与新增测试，不重复无关测试。产品src未改，README与证据更新不改变已验证行为。
+
+最终四项（源/测试固定6beef2c，其后仅README/规格/证据）：`uv sync --locked`、`uv run ruff check src tests`、`uv run ruff format --check src tests`、`uv run python -m pytest -q`全部exit0；**1888 passed/94.06s**，118文件格式通过，/tmp/github-host-g10-final-four.log。相较上次1886新增两项G10包外启动器预演；无失败/警告被过滤。6beef2c已用于独立临时合成clone的locked安装及实际两轮MCP/宿主验收，固定命令/源HEAD在round command记录中；此前cce8ab1干净clone四次47工具协议证据保留。最后差异仅文档及精简JSON，不重复相同产品四项。远端clone与CI仍由协调者执行，不能将本机cached安装当干净OS首次下载。

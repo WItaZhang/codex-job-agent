@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | G01 | 无data/local的干净git clone或固定archive，按README uv sync --locked | 固定HEAD、命令/exit、锁文件不改；源码根和含空格目录；缺依赖提示可操作 |
 | G02 | 两宿主项目stdio启动配置 | .mcp.json与.codex/config.toml实际命令启动initialize/list_tools；本机已有用户MCP/配置不读不改；根/子目录入口差异测试；项目信任/首次MCP批准及本机版本分开实证 |
-| G03 | 共用skills/agents和相对链接 | 四个skills可定位、角色指向唯一源，移动检出有效；静态/协议测试不冒称真实宿主已派生agent；无可用宿主交互则明确未验 |
+| G03 | 共用skills/agents和相对链接 | 四个skills可定位、角色指向唯一源，移动检出有效；静态/协议测试不冒称真实宿主已派生agent；实际派生需spawn与独立child事件，完整定义传入与实际返回分开核对；只按新返回的确切线程ID读取本次合成记录，不遍历私人历史，宿主加密字段无法明文比对时明确保留证据限制 |
 | G04 | 用户按例创建合成legacy配置并初始化意图，导入合成岗位 | 实际MCP初始化/读取/校验错误；不从旧data/local复制；标记workspace保持local_only，不能为验收降级 |
 | G05 | fetch→today→apply-list→apply路径 | 包外/测试内合成collector、结构化宿主参数、runner与页面，真实领域Store/Toolbox完整结果；无网络毒丸；明确skill指令映射与未调用真实模型，不把测试替身植入用户入口 |
 | G06 | 保护公司/未知公司/缺名单，普通及恢复路径 | 原有保守名单/快照/邮件/只填保护回归；无真实提交，宿主强制审批不绕过 |
