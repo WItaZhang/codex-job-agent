@@ -1,6 +1,7 @@
 """The calibration tools, grouped in three tiers (spec §5.1).
 
-- read: look only.
+- read: look only, except reading the company list may append protection audit snapshots;
+  this changes neither intent, labels nor application status.
 - prepare: may change analyses or the job pool, never the intent or the user's labels.
 - commit: validated decisions and runs under delegated authority. Labels still require actual user evidence;
   decisions identify delegated_coordinator. Project approval overrides never expand runner tool access.
@@ -913,7 +914,55 @@ class Toolbox:
     # --- applying (spec 4.10) ---------------------------------------------------------------------
 
     def _applicant(self) -> applicant_files.Applicant:
-        return applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        # Guards also run in background workers: do not share the tool connection's write transaction.
+        observer = Store(self.store.path, self.settings)
+        try:
+            effective = observer.observe_careful_companies(applicant.careful_companies)
+        finally:
+            observer.db.close()
+        return applicant.model_copy(update={"careful_companies": effective})
+
+    @_tool("prepare")
+    def release_careful_companies(self, companies: list[str], user_report: str, actor: Literal["user"]) -> dict:
+        """Record only an actual user's explicit removal request, never a coordinator's autonomous choice.
+        First remove the named entries from applicant.yaml under that same user request, then call this tool.
+        user_report is the non-sensitive explicit request/reference, not invented evidence. Actor is an audit
+        assertion, NOT human authentication. Old careful batches stay fill-only; prepare a new batch afterwards.
+        A later observed readdition restores protection. No private profile is read or configuration written."""
+        if actor != "user" or not user_report.strip() or not companies:
+            raise InvariantError("Release requires an explicit user request and named companies")
+        if any(applicant_files.unknown_company(name) for name in companies):
+            raise InvariantError("Name actual retained company entries to release")
+        applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        requested = {applicant_files.company_key(name) for name in companies}
+        current = {applicant_files.company_key(name) for name in applicant.careful_companies}
+        writer = Store(self.store.path, self.settings)
+        try:
+            writer.observe_careful_companies(applicant.careful_companies)
+            with writer.exclusive():
+                retained = writer.protected_companies()
+                if requested & current:
+                    raise InvariantError(
+                        "Remove the requested entries from applicant.yaml first, on the user's command"
+                    )
+                if not requested <= {applicant_files.company_key(name) for name in retained}:
+                    raise InvariantError("Release must name retained list entries, not matching job names")
+                released = [name for name in retained if applicant_files.company_key(name) in requested]
+                decision_id = writer.record_decision(
+                    None,
+                    "careful_companies_release",
+                    {
+                        "companies": released,
+                        "actor": "user",
+                        "user_report": user_report.strip(),
+                        "evidence_authenticated": False,
+                    },
+                )
+                effective = writer.protected_companies()
+        finally:
+            writer.db.close()
+        return {"released": released, "careful_companies": effective, "decision_id": decision_id}
 
     def _ready_applicant(self) -> applicant_files.Applicant:
         applicant = self._applicant()
@@ -1200,9 +1249,8 @@ class Toolbox:
             len(items) if stop_before_submit else (0 if only is not None else self.settings.apply.review_first)
         )
         jobs = []
-        retained = self.store.protected_companies()
         for n, item in enumerate(items, start=1):
-            protected = self._protected_company(item["job_id"], applicant, item["companies"], retained)
+            protected = self._protected_company(item["job_id"], applicant, item["companies"])
             if n <= review_first:
                 mode = "review"
             elif protected:
@@ -1246,10 +1294,10 @@ class Toolbox:
             )
         return list(dict.fromkeys(names))
 
-    def _protected_company(self, job_id: str, applicant=None, names=(), retained=()) -> bool:
+    def _protected_company(self, job_id: str, applicant=None, names=()) -> bool:
         applicant = applicant or self._applicant()  # required list, never default to []
         return any(
-            applicant_files.careful(name, [*applicant.careful_companies, *retained])
+            applicant_files.careful(name, applicant.careful_companies)
             for name in (*names, *self._company_names(job_id))
         )
 
@@ -1398,10 +1446,9 @@ class Toolbox:
             )
             for job in jobs
         ]
-        retained = self.store.protected_companies()
         for job in jobs:
             if job["mode"] == "submit" and (
-                job.get("protected") or self._protected_company(job["job_id"], applicant, job["companies"], retained)
+                job.get("protected") or self._protected_company(job["job_id"], applicant, job["companies"])
             ):
                 job["mode"] = "careful"
                 job["protected"] = True
@@ -2164,7 +2211,6 @@ class Toolbox:
         running = self._resuming()
         items, problems = [], []
         same = self._same_posting(self.store.applications())
-        retained = self.store.protected_companies()
         for job_id in wanted:
             hold = holds[job_id]
             job = self.store.job(job_id)
@@ -2186,7 +2232,7 @@ class Toolbox:
             if item["mode"] == "submit" and (
                 shown.get("mode") == "careful"
                 or shown.get("protected")
-                or self._protected_company(job_id, names=item["companies"], retained=retained)
+                or self._protected_company(job_id, names=item["companies"])
             ):
                 item.update(mode="careful", via="form_fill")
             target, count = self._held_tab(hold, tabs)

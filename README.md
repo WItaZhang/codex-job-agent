@@ -132,3 +132,5 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 uv run python -m pytest -q
 ```
+
+公司保护留底来自实际读取的 `careful_companies` 快照，保存在 decisions。用户明确解除时，按真实请求删除配置条目后调用 `release_careful_companies(companies, user_report, actor="user")` 并重新准备批次；仅删除配置不会解锁，旧 careful 批次仍只填。该入口记录真实用户请求，不认证身份，agent 不得自主解除。

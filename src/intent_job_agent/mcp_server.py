@@ -67,6 +67,10 @@ Applying (project skill /apply):
 - careful_companies must be explicitly available. Only explicit user commands may add/delete names; never reduce
   protection for progress. Protected/unknown companies only fill, never submit or send application email. This
   project offers no automatic unlock. Recheck current protection on execution/resume/retry and retain old protection.
+- Protection retains actual observed list snapshots, never inferred job names. Only on a real explicit user
+  removal request: remove its entries from applicant.yaml, then release_careful_companies with the named entries,
+  actual user_report and actor=user; prepare a new batch. Parameters audit the request, not authenticate it.
+  Never release autonomously. Old careful batches stay fill-only; observed readdition restores protection.
 - CAPTCHAs are never solved. Login/SSO/missing codes remain actual capability gates. Resume with evidence the gate
   is resolved via prepare_resume/resume_applying; no mandatory approval phrase. No automatic abandonment.
 - mark_applications defaults to historical user-report semantics: call that path only on actual user messages.

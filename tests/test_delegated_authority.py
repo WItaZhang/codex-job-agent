@@ -409,3 +409,117 @@ def test_mid_resume_missing_list_preserves_all_remaining_holds(box):
     for job in jobs[1:]:
         hold = box.store.hold(job)
         assert hold["resuming"] == 0 and hold["times"] == 1 and hold["reason"] == "captcha"
+
+
+def test_retention_observes_list_before_any_company_enters_batch(box):
+    autonomous(box)
+    change_list(box, ["Stripe", "Acme"])
+    box._applicant()  # first read, no batch or even job exists
+    change_list(box, ["Stripe"])
+    jobs = ready(box, ["Acme", "Beta"])
+    assert box.prepare_apply_batch(only=[jobs[0]])["jobs"][0]["mode"] == "careful"
+    assert box._submission_block(jobs[0])  # thread guard uses the same retained list
+
+
+def test_unknown_company_and_conservative_matches_do_not_pollute_snapshot(box):
+    autonomous(box)
+    jobs = ready(box, ["", "Acme Corp", "Stripe Research", "Research"])
+    job = box.store.job(jobs[0])
+    box.store.add_job(job.model_copy(update={"tags": [*job.tags, "company.acme"]}))
+    for _ in range(2):
+        batch = box.prepare_apply_batch(only=jobs)
+        assert [j["mode"] for j in batch["jobs"]] == ["careful", "submit", "careful", "submit"]
+    assert box.store.protected_companies() == ["Stripe"]
+
+
+def test_explicit_user_release_is_audited_and_allows_new_batch(box):
+    autonomous(box)
+    ready(box, ["Stripe"])
+    old = box.prepare_apply_batch()
+    change_list(box, ["Beta"])
+    assert box.prepare_apply_batch()["jobs"][0]["mode"] == "careful"
+    result = box.release_careful_companies(
+        ["Stripe"], "User explicitly requests removing Stripe protection", actor="user"
+    )
+    assert result["released"] == ["Stripe"] and result["decision_id"]
+    assert box.prepare_apply_batch()["jobs"][0]["mode"] == "submit"
+    assert not box._submission_block("j00")
+    assert box.store.apply_batch(old["batch_id"])["jobs"][0]["mode"] == "careful"
+    change_list(box, ["Stripe", "Beta"])
+    assert box._submission_block("j00")  # observed readdition restores protection
+
+
+def test_release_requires_explicit_report_and_prior_config_removal(box):
+    change_list(box, ["Stripe"])
+    box._applicant()
+    with pytest.raises(InvariantError):
+        box.release_careful_companies(["Stripe"], "Remove Stripe", actor="user")
+    change_list(box, [])
+    with pytest.raises(InvariantError):
+        box.release_careful_companies(["Stripe"], "", actor="user")
+    with pytest.raises(InvariantError):
+        box.release_careful_companies(["Stripe"], "Agent wants to progress", actor="delegated_coordinator")
+    assert box.store.protected_companies() == ["Stripe"]
+
+
+def test_thread_last_guard_retains_observed_then_deleted_company(box):
+    autonomous(box)
+    ready(box, ["Alpha", "Beta", "Gamma"])
+    original = box.apply_runner
+
+    def execute(spec):
+        result = original(spec)
+        if spec.job_id == "j00":
+            change_list(box, ["Beta"])
+            box._applicant()  # another successful observation while the batch is running
+            change_list(box, [])
+        return result
+
+    box.apply_runner = execute
+    batch = box.prepare_apply_batch()
+    box.start_applying(batch["batch_id"], batch["summary"])
+    assert box.apply_status()["status"] == "done"
+    assert [s.job_id for s in original.calls] == ["j00", "j02"]
+    assert box.store.applications()["j01"]["status"] == "pending"
+
+
+def test_snapshot_is_exact_deduplicated_and_survives_reopening(box):
+    from intent_job_agent.store import Store
+
+    change_list(box, ["Stripe, Inc.", "Acme"])
+    for _ in range(3):
+        box._applicant()
+    snapshots = [json.loads(d["payload"]) for d in box.store.decisions() if d["kind"] == "careful_companies_snapshot"]
+    assert len(snapshots) == 1
+    assert snapshots[0]["companies"] == ["Stripe, Inc.", "Acme"]
+    reopened = Store(box.store.path, box.settings)
+    try:
+        assert reopened.protected_companies() == ["Stripe, Inc.", "Acme"]
+    finally:
+        reopened.db.close()
+
+
+def test_release_not_exposed_to_scheduled_runs():
+    from intent_job_agent.tools import SCHEDULED_TOOLS, TOOL_TIERS
+
+    assert TOOL_TIERS["release_careful_companies"] == "prepare"
+    assert "release_careful_companies" not in SCHEDULED_TOOLS
+
+
+def test_current_observed_list_wins_over_a_concurrent_stale_release(box):
+    change_list(box, ["Stripe"])
+    box._applicant()
+    # Synthetic interleaving: a release based on an earlier empty file commits after readdition was observed.
+    box.store.record_decision(
+        None,
+        "careful_companies_release",
+        {
+            "companies": ["Stripe"],
+            "actor": "user",
+            "user_report": "Earlier explicit request, before readdition",
+            "evidence_authenticated": False,
+        },
+    )
+    assert box._applicant().careful_companies == ["Stripe"]
+    change_list(box, [])
+    assert box._applicant().careful_companies == ["Stripe"]
