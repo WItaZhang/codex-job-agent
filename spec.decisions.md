@@ -551,3 +551,12 @@ S1条件采用：锁定MCP0.0.83/Playwright1.56.0先证明精确WS、CDP browser
 实现：`applicant.yaml` 的 `chrome_user_data_dir` 指定目录，没写时行为不变（工作区空专属profile）。`intent-job-agent chrome` 打开并记下实例身份；投递沿用决定29的归属核验，只是 profile 换成这个目录；代码不读取、不复制日常资料，不创建、不删除、不关闭这个实例；启动只用最小参数，不加规避检测的参数。迁移由用户手动做一次（docs/usage.md），代码里没有复制日常资料的函数。
 
 本决定部分取代决定29、spec 4.10 第 6 条和§10 第 56 条中"只用空专属profile"的规则；归属核验、失效结果、屏蔽名单、验证码规则不变。用户接受的风险写在 4.10 第 6 条：agent 能看到并切换到这个实例的其他标签页，只靠指令要求新开标签页，所以这个实例只用于求职。公众默认和 local_only 不变。
+
+
+## 决定 34（2026-11-01）：smartextract 一个站点出错只跳过这个站点
+
+2026-10-17、10-31、11-01 的每日抓取报告都写 smartextract 失败（`TimeoutError: Timeout 30000ms exceeded.`），JobSpy 和 Workday 正常。原因：ApplyPilot 的 `collect_page_intelligence` 在打开页面后等 networkidle，用 Playwright 默认的 30 秒超时；有的站点一直不进入 networkidle，就抛出超时。它的 `_run_one_site` 只在 LLM、解析和执行三步上接住异常，读页面这一步没有接；`_run_all` 和并行模式的 `future.result()` 也不接，所以一个站点的异常让整个 `run_smart_extract` 中断，后面的站点都不抓，适配层把整个 smartextract 记成出错（已入库的照旧保留）。
+
+决定：在适配层（`applypilot_bridge.py`）运行 smartextract 期间包住它的 `_run_one_site`：一个站点的异常（`Exception`，不含用户中断和退出）变成该站点的失败结果，形状和它自己的 `*_ERROR` 结果一样（状态 `SITE_ERROR`，错误是异常类型加消息第一行，不带调用栈），所以它的汇总和入库照常进行；运行结束后恢复原函数。vendor 代码不改。来源报告新增 `failed_sites`，逐个列出失败的站点（含它自己记下的 `*_ERROR`），原有的 `error`、`skipped`、`stats` 不变；有站点失败时 `error` 为空但不算完全成功，/fetch-jobs 汇报时说出失败的站点和原因。
+
+没有做的：不改超时时长、networkidle 等待或重试（vendor 逻辑保持原样，是否延长超时另行决定）；不给任何站点写特例。

@@ -44,6 +44,7 @@ description: 每日模块①：抓取今天能抓到的岗位，代码预打标�
 
 - 新抓到多少（看 `discovery_status` 和 `boards_status` 的结果）、预筛排除多少、今天打了多少标签（剩余预算）、还有多少在排队。
 - 已存的岗位换了地点的有多少（`discovery_status` 结果里的 `synced.relocated`），退回重新打标签的有多少（`synced.retagged`）；都是 0 就不提。
+- 某个来源的 `error` 不为空：说出这个来源出错和原因（原样）。smartextract 的 `failed_sites` 不为空：说出哪些站点没抓成、各自的原因（原样），其他站点抓到的照常算；不要说成 smartextract 全部成功，也不要说成整个来源出错。
 - 子 agent 报告的新 key（如果有）。
 - 现在有多少打好标签、还没给用户看过的岗位可以进今天的 7+3。
 

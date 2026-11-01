@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -29,6 +30,10 @@ _PERIODS = {"yearly": "year", "monthly": "month", "hourly": "hour"}
 # What ApplyPilot's sources store for a missing value: str(None) from its JobSpy storage, "null" from its
 # enrichment's LLM step, "nan" from pandas.
 _PLACEHOLDERS = {"none", "null", "nan"}
+# The statuses ApplyPilot's smartextract gives a site it read through; any other (its *_ERROR ones, and
+# SITE_ERROR here) is a failed site.
+_SITE_READ = ("PASS", "PARTIAL", "FAIL")
+_ERROR_CHARS = 300
 
 
 def staging_dir(data_dir: Path, settings: Settings) -> Path:
@@ -178,7 +183,8 @@ def workday_location(info: dict) -> str:
 
 
 def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
-    """Run the chosen sources, then enrichment. A failing source is reported; the others still run."""
+    """Run the chosen sources, then enrichment. A failing source is reported; the others still run. In
+    smartextract a failing site is skipped and listed in its report's `failed_sites` (spec 2c item 19)."""
     settings.require_external("job discovery", data_dir)
     configure(data_dir, settings)
     from .vendor.applypilot import config
@@ -190,6 +196,8 @@ def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: 
     reports = {}
     for source in sources:
         report = {"error": None, "skipped": None, "stats": None}
+        if source == "smartextract":
+            report["failed_sites"] = []
         try:
             if source == "jobspy":
                 from .vendor.applypilot.discovery import jobspy
@@ -206,7 +214,8 @@ def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: 
                 else:
                     from .vendor.applypilot.discovery import smartextract
 
-                    report["stats"] = smartextract.run_smart_extract()
+                    with isolated_sites(smartextract) as report["failed_sites"]:
+                        report["stats"] = smartextract.run_smart_extract()
         except Exception as error:  # one source's failure must not stop the others
             report["error"] = f"{type(error).__name__}: {error}"
         reports[source] = report
@@ -222,6 +231,39 @@ def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: 
             report["error"] = f"{type(error).__name__}: {error}"
         reports["enrich"] = report
     return json.loads(json.dumps(reports, default=str))
+
+
+@contextmanager
+def isolated_sites(smartextract):
+    """While open, one smartextract site's exception becomes that site's failed result in ApplyPilot's own result
+    shape (status SITE_ERROR), so its run goes on with the next site: ApplyPilot reads each page with no guard
+    around it. Yields the failed sites (name, link, status, reason), its own *_ERROR results included. Interrupts
+    and exits still stop the run. The original function is back when this closes (spec 2c item 19)."""
+    original = smartextract._run_one_site
+    failed: list[dict] = []
+
+    def run_one_site(name: str, url: str) -> dict:
+        try:
+            result = original(name, url)
+        except Exception as error:  # this site only; the others still run
+            result = {"name": name, "status": "SITE_ERROR", "error": _error_line(f"{type(error).__name__}: {error}")}
+        if result.get("status") not in _SITE_READ:
+            failed.append(
+                {"name": name, "url": url, "status": result.get("status"), "error": _error_line(result.get("error"))}
+            )
+        return result
+
+    smartextract._run_one_site = run_one_site
+    try:
+        yield failed
+    finally:
+        smartextract._run_one_site = original
+
+
+def _error_line(text) -> str:
+    """An error's first line, kept short: Playwright appends its call log to the message."""
+    lines = str(text or "").strip().splitlines()
+    return lines[0].strip()[:_ERROR_CHARS] if lines else ""
 
 
 def _retry_missing_text(path: Path) -> int:

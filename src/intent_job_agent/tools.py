@@ -657,7 +657,8 @@ class Toolbox:
 
     @_tool("prepare")
     def discovery_status(self) -> dict:
-        """Progress of the last discovery run; once it is done, imports the new jobs (untagged)."""
+        """Progress of the last discovery run; once it is done, imports the new jobs (untagged). Each source's
+        report has its error; smartextract's also lists the sites that failed (`failed_sites`), the others ran."""
         run = self._discovery
         if run is None:
             return {"status": "idle"}

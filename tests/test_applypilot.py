@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 import yaml
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from intent_job_agent import applypilot_bridge as bridge
 from intent_job_agent.domain import Job, Salary
@@ -257,6 +258,113 @@ def test_a_failing_source_does_not_stop_the_others(box, monkeypatch):
     assert "synthetic outage" in result["sources"]["workday"]["error"]
     assert result["sources"]["jobspy"]["error"] is None
     assert len(box.store.jobs()) == 1
+
+
+SMART_SITES = [
+    {"name": "Synthetic Board A", "url": "https://a.example.org/jobs", "type": "static"},
+    {"name": "Synthetic Board B", "url": "https://b.example.org/jobs", "type": "static"},
+    {"name": "Synthetic Board C", "url": "https://c.example.org/jobs", "type": "static"},
+]
+
+
+def smart_sites(box, monkeypatch) -> None:
+    """Three SYNTHETIC smartextract sites; every page read times out like a site that never goes network-idle."""
+    monkeypatch.setenv("GEMINI_API_KEY", "synthetic-key")
+    (box.data_dir / "sites.yaml").write_text(yaml.safe_dump({"sites": SMART_SITES}), encoding="utf-8")
+    searches(box)
+
+    def page_timeout(url, headless=True):
+        raise PlaywrightTimeoutError(
+            "Timeout 30000ms exceeded.\n=========================== logs ===========================\n"
+            f'waiting for navigation to "{url}" until "networkidle"'
+        )
+
+    monkeypatch.setattr(ap_smart, "collect_page_intelligence", page_timeout)
+
+
+def site_reading(failing: set[str], vendor_errors: dict[str, str] | None = None):
+    """Stands in for smartextract._run_one_site: sites in `failing` run ApplyPilot's own pipeline (whose page read
+    times out), sites in `vendor_errors` return its LLM_ERROR result, the rest find one SYNTHETIC remote job."""
+    real = ap_smart._run_one_site
+
+    def run_one_site(name, url):
+        if name in failing:
+            return real(name, url)
+        if name in (vendor_errors or {}):
+            return {"name": name, "status": "LLM_ERROR", "error": vendor_errors[name]}
+        job = {"title": f"Machine Learning Engineer {name[-1]}", "url": f"{url}/1", "location": "Remote"}
+        found = {"strategy": "json_ld", "total": 1, "titles": 1, "plan": {}, "jobs": [job]}
+        return {"name": name, "status": "PASS", **found}
+
+    return run_one_site
+
+
+def test_one_smartextract_site_failing_skips_only_that_site(box, monkeypatch):
+    smart_sites(box, monkeypatch)
+    fake = site_reading({"Synthetic Board A"})
+    monkeypatch.setattr(ap_smart, "_run_one_site", fake)
+    result = discover(box, sources=("smartextract",))
+    report = result["sources"]["smartextract"]
+    assert report["error"] is None
+    assert report["stats"] == {"total_new": 2, "total_existing": 0, "passed": 2, "total": 3}
+    assert report["failed_sites"] == [
+        {
+            "name": "Synthetic Board A",
+            "url": "https://a.example.org/jobs",
+            "status": "SITE_ERROR",
+            "error": "TimeoutError: Timeout 30000ms exceeded.",
+        }
+    ]
+    titles = sorted(job.title for job in box.store.jobs())
+    assert titles == ["Machine Learning Engineer B", "Machine Learning Engineer C"]
+    assert ap_smart._run_one_site is fake  # the wrapper is gone after the run
+
+
+def test_every_smartextract_site_failing_is_reported_site_by_site(box, monkeypatch):
+    smart_sites(box, monkeypatch)
+    fake = site_reading({"Synthetic Board A", "Synthetic Board B"}, {"Synthetic Board C": "synthetic quota exceeded"})
+    monkeypatch.setattr(ap_smart, "_run_one_site", fake)
+    report = discover(box, sources=("smartextract",))["sources"]["smartextract"]
+    assert report["error"] is None
+    assert report["stats"] == {"total_new": 0, "total_existing": 0, "passed": 0, "total": 3}
+    assert [(site["name"], site["status"], site["error"]) for site in report["failed_sites"]] == [
+        ("Synthetic Board A", "SITE_ERROR", "TimeoutError: Timeout 30000ms exceeded."),
+        ("Synthetic Board B", "SITE_ERROR", "TimeoutError: Timeout 30000ms exceeded."),
+        ("Synthetic Board C", "LLM_ERROR", "synthetic quota exceeded"),
+    ]
+    assert box.store.jobs() == []
+
+
+def test_parallel_smartextract_run_also_skips_only_the_failing_site(box, monkeypatch):
+    smart_sites(box, monkeypatch)
+    monkeypatch.setattr(ap_smart, "_run_one_site", site_reading({"Synthetic Board B"}))
+    bridge.configure(box.data_dir, box.settings)
+    with bridge.isolated_sites(ap_smart) as failed:
+        stats = ap_smart.run_smart_extract(workers=3)  # run_sources uses ApplyPilot's default of one worker
+    assert stats == {"total_new": 2, "total_existing": 0, "passed": 2, "total": 3}
+    assert [(site["name"], site["error"]) for site in failed] == [
+        ("Synthetic Board B", "TimeoutError: Timeout 30000ms exceeded.")
+    ]
+
+
+def test_a_clean_smartextract_run_lists_no_failed_sites(box, monkeypatch):
+    smart_sites(box, monkeypatch)
+    monkeypatch.setattr(ap_smart, "_run_one_site", site_reading(set()))
+    report = discover(box, sources=("smartextract",))["sources"]["smartextract"]
+    assert report["error"] is None and report["failed_sites"] == []
+    assert report["stats"]["passed"] == 3
+
+
+def test_an_interrupt_still_stops_smartextract(box, monkeypatch):
+    smart_sites(box, monkeypatch)
+
+    def interrupted(name, url):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(ap_smart, "_run_one_site", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        bridge.run_sources(box.data_dir, box.settings, ["smartextract"], enrich=False)
+    assert ap_smart._run_one_site is interrupted
 
 
 def test_missing_searches_file_is_reported(box):
