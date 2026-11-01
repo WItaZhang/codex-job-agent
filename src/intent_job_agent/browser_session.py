@@ -1,7 +1,8 @@
 """Workspace-owned browsers. Exact endpoints are identity evidence, never bare-port discovery.
 
 Supported process/lock implementations: macOS and Linux. This does not authenticate a
-malicious process with full access to the same user's files. No daily profiles are adopted.
+malicious process with full access to the same user's files. No daily profiles are adopted or copied; an
+applicant may instead name their own separate Chrome instance in applicant.yaml (decision 33).
 """
 
 import base64
@@ -64,16 +65,77 @@ def _plain(path: Path):
 
 
 def scope(settings):
-    return (str(Path(settings.storage.data_dir).resolve()), str(Path(settings.storage.db_path).resolve()))
+    """(root, db, profile): the workspace and the one browser profile it may control."""
+    return (
+        str(Path(settings.storage.data_dir).resolve()),
+        str(Path(settings.storage.db_path).resolve()),
+        str(profile_dir(settings)),
+    )
+
+
+# Chrome's default user data folders (macOS, Linux). Chrome opens no debugging port on them, and the profiles inside
+# belong to the daily browser.
+_DAILY = (
+    "Library/Application Support/Google/Chrome",
+    "Library/Application Support/Google/Chrome Beta",
+    "Library/Application Support/Google/Chrome Canary",
+    "Library/Application Support/Chromium",
+    ".config/google-chrome",
+    ".config/google-chrome-beta",
+    ".config/chromium",
+)
+
+
+def profile_dir(settings) -> Path:
+    """The user data folder the applying Chrome runs on: the applicant's own instance when applicant.yaml names one
+    (decision 33, spec 4.10 item 6), else this workspace's dedicated profile."""
+    from . import applicant
+
+    root = Path(settings.storage.data_dir).resolve()
+    dedicated = root / "browser/profile"
+    if not (applicant.folder(root, settings.apply.applicant_dir) / applicant.FILE).is_file():
+        return dedicated
+    try:
+        own = applicant.load(root, settings.apply.applicant_dir).chrome_user_data_dir
+    except InvariantError as error:
+        raise BrowserIdentityLost(f"Cannot read chrome_user_data_dir: {error}") from error
+    if own is None:
+        return dedicated
+    if not own.is_absolute():
+        raise BrowserIdentityLost(f"chrome_user_data_dir must be an absolute path, not {own}")
+    _plain(own)
+    if not own.is_dir() or own.resolve() != own:
+        raise BrowserIdentityLost(f"chrome_user_data_dir {own} is not a folder; prepare it first (docs/usage.md)")
+    for daily in (Path.home() / d for d in _DAILY):
+        if own == daily or daily in own.parents:
+            raise BrowserIdentityLost(
+                f"chrome_user_data_dir {own} is Chrome's default data folder or inside it; use a separate folder"
+            )
+    if own == root / "browser" or root / "browser" in own.parents:
+        raise BrowserIdentityLost(f"chrome_user_data_dir {own} is inside this workspace's browser folder")
+    return own
+
+
+def _profile(expected):
+    """The profile in an expected scope; a bare (root, db) means the workspace's dedicated one."""
+    return Path(expected[2]) if len(expected) > 2 else Path(expected[0]) / "browser/profile"
+
+
+def _own(expected):
+    return _profile(expected) != Path(expected[0]) / "browser/profile"
+
+
+def _root(binding, expected):
+    if not isinstance(binding, BrowserBinding):
+        raise BrowserIdentityLost("A complete BrowserBinding is required, not a port")
+    if expected is None or (binding.root, binding.db_path) != tuple(map(str, expected[:2])):
+        raise BrowserIdentityLost("Browser workspace differs from caller's expected root/db")
 
 
 def _workspace(binding, expected):
-    if not isinstance(binding, BrowserBinding):
-        raise BrowserIdentityLost("A complete BrowserBinding is required, not a port")
-    if expected is None or (binding.root, binding.db_path) != tuple(map(str, expected)):
-        raise BrowserIdentityLost("Browser workspace differs from caller's expected root/db")
-    if Path(binding.profile) != Path(expected[0]) / "browser/profile":
-        raise BrowserIdentityLost("Browser profile is not this workspace's dedicated profile")
+    _root(binding, expected)
+    if Path(binding.profile) != _profile(expected):
+        raise BrowserIdentityLost("Browser profile is not the one this workspace is set to use")
 
 
 def validate_os(binding: BrowserBinding, *, expected):
@@ -86,8 +148,8 @@ def validate_os(binding: BrowserBinding, *, expected):
         root, profile = Path(binding.root), Path(binding.profile)
         _plain(root)
         _plain(profile)
-        if root.resolve() != root or not profile.is_relative_to(root / "browser"):
-            raise BrowserIdentityLost("Browser profile is outside the canonical workspace")
+        if root.resolve() != root or profile.resolve() != profile:
+            raise BrowserIdentityLost("Browser profile is not a canonical path")
         proc = watchdog.processes().get(binding.pid)
         if proc is None or proc.started != binding.started:
             raise BrowserIdentityLost("Browser PID/start identity lost")
@@ -292,8 +354,8 @@ def inspect(settings):
     binding = _read_record(Path(expected[0]) / "browser/session.json")
     if binding is None:
         return None
-    _workspace(binding, expected)
-    if not watchdog.alive(binding.pid, binding.started):
+    _root(binding, expected)
+    if Path(binding.profile) != _profile(expected) or not watchdog.alive(binding.pid, binding.started):
         return None
     verify(binding, expected=expected)
     return binding
@@ -315,10 +377,8 @@ def _own_row(db_path):
 
 def ensure(settings):
     settings.require_external("browser.ensure")
-    from .vendor.applypilot.config import get_chrome_path
-
     expected = scope(settings)
-    root, db_path = expected
+    root, db_path, _ = expected
     with management(root, timeout=settings.apply.browser_lock_seconds) as folder:
         # Re-read only after taking the management lock: a previous run may have ended while waiting.
         row = _own_row(db_path)
@@ -326,87 +386,150 @@ def ensure(settings):
             owner_pid=row["owner_pid"], owner_started=row["owner_started"], kind=row["kind"], run_id=row["run_id"]
         )
         path = folder / "session.json"
-        old = _read_record(path)
-        if old is not None:
-            _workspace(old, expected)
-        profile = folder / "profile"
-        marker = folder / "owned-profile.json"
-        _plain(profile)
-        _plain(marker)
-        if profile.exists():
-            try:
-                owned = json.loads(marker.read_text())
-            except (OSError, ValueError) as error:
-                raise BrowserIdentityLost("Unrecognized profile; do not adopt or delete it") from error
-            if owned != {"root": root, "db_path": db_path, "profile": str(profile)}:
-                raise BrowserIdentityLost("Profile ownership record differs from this workspace")
-        else:
-            if marker.exists():
-                raise BrowserIdentityLost("Owned profile is missing; inspect records before retrying")
-            profile.mkdir(mode=0o700)
-            _atomic(marker, {"root": root, "db_path": db_path, "profile": str(profile)})
+        old = _current(path, expected)
+        if not _own(expected):
+            _dedicated(folder, root, db_path)
         if old is not None:
             if watchdog.alive(old.pid, old.started):
                 verify(old, expected=expected)
                 binding = BrowserBinding(**{**old.dump(), **owner})
                 _atomic(path, binding.dump())
                 return binding
-        # No live process using this profile may be displaced, including an unknown stale session.
-        if any(f"--user-data-dir={profile}" in p.command for p in watchdog.processes().values()):
-            raise BrowserIdentityLost("A live process still uses this profile; leave it untouched")
-        active = profile / "DevToolsActivePort"
-        _plain(active)
-        active.unlink(missing_ok=True)  # only our proven-owned profile, with no live user
-        proc = subprocess.Popen(
-            launch_arguments(
-                settings.apply.browser_executable or get_chrome_path(),
-                profile,
-                headless=settings.apply.browser_headless,
-            ),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        identity = None
-        try:
-            deadline = time.monotonic() + settings.apply.browser_start_seconds
-            while not active.is_file():
-                if proc.poll() is not None or time.monotonic() > deadline:
-                    raise BrowserIdentityLost("Dedicated Chrome did not publish its endpoint")
-                time.sleep(0.05)
-            identity = watchdog.processes()[proc.pid]
-            port, endpoint = active.read_text().strip().splitlines()
-            binding = BrowserBinding(
-                root,
-                str(profile),
-                uuid.uuid4().hex,
-                proc.pid,
-                identity.started,
-                f"ws://127.0.0.1:{port}{endpoint}",
-                db_path=db_path,
-                **owner,
+        return _launch(settings, expected, path, owner, lambda: _own_row(db_path) == row)
+
+
+def open_instance(settings):
+    """`intent-job-agent chrome`: open the applicant's own Chrome (decision 33), the one /apply uses, for everyday
+    browsing. Not running: start it and record its identity with no run owner; a run takes it over in ensure().
+    Running as recorded: only ask it for a new window."""
+    settings.require_external("browser.open")
+    from .vendor.applypilot.config import get_chrome_path
+
+    expected = scope(settings)
+    if not _own(expected):
+        raise BrowserIdentityLost("applicant.yaml names no chrome_user_data_dir; /apply opens the dedicated profile")
+    with management(expected[0], timeout=settings.apply.browser_lock_seconds) as folder:
+        path = folder / "session.json"
+        old = _current(path, expected)
+        if old is not None and watchdog.alive(old.pid, old.started):
+            verify(old, expected=expected)
+            subprocess.Popen(
+                [settings.apply.browser_executable or get_chrome_path(), f"--user-data-dir={_profile(expected)}"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
-            verify(binding, expected=expected)
-            if _own_row(db_path) != row:
-                raise BrowserIdentityLost("Run changed while browser started")
-            _atomic(path, binding.dump())
-            return binding
-        except BaseException:
-            if proc.poll() is None and (identity is None or watchdog.alive(proc.pid, identity.started)):
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-                except (OSError, subprocess.TimeoutExpired):
-                    if identity is not None and watchdog.alive(proc.pid, identity.started):
-                        proc.kill()
-                        try:
-                            proc.wait(timeout=3)
-                        except (OSError, subprocess.TimeoutExpired):
-                            pass  # Preserve the original failure; do not touch any other process.
-            raise
+            return old
+        return _launch(settings, expected, path, dict(owner_pid=0, owner_started="", kind="", run_id=""), lambda: True)
 
 
-def launch_arguments(executable, profile, *, headless=False):
+def _current(path, expected):
+    """This workspace's recorded browser for the configured profile. A record of another profile (the setting
+    changed) is set aside: that browser keeps running and is never adopted."""
+    old = _read_record(path)
+    if old is None:
+        return None
+    _root(old, expected)
+    return old if Path(old.profile) == _profile(expected) else None
+
+
+def _dedicated(folder, root, db_path):
+    profile = folder / "profile"
+    marker = folder / "owned-profile.json"
+    _plain(profile)
+    _plain(marker)
+    if profile.exists():
+        try:
+            owned = json.loads(marker.read_text())
+        except (OSError, ValueError) as error:
+            raise BrowserIdentityLost("Unrecognized profile; do not adopt or delete it") from error
+        if owned != {"root": root, "db_path": db_path, "profile": str(profile)}:
+            raise BrowserIdentityLost("Profile ownership record differs from this workspace")
+    else:
+        if marker.exists():
+            raise BrowserIdentityLost("Owned profile is missing; inspect records before retrying")
+        profile.mkdir(mode=0o700)
+        _atomic(marker, {"root": root, "db_path": db_path, "profile": str(profile)})
+
+
+def _launch(settings, expected, path, owner, still_owner):
+    from .vendor.applypilot.config import get_chrome_path
+
+    root, db_path = expected[:2]
+    profile, own = _profile(expected), _own(expected)
+    # No live process using this profile may be displaced, including an unknown stale session.
+    if any(f"--user-data-dir={profile}" in p.command for p in watchdog.processes().values()):
+        if own:
+            raise BrowserIdentityLost(
+                "Your own Chrome is open without a recorded identity; quit it, then reopen with intent-job-agent chrome"
+            )
+        raise BrowserIdentityLost("A live process still uses this profile; leave it untouched")
+    active = profile / "DevToolsActivePort"
+    _plain(active)
+    active.unlink(missing_ok=True)  # only a profile with no live user
+    proc = subprocess.Popen(
+        launch_arguments(
+            settings.apply.browser_executable or get_chrome_path(),
+            profile,
+            headless=settings.apply.browser_headless,
+            own=own,
+        ),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    identity = None
+    try:
+        deadline = time.monotonic() + settings.apply.browser_start_seconds
+        while not active.is_file():
+            if proc.poll() is not None or time.monotonic() > deadline:
+                raise BrowserIdentityLost("Dedicated Chrome did not publish its endpoint")
+            time.sleep(0.05)
+        identity = watchdog.processes()[proc.pid]
+        port, endpoint = active.read_text().strip().splitlines()
+        binding = BrowserBinding(
+            root,
+            str(profile),
+            uuid.uuid4().hex,
+            proc.pid,
+            identity.started,
+            f"ws://127.0.0.1:{port}{endpoint}",
+            db_path=db_path,
+            **owner,
+        )
+        verify(binding, expected=expected)
+        if not still_owner():
+            raise BrowserIdentityLost("Run changed while browser started")
+        _atomic(path, binding.dump())
+        return binding
+    except BaseException:
+        if proc.poll() is None and (identity is None or watchdog.alive(proc.pid, identity.started)):
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except (OSError, subprocess.TimeoutExpired):
+                if identity is not None and watchdog.alive(proc.pid, identity.started):
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=3)
+                    except (OSError, subprocess.TimeoutExpired):
+                        pass  # Preserve the original failure; do not touch any other process.
+        raise
+
+
+def launch_arguments(executable, profile, *, headless=False, own=False):
+    if own:
+        # The applicant's everyday browser: only what the debugging endpoint needs (decision 33).
+        return [
+            executable,
+            *(["--headless=new"] if headless else []),
+            "--remote-debugging-port=0",
+            "--remote-debugging-address=127.0.0.1",
+            f"--user-data-dir={profile}",
+            "--profile-directory=Default",
+            "--no-first-run",
+            "--no-default-browser-check",
+        ]
     return [
         executable,
         *(["--headless=new"] if headless else []),
@@ -437,6 +560,8 @@ def launch_arguments(executable, profile, *, headless=False):
 
 def close(binding, *, expected, timeout):
     _workspace(binding, expected)
+    if _own(expected):
+        raise BrowserIdentityLost("Code never closes the applicant's own Chrome")
     with management(expected[0], timeout=timeout):
         validate_owner(binding, expected=expected)
         verify(binding, expected=expected)

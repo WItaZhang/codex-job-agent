@@ -148,6 +148,28 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
    - 问"这周达标了吗"：`apply_stats` 按每次尝试给出本周和上周的提交数、成功率和各类失败。
    - 不要求项目逐步批准；仲裁协议、SSN、银行卡或申请费，agent 会停下并告诉你。结束时给一张检查单：每个岗位打开过的其他网站、发出的邮件。
 4. 投递使用工作区自己的专属 Chrome profile：首次新建空目录，同工作区后续复用，需在该浏览器重新登录。不会复制日常 Chrome 资料，不接管已有固定 9222 端口。自动提交撤不回，网站可能封号；专属 profile 不是凭据加密或恶意同用户进程隔离保证。
+5. 也可以改用**你自己的一个独立 Chrome 实例**，日常浏览和投递共用它的登录状态（见下一节）。
+
+### 投递和日常浏览共用一个 Chrome（可选）
+
+Chrome 不允许自动化工具接入默认数据目录里的日常 Chrome，所以把求职用的那个账号放进一个单独的数据目录，以后这个账号就用它浏览。投递接入的就是这一个实例，你在里面登录过的招聘网站、Google 账号、LinkedIn 都直接可用。网站看到的是一个长期使用、有历史记录的正常浏览器，验证码通常会少一些，但不保证没有；遇到时照常停下等你处理，系统不破解验证码，也不加任何伪装检测的参数。
+
+1. **准备目录（只做一次）**：完全退出 Chrome（⌘Q），把日常 Chrome 里这个账号的资料文件夹复制成新目录里的 `Default`，缓存不用复制。在 `chrome://version` 的"个人资料路径"一行可以查到是哪个文件夹（如 `Profile 2`）：
+
+   ```sh
+   SRC="$HOME/Library/Application Support/Google/Chrome/Profile 2"
+   DST="$HOME/Library/Application Support/Google/Chrome-Jobs"
+   mkdir -p "$DST"
+   rsync -a --exclude 'Cache' --exclude 'Code Cache' --exclude 'GPUCache' --exclude 'Service Worker/CacheStorage' \
+     "$SRC/" "$DST/Default/"
+   ```
+
+   之后在日常 Chrome 里不要再用这个账号，两边的登录状态会各走各的；确认新实例可用后，可以自己在日常 Chrome 里移除这个资料。也可以不复制，用空目录，在新实例里重新登录一次。
+2. **写进 `applicant.yaml`**：`chrome_user_data_dir: ~/Library/Application Support/Google/Chrome-Jobs`。目录不能是 Chrome 的默认数据目录或在它里面，不能在 `data/local/browser/` 里，路径上不能有软链。
+3. **打开它**：`uv run intent-job-agent chrome --config configs/default.yaml`。没开时启动并记下它的身份；已经开着时只新开一个窗口。不要直接双击 Chrome 图标打开这个账号，那样开的是日常 Chrome。`/apply` 时它没开会自动启动；如果它是用别的方式开的，投递会拒绝接管，关掉后用上面的命令重开即可。投递不会关掉它。
+4. **风险**：投递 agent 连上后能看到这个实例里所有标签页的标题和地址，也能切过去读页面；"每个岗位新开一个标签页"只是给 agent 的指令，屏蔽名单只拦新打开的网站。所以这个实例只用来求职，投递跑着时不要在里面开网银、私人邮件等页面；标签页的标题和地址可能写进投递记录。它开着时，本机其他程序也能通过调试端口控制它，和专属 profile 一样。
+
+改回专属 profile：删掉 `applicant.yaml` 里这一行即可，你的实例不会被动。
 
 ## 全权委托与保护公司
 

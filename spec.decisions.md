@@ -509,7 +509,7 @@ External legacy configurations cannot address marked workspace storage (resolved
 
 CI 39916656829实际failure（1585 passed/21 skipped/3 failed），取代此前queued认知及R1整合后另修R1s的安排。甲方要求R1建立通过的CI：本片修停止/恢复竞态、Linux非ASCII进程识别，补Playwright1.56.0对应Chromium及系统依赖；只供既有本地合成网页测试，不开放新workspace真实业务。ps使用受控子进程locale，保留C时间/UTC和Unicode，不改用户系统locale、不跳过原断言。不重跑旧run碰运气；新HEAD完整验证及制品探针后交Claude复核，协调者推送跑新CI，通过后整合再立即R1b；全套R6仍后续。
 
-## 决定29（2026-10-23）：R1b浏览器归属、空专属profile及失效结果
+## 决定29（2026-10-23）：R1b浏览器归属、空专属profile及失效结果（"只用空专属profile"的部分已被决定 33 取代）
 
 甲方批准新树先规格与本地合成探针，给甲方/Claude复核后才产品实现。采纳B1/B2：四格/stop优先序及旧generation恢复重开见[public-r1b.md](specs/public-r1b.md)；submit已launch结果不明held，不允许pending自动重投；未launch不造interrupted。仅归属有效的页面变化沿用只报告，身份失效停止自己的agent/driver。
 
@@ -538,3 +538,16 @@ S1条件采用：锁定MCP0.0.83/Playwright1.56.0先证明精确WS、CDP browser
 基础发现推荐与投递额外依赖分开说明；Codex宿主下实际投递仍依赖Claude Code/Chrome/Node。作者决定25仅属于本项目开发及作者会话，新用户在自身宿主明确授权业务，保护公司本人提交确认、隐私和禁止破解验证码等规则不取消。既有local_only不解锁。§9业务标准保留，合成测试不构成真实投递或上市验收。
 
 当前计划见specs/github-host-release.plan.md；不改历史决定正文，决定30仍由R2历史分支保留，不占其编号。原公众规格保留为暂停路线记录，后续是否重启另行决策。
+
+
+## 决定 33（2026-10-31）：投递可改用用户自己的独立 Chrome 实例
+
+用户要求投递直接使用日常 Chrome 里 qianqian.zhang042@gmail.com 的资料，共用已有登录状态，并尽量少被人机验证拦下。
+
+核实到的限制：Chrome 136 起在默认数据目录上忽略 `--remote-debugging-port`；唯一官方入口 `chrome://inspect` 的远程调试开关每次建立调试会话都要本人点允许，而投递每个岗位、看门狗和读回都各自连接，无法无人值守；日常 Chrome 里同一进程有三个账号，接管整个进程会把三个账号都暴露给投递 agent，新标签页还可能开到别的资料。Playwright MCP 0.0.83 连上已有浏览器时，把已有标签页全部列为可用，第一个已有标签页成为当前页。
+
+用户在三个选项里选了"独立实例"：把该账号的资料一次性迁到单独的 Chrome 数据目录，以后用户日常浏览和投递共用这一个实例；没选"接管运行中的日常 Chrome"（每次连接要点允许、三个账号同时暴露、需要 CDP 中继）和"独立实例但不迁移"（登录状态和历史都带不过来）。
+
+实现：`applicant.yaml` 的 `chrome_user_data_dir` 指定目录，没写时行为不变（工作区空专属profile）。`intent-job-agent chrome` 打开并记下实例身份；投递沿用决定29的归属核验，只是 profile 换成这个目录；代码不读取、不复制日常资料，不创建、不删除、不关闭这个实例；启动只用最小参数，不加规避检测的参数。迁移由用户手动做一次（docs/usage.md），代码里没有复制日常资料的函数。
+
+本决定部分取代决定29、spec 4.10 第 6 条和§10 第 56 条中"只用空专属profile"的规则；归属核验、失效结果、屏蔽名单、验证码规则不变。用户接受的风险写在 4.10 第 6 条：agent 能看到并切换到这个实例的其他标签页，只靠指令要求新开标签页，所以这个实例只用于求职。公众默认和 local_only 不变。

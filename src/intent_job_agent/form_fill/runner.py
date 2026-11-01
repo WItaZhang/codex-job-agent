@@ -462,10 +462,12 @@ def recording_store(ctx: RunContext, url: str) -> RecordingStore:
 def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, binding, before) -> Path:
     """checkpoint.json for this job's checkpoint service: paths and limits only, no contact detail."""
     form_fill = ctx.settings.form_fill
+    root, db_path, browser_profile = browser_session.scope(ctx.settings)
     config = checkpoint.Config(
         binding=binding.dump(),
-        root=browser_session.scope(ctx.settings)[0],
-        db_path=browser_session.scope(ctx.settings)[1],
+        root=root,
+        db_path=db_path,
+        browser_profile=browser_profile,
         before=[str(t.get("id")) for t in before],
         recordings_dir=str(recordings_root(ctx)),
         rec_id=recording_id(entry.url),
