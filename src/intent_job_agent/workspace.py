@@ -120,12 +120,22 @@ def resolve_settings(*, config: str | None = None, workspace: str | None = None)
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Internal prerelease: local workspace initialization only")
+    parser = argparse.ArgumentParser(description="Internal prerelease: workspace initialization and your own Chrome")
     sub = parser.add_subparsers(dest="command", required=True)
     init = sub.add_parser("init")
     init.add_argument("--workspace")
+    chrome = sub.add_parser("chrome", help="open the Chrome named by chrome_user_data_dir, which /apply also uses")
+    paths = chrome.add_mutually_exclusive_group()
+    paths.add_argument("--config")
+    paths.add_argument("--workspace")
     args = parser.parse_args(argv)
     try:
+        if args.command == "chrome":
+            from . import browser_session
+
+            binding = browser_session.open_instance(resolve_settings(config=args.config, workspace=args.workspace))
+            print(f"Chrome: {binding.profile}")
+            return 0
         root = initialize(args.workspace)
     except (InvariantError, OSError) as error:
         print(str(error), file=sys.stderr)

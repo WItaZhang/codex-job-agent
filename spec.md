@@ -337,7 +337,11 @@ exception 默认为空。新增一个 exception 必须**同时满足**以下条�
      - 不编造简历、投递资料和允许读的文件里没有的经历、数字和事实。
 
      代码在 `apply_bridge.py` 里把 ApplyPilot 的那一句整句换成这条规则（英文），vendor 文件不改。这项替换对所有人都做，不需要在 `applicant.yaml` 里打开；找不到 ApplyPilot 的原句时报错，这个岗位不开始投递、退回待投，和地点检查的替换一样（第 10 节第 67、69 条）。填表模块用同一份投递指令，也按这条写。
-6. **浏览器**：使用工作区拥有的空专属profile，不复制日常Chrome或其他worker，不采用/迁移/删除旧复制目录；legacy也需重新登录。通过动态端点、精确WS与PID/start/profile核验归属，不以固定9222响应判定可复用（决定29，[R1b规格](specs/public-r1b.md)，当前实现待验收）。
+6. **浏览器**：默认使用工作区拥有的空专属profile，不复制日常Chrome或其他worker，不采用/迁移/删除旧复制目录；legacy也需重新登录。通过动态端点、精确WS与PID/start/profile核验归属，不以固定9222响应判定可复用（决定29，[R1b规格](specs/public-r1b.md)，当前实现待验收）。
+   - **用户自己的 Chrome 实例**（决定 33）：`applicant.yaml` 写了 `chrome_user_data_dir` 时，投递、恢复和填表改用这个目录的 Chrome，用户日常浏览和投递共用同一个实例和它的登录状态。目录由用户准备（可以把日常 Chrome 的某个资料一次性手动迁进去，只放一个账号）；代码不读取、不复制日常资料，不创建、不删除、不关闭这个实例。目录必须已存在、是绝对路径、路径上没有软链，不能是 Chrome 默认数据目录或在它里面（Chrome 在默认目录上不开调试端口，也会和日常 Chrome 抢同一份资料），也不能在工作区的 `browser/` 里。
+   - 用户用 `intent-job-agent chrome --config <配置>` 打开它：没开就按下面的参数启动并记下实例身份，已经开着就只让它新开一个窗口。投递时它没开就照样由代码启动；开着但不是这样打开的（没有身份记录），拒绝接管，提示关掉后重新打开。归属核验和专属profile一样（PID/start、命令行里的目录、精确WS）。
+   - 启动参数只有调试端点必需项（动态端口、只听本机、数据目录、`--profile-directory=Default`）和跳过首次运行/默认浏览器提示，不带专属profile那组兼容参数（窗口大小、假媒体设备、拒绝权限提示、关通知、关后台联网/组件更新/同步、关会话恢复等），让它就是一个正常的日常浏览器。不加任何规避网站检测的参数，也不承诺不遇到验证码；遇到验证码照第 10 条停下等用户。
+   - 用户 2026-10-31 选择并接受的风险：投递 agent 连上后能看到这个实例里所有标签页的标题和地址，也能切换过去读页面；"每个岗位新开一个标签页"只是指令，屏蔽名单只拦新请求，不拦已经打开的页面。所以这个实例只用于求职，投递跑着时不在里面开私密页面；标签页的标题和地址可能进入投递运行记录。本机同一用户的其他程序在它开着时也能通过调试端点控制它，和专属profile一样。
    - 浏览器启动/接管/关闭使用最小管理锁，投递、恢复及独立填表复用同一apply_running owner互斥，不引入心跳lease。
    - 表单要求填 SSN、银行卡或付申请费时，agent 不填不付，停下这个岗位并反馈给用户（和仲裁协议一样）。投递资料里不放 SSN 和支付信息。
    - 投递用的浏览器打不开网页版邮箱、网银和支付、云盘、密码管理器等网站，名单写在配置中。
@@ -648,7 +652,7 @@ exception 默认为空。新增一个 exception 必须**同时满足**以下条�
 
 54. **借用的范围**：ApplyPilot 的 `apply/prompt.py`（投递指令）和 `apply/chrome.py`（投递用 Chrome）原样放进 vendor，只改 import。单个岗位的运行（启动 Claude Code、读输出、结果码）在 `apply_bridge.py` 里改写自它的 `launcher.run_job`，而不是原样使用 `launcher.py` 和 `dashboard.py`：原文件把"跳过全部权限确认"和命令行参数写死在函数里，只有改写才能加上风险控制，也就不需要它的终端界面。
 55. **权限白名单**：投递用的 Claude Code 以默认权限模式运行（ApplyPilot 用 `bypassPermissions`），只预先放行 Playwright MCP 的浏览器工具和 Gmail 的 `search_emails`、`read_email`、`send_email`；无人值守时其余工具一律被拒绝。不给内置工具（`--tools ""`），不加载用户自己的 MCP 服务（`--strict-mcp-config`）。MCP 服务固定版本（Playwright MCP 0.0.83，Gmail MCP 1.1.11），都写在配置中。
-56. **浏览器**：仅使用工作区拥有的空专属profile和已验证实例绑定；不复制日常资料，不采用旧worker目录。复用前验证generation、精确WS、PID/start和profile；归属不明失败关闭，不扫描或杀占端口进程。held旧generation走安全重开核查，不接管旧tab（决定29）。屏蔽名单用 Playwright MCP 的 `--blocked-origins`；它的说明写明这不是严格的安全边界，也不拦重定向。
+56. **浏览器**：默认使用工作区拥有的空专属profile，或用户在 `applicant.yaml` 指定的自己的 Chrome 实例（4.10 第 6 条，决定 33），都要已验证实例绑定；代码不复制日常资料，不采用旧worker目录。复用前验证generation、精确WS、PID/start和profile；归属不明失败关闭，不扫描或杀占端口进程。held旧generation走安全重开核查，不接管旧tab（决定29）。屏蔽名单用 Playwright MCP 的 `--blocked-origins`；它的说明写明这不是严格的安全边界，也不拦重定向。
 57. **每个岗位一个标签页**：先开新标签页再做；停在提交前的岗位，表填好后标签页留着给用户提交；自动提交的岗位做完关掉；停在门槛的，不管哪种模式，标签页都留在那一页（第 97 条）。停在提交前的岗位不发任何邮件：ApplyPilot 遇到只接受邮件投递的岗位会直接发邮件，那就等于提交了，所以这种岗位停下，报告邮箱地址（email_only）。
 58. **结果和状态**（自动提交的岗位；填表模块做的岗位见第 89 条）：ApplyPilot 的结果码照旧读取。自动提交的岗位 APPLIED → 已投；停在提交前的岗位，dry run 报告 APPLIED 表示表已填好 → waiting（等用户提交）；门槛（captcha、login_issue、sso_required、email_verification）→ held（等你处理，第 97 条）；其余 → failed，附原因（arbitration、ssn_required、payment_required、expired 等）和 agent 写的 NOTE。用户提交后用 mark_applications(actor="user", user_report="实际用户报告") 记成已投；兼容历史的默认 actor=user 只供实际用户报告；代理显式 actor=delegated_coordinator 只允许有依据的 pending 重试，不写 via=user 尝试。代理不可主动放弃 held 或标记已投；未决 interrupted/maybe_submitted 不能通过默认代理路径清除。actor/user_report 只用于审计，不认证身份。原标签页已交上保留历史 submitted_by_user 结果码，另记 actor=unknown 的观察证据，不据此断言用户亲自提交。清单只列待投的。每个结果一出来就写进数据库（运行线程用自己的数据库连接），服务中途停掉也不会把已提交的岗位留在待投里、下次再投一遍。
 59. **批次**：每批最多 30 个；默认 review_first=0，按当前保护名单路由。显式只填不提交用 stop_before_submit=true 或非零 review_first。start_applying 保留摘要、待投、求职信校验，并在开始和每个自动岗位启动前重查名单。公司规范化、未知公司和合并名保护见 4.10 第 1 条。

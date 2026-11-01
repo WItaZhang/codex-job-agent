@@ -6,7 +6,7 @@
 
 R1已由甲方最终签收，main 85305234c57713efe8738abf0dd64aed220aef3f，分支CI39918253389对应34221b1；main远端CI39919661089全success（1627 passed/122.49s、0skip，wheel/sdist/editable通过，日志/tmp/public-r1-main-ci-39919661089.log）。合并后本地四项1627 passed/66.13s，均为甲方提供。此事实不表示R1已有本规格的浏览器归属能力，旧切片报告不改写。
 
-R1b只修浏览器实例归属、空专属profile、必要跨会话互斥及身份丢失结果。不盲连9222，不读取/复制日常Chrome或其他worker；旧复制目录不采用、不迁移、不删除，包括legacy也不提供采用一次的开关。作者需在新的空专属profile重新登录是接受的行为变化。PDF渲染另用一次性空profile，不与CDP归属混同。
+R1b只修浏览器实例归属、空专属profile、必要跨会话互斥及身份丢失结果。不盲连9222，不读取/复制日常Chrome或其他worker；旧复制目录不采用、不迁移、不删除，包括legacy也不提供采用一次的开关。作者需在新的空专属profile重新登录是接受的行为变化。例外：用户在 `applicant.yaml` 显式指定自己的独立 Chrome 实例时改用它，归属核验相同，启动只用最小参数，代码不读取/复制日常资料、不关闭该实例（spec 4.10 第 6 条，决定 33）。PDF渲染另用一次性空profile，不与CDP归属混同。
 
 新workspace local_only原样拒绝真实执行，无新白名单/测试授权字段。合成浏览器实证仅在scripts/tests显式运行、临时空profile、about:blank或127.0.0.1 fixture，不访问招聘/邮箱/私人资料，不成为wheel产品入口。
 

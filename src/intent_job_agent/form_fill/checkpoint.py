@@ -64,6 +64,7 @@ class Config(BaseModel):
     binding: dict
     root: str
     db_path: str
+    browser_profile: str  # the profile the binding must be on: dedicated, or the applicant's own (decision 33)
     before: list[str]
     recordings_dir: str
     rec_id: str
@@ -646,7 +647,7 @@ def main(argv=None) -> int:
                 browser_session.BrowserBinding.load(config.binding),
                 redactor,
                 config.network_max_mb * 2**20,
-                expected=(config.root, config.db_path),
+                expected=(config.root, config.db_path, config.browser_profile),
                 render_seconds=config.timeout_seconds,
             ),
             redactor,

@@ -43,6 +43,7 @@ class Applicant(_Model):
     apply_agent_read: list[Path] = []  # folders the apply agent may read (read-only), e.g. a knowledge base
     onsite_ok: list[Line] = []  # where on-site or hybrid jobs are fine; empty: ApplyPilot's single profile city
     relocation: Line | None = None  # the answer to relocation questions; None: ApplyPilot's "cannot relocate"
+    chrome_user_data_dir: Path | None = None  # the applicant's own Chrome instance (decision 33); None: dedicated
 
     @field_validator("careful_companies")
     @classmethod
@@ -101,6 +102,7 @@ def load(data_dir: Path, applicant_dir: str) -> Applicant:
             "cover_letter_skill": resolve(applicant.cover_letter_skill),
             "cover_letter_context": [resolve(p) for p in applicant.cover_letter_context],
             "apply_agent_read": [resolve(p) for p in applicant.apply_agent_read],
+            "chrome_user_data_dir": applicant.chrome_user_data_dir and applicant.chrome_user_data_dir.expanduser(),
         }
     )
 

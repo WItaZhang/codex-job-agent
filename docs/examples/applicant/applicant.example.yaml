@@ -25,6 +25,10 @@ relocation: null                  # optional: the answer to relocation questions
                                   # "Yes, I am willing to relocate anywhere in the United States."
                                   # Empty: ApplyPilot's "cannot relocate".
 
+chrome_user_data_dir: null        # optional: your own separate Chrome data folder, used for applying and for your
+                                  # everyday browsing of that account (docs/usage.md). Not Chrome's default folder.
+                                  # Empty: a dedicated empty profile in data/local/browser.
+
 apply_agent_read: []              # optional: folders the apply agent may read (read-only) to answer application
                                   # questions, e.g. your knowledge base. Not the root or home folder, not anything
                                   # containing data/local or this profile.

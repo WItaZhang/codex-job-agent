@@ -9,6 +9,7 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -151,7 +152,9 @@ def config(tmp_path, **changes) -> Config:
         "ignore_filled_on_page": None,
         "network_max_mb": 30,
     }
-    return Config(**{**values, **changes})
+    values = {**values, **changes}
+    values.setdefault("browser_profile", str(Path(values["root"]) / "browser/profile"))
+    return Config(**values)
 
 
 @pytest.fixture
