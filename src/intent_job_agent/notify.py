@@ -55,6 +55,12 @@ def notice(held, waiting: int, step: str) -> tuple[str, str] | None:
     return title, f"{kinds}：{names}{more}"
 
 
+def now(n, company: str, reason: str) -> tuple[str, str]:
+    """(title, body) when a live re-run of the gate list stops at a gate and waits for the user (spec section 10 item
+    119): which kind of gate, and the batch number and company of the one job. Never an address."""
+    return "投递：现在需要你", f"{KINDS.get(reason, '要登录')}：{n} {clean(company)}。处理完说“好了”"
+
+
 def mac(title: str, body: str) -> bool:
     """Show the notification on macOS. Never raises and never retries: a notification that cannot be shown (Focus,
     no permission) must not stop applying; the chat still lists everything."""

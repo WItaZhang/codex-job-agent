@@ -95,6 +95,14 @@ class ApplyWatchdog(_Section):
     down_after: int = Field(gt=0)  # looks in a row without an answer before the applying Chrome counts as gone
 
 
+class ApplyGateWait(_Section):
+    """How a live re-run of the gate list waits for the user at each gate (spec section 10 items 119, 121)."""
+
+    timeout_seconds: float = Field(gt=0)  # one wait for the user to clear a gate in its tab
+    poll_seconds: float = Field(gt=0)  # how often the wait looks for a reply, a closed tab or a received page
+    max_waits: int = Field(gt=0)  # waits for one job in one re-run; one more gate counts as not cleared in time
+
+
 class Apply(_Section):
     browser_executable: str | None = None
     browser_headless: bool = False
@@ -119,6 +127,7 @@ class Apply(_Section):
     done: ApplyDone
     notify: bool  # a macOS notification when a step ends and jobs wait for the user (spec 4.10 item 10)
     watchdog: ApplyWatchdog
+    gate_wait: ApplyGateWait
 
 
 class FormFill(_Section):

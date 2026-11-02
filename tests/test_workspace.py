@@ -150,7 +150,7 @@ def test_all_registered_nonlocal_tools_reject_direct_calls(tmp_path):
     _, settings = workspace(tmp_path)
     store = Store(settings.storage.db_path, settings)
     box = Toolbox(settings, store)
-    assert len(TOOL_TIERS) == 47  # adding a tool requires reviewing the R1 side-effect inventory
+    assert len(TOOL_TIERS) == 48  # adding a tool requires reviewing the R1 side-effect inventory
     assert LOCAL_READ_TOOLS <= TOOL_TIERS.keys()
     for name in TOOL_TIERS.keys() - LOCAL_READ_TOOLS:
         # Guard must run before even interpreting arguments/looking up personal input.
@@ -168,6 +168,7 @@ def test_all_registered_nonlocal_tools_reject_direct_calls(tmp_path):
         ("fill", (None,)),
         ("read", ({}, Path("/synthetic-unused"), None)),
         ("tab_state", ({},)),
+        ("close_tab", ({},)),
     ],
 )
 def test_direct_form_fill_adapter_is_closed(tmp_path, monkeypatch, method, args):

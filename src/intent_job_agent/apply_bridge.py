@@ -807,6 +807,26 @@ def _read_line(line: str, texts: list, events: list, pages: list) -> None:
                         pages.extend(watchdog.PAGE_URL.findall(item["text"]))
 
 
+def _close(holder: dict, binding, target: dict, expected) -> bool:
+    from . import browser_session
+
+    with readback._playwright(holder) as p:  # leaving it drops the CDP connection; the browser stays
+        browser = browser_session.connect(p, binding, expected=expected)
+        page = readback._page_by_id([page for ctx in browser.contexts for page in ctx.pages], target)
+        if page is None:
+            return False
+        page.close()
+        return True
+
+
+def close_tab(binding, target: dict, seconds: float, *, expected) -> bool:
+    """Close one job's own tab in the verified applying Chrome, found by its CDP id only - never by its address, so
+    no other tab is ever closed (spec section 10 item 116: a gated job of an unattended step, or a gate the user did
+    not clear in a live re-run). False when no tab has that id. At most `seconds`, like a glance (item 108). It
+    lives here, not in the read-back, which never drives a page."""
+    return readback._bounded(_close, seconds, binding, target, expected)
+
+
 class ChromeRunner:
     """The real runner: one worker Chrome, one Claude Code run per application, one at a time."""
 

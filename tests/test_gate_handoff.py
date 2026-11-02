@@ -744,7 +744,12 @@ def test_resuming_takes_over_the_tab_submits_and_refills(box):  # G11 a, c; G13
     assert any("原来等你处理的那个标签页可以关掉" in item for item in refill["todo"])
     assert box.notices == [("投递：1 个填好等你检查", "接着做做完")]
     (decision,) = [d for d in box.store.decisions() if d["kind"] == "resume"]
-    assert json.loads(decision["payload"]) == {"job_ids": HELD, "approved_via": "delegated_coordinator"}
+    assert json.loads(decision["payload"]) == {
+        "job_ids": HELD,
+        "live": False,
+        "unattended": False,
+        "approved_via": "delegated_coordinator",
+    }
 
 
 def test_two_tabs_on_the_same_address_keep_that_job_waiting(box):  # G11 d

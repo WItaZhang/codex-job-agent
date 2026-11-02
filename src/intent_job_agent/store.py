@@ -474,6 +474,19 @@ class Store:
     def hold(self, job_id: str) -> dict | None:
         return next((row for row in self.holds() if row["job_id"] == job_id), None)
 
+    def update_hold(self, job_id: str, **fields) -> None:
+        """Change a held job's row on the list, and nothing else: no attempt row (spec section 10 items 116, 119).
+        A tab closed by code loses its id and generation (never taken over again) and keeps its address; a gate not
+        cleared in time adds one to `times`."""
+        unknown = set(fields) - set(HOLD_FIELDS)
+        if unknown or not fields:
+            raise InvariantError(f"A hold's fields are {list(HOLD_FIELDS)}, not {sorted(unknown)}")
+        with self._tx():
+            self.db.execute(
+                f"UPDATE apply_holds SET {', '.join(f'{name} = ?' for name in fields)} WHERE job_id = ?",
+                [*fields.values(), job_id],
+            )
+
     def set_resuming(self, job_ids: list[str], on: bool) -> None:
         """Mark held jobs as being resumed, before their run starts (item 102): a mark left behind by a stopped
         server tells the next resume to check the tab first."""

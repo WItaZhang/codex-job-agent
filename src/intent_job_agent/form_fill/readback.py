@@ -936,8 +936,8 @@ def simplify_html(html: str) -> str:
     return re.sub(r"<link\b[^>]*>", "", html, flags=re.I)
 
 
-def _find_page(browser, target: dict):
-    pages = [p for ctx in browser.contexts for p in ctx.pages]
+def _page_by_id(pages, target: dict):
+    """The page whose CDP target id is the target's, or None."""
     for p in pages:
         try:
             session = p.context.new_cdp_session(p)
@@ -945,10 +945,18 @@ def _find_page(browser, target: dict):
                 info = session.send("Target.getTargetInfo")
             finally:
                 session.detach()
-        except Exception:  # noqa: BLE001 - fall back to the URL below
+        except Exception:  # noqa: BLE001 - this page cannot say its id
             continue
         if info.get("targetInfo", {}).get("targetId") == target.get("id"):
             return p
+    return None
+
+
+def _find_page(browser, target: dict):
+    pages = [p for ctx in browser.contexts for p in ctx.pages]
+    found = _page_by_id(pages, target)
+    if found is not None:
+        return found
     same = [p for p in pages if _same_url(p.url, target.get("url", ""))]
     if len(same) == 1:
         return same[0]
