@@ -1027,6 +1027,20 @@ class FormFillRunner:
             expected=browser_session.scope(self.settings),
         )
 
+    def close_tab(self, target: dict) -> bool:
+        """Close a job's own tab by its CDP id (spec section 10 item 116), only in the Chrome it was kept in: a tab
+        kept in another generation (Chrome restarted, another instance) is never closed. False when not closed."""
+        self.settings.require_external("close_tab", self.data_dir, self.profile)
+        binding = self.binding or self.ensure_chrome()
+        if not target.get("generation") or target.get("generation") != binding.generation:
+            return False
+        return apply_bridge.close_tab(
+            binding,
+            target,
+            seconds=self.settings.apply.watchdog.read_seconds,
+            expected=browser_session.scope(self.settings),
+        )
+
     def _binding(self) -> browser_session.BrowserBinding:
         if self.binding is None:
             raise InvariantError("The applying Chrome is not started; call ensure_chrome first")
