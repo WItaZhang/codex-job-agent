@@ -136,6 +136,12 @@ class FormFill(_Section):
     network_max_mb: int  # the first page's network record stops growing here (spec 6.2)
 
 
+class OpenAnswers(_Section):
+    """The applicant's open-answer bank (specs/open-answers.md); the file is named in applicant.yaml."""
+
+    max_chars: int = Field(default=8000, gt=0)  # the section the accepted entries make; over it is a problem, never cut
+
+
 class LLM(_Section):
     provider: Literal["host", "fake", "anthropic", "openai_compatible"]
     model: str | None
@@ -160,6 +166,7 @@ class Settings(_Section):
     duplicates: Duplicates
     apply: Apply
     form_fill: FormFill
+    open_answers: OpenAnswers = OpenAnswers()  # optional: older workspace settings lack it
     llm: LLM
     storage: Storage
     runtime: dict | None = None

@@ -117,8 +117,8 @@ cases:
     bank:
       version: 1
       entries:
-        - {id: why-role, type: why_role, question: Why us?, text: First answer., status: accepted, from: SYNTHETIC}
-        - {id: why-role, type: why_role, question: Why this team?, text: Second answer., status: draft}
+        - {id: why-role, type: why_role, question: "Why us?", text: First answer., status: accepted, from: SYNTHETIC}
+        - {id: why-role, type: why_role, question: "Why this team?", text: Second answer., status: draft}
     expect:
       problems: ["entries[1] (why-role): duplicate id 'why-role'"]
 
@@ -127,7 +127,7 @@ cases:
     bank:
       version: 1
       entries:
-        - {id: draft-one, type: about_me, question: Tell us about yourself., text: Not accepted yet., status: draft}
+        - {id: draft-one, type: about_me, question: "Tell us about yourself.", text: Not accepted yet., status: draft}
         - id: retired-one
           type: why_role
           question: Why us?
@@ -153,13 +153,13 @@ cases:
       version: 2
       colour: blue
       entries:
-        - {id: Bad Id, type: why_role, question: Why us?, text: Fine., status: accepted, from: SYNTHETIC}
-        - {id: no-type, type: hobbies, question: Hobbies?, text: Chess., status: accepted, from: SYNTHETIC}
-        - {id: no-from, type: about_me, question: About you?, text: Something., status: accepted}
-        - {id: empty-text, type: about_me, question: About you?, text: "  ", status: draft}
-        - {id: bad-status, type: about_me, question: About you?, text: Something., status: final}
-        - {id: extra, type: about_me, question: About you?, text: Something., status: draft, score: 5}
-        - {id: empty-rejected, type: about_me, question: About you?, text: Something., status: draft, rejected: [""]}
+        - {id: Bad Id, type: why_role, question: "Why us?", text: Fine., status: accepted, from: SYNTHETIC}
+        - {id: no-type, type: hobbies, question: "Hobbies?", text: Chess., status: accepted, from: SYNTHETIC}
+        - {id: no-from, type: about_me, question: "About you?", text: Something., status: accepted}
+        - {id: empty-text, type: about_me, question: "About you?", text: "  ", status: draft}
+        - {id: bad-status, type: about_me, question: "About you?", text: Something., status: final}
+        - {id: extra, type: about_me, question: "About you?", text: Something., status: draft, score: 5}
+        - {id: empty-rejected, type: about_me, question: "About you?", text: Something., status: draft, rejected: [""]}
         - just a string
     expect:
       problems:

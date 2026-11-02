@@ -1,0 +1,57 @@
+# 示例，内容都是编的（synthetic）：复制到 data/local/applicant/open_answers.yaml，再在 applicant.yaml 写
+# open_answers: open_answers.yaml（specs/open-answers.md）。不写这一行时，投递和填表都和原来一样。
+#
+# 这里放你已经定稿的开放题答案（"Why this role?"、"Tell us about yourself"、"Anything else?" 这类）。
+# 填表 agent 拿到 status: accepted 的条目，学你选哪些事实和动机、怎么措辞，再为每个岗位和每道题重新写；
+# 题目相同、也适合这个岗位时才会贴近地复用。它不会因为这些例子添加简历和投递资料里没有的事实，
+# 也不会因此不停下（仲裁协议、SSN、支付、不许用 AI 写、验证码照样停）。
+#
+# 每条：
+#   id            唯一；小写字母、数字、- 和 _
+#   type          题型，只能是：why_role（为什么是这个领域/岗位/公司）、origin（怎么进入这个领域）、
+#                 team_fit（看重什么样的团队或公司）、about_me、challenge、disagreement、proudest_work、
+#                 anything_else，都不是就写 other
+#   question      原题
+#   text          定稿全文，可以多行
+#   status        draft（还没定）、accepted（你接受了，才会给 agent）、retired（不再用，留着记录）
+#   source_words  可选：这条出自你的哪些原话，逐字，任何语言都行；只留底，不给 agent
+#   rejected      可选：你否掉的说法；agent 不用它们，也不用相似的说法
+#   notes         可选：你对这条的说明，会给 agent
+#   from          accepted 必填：这条出自你哪一次的消息或选择
+#   added         可选：日期
+#
+# 不能写联系方式（邮箱、电话、地址、所在城市、个人链接）：代码按 profile.json 检查，写了就不开始投递。
+# 已接受的条目合起来有字数上限（configs/default.yaml 的 open_answers.max_chars），超了会报错、不会截断：
+# 缩短条目，或把旧的改成 retired。
+version: 1
+entries:
+  - id: why-role-ranking
+    type: why_role
+    question: Why do you want to work on search ranking at our company?
+    text: |-
+      Ranking is where I learned that a model is only as good as the question it answers.
+      On my last team I chose which signals to trust before I tuned anything.
+      Your team owns that choice for the whole product, and that is the work I want.
+    status: accepted
+    source_words:
+      - 我喜欢排序，因为它逼我先想清楚到底在优化什么。
+    rejected:
+      - I am passionate about building the future of search.
+    notes: Say what the team owns; never praise the company in general.
+    from: 示例：某天对话里你改定并说"就用这个"
+    added: 2026-11-02
+
+  - id: anything-else-gap
+    type: anything_else
+    question: Is there anything else you would like us to know?
+    text: My resume lists the projects; what it does not show is that I asked to own the unglamorous parts.
+    status: accepted
+    rejected:
+      - I am a fast learner and a team player.
+    from: 示例：某天对话里你选了第 2 个选项
+
+  - id: about-me-draft
+    type: about_me
+    question: Tell us about yourself.
+    text: A draft you have not accepted yet; the agent never sees it.
+    status: draft

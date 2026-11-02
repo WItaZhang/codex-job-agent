@@ -171,6 +171,8 @@ form_fill:                        # 填表模块（specs/form-fill.md；切片�
   watch_interval_seconds: 1       # 后台补录读页的间隔（spec 4.2）
   stuck_after: 3                  # 同一页连续几次 checkpoint("filled") 没换页就让填表 agent 停下（spec 4.2）
   network_max_mb: 30              # 第一页网络记录的上限（spec 6.2）
+open_answers:                     # 开放题答案库（specs/open-answers.md）；文件由 applicant.yaml 的 open_answers 指定
+  max_chars: 8000                 # 已接受的条目注入填表指令的那一段最多多少字符；超了是校验错误，从不截断
 llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null
