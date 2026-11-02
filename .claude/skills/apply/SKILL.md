@@ -53,7 +53,7 @@ description: 从投递清单自主准备求职信并分批投递；默认不抽�
 
 恢复先核查原页面是否已提交；当前名单命中会变为 careful，原 careful 不自动升级。中断结果仍不明确时不启动重投。第三次门槛失败按现有规则计数，不新增自动放弃策略。
 
-**在场重跑清单**（spec 4.10 第 10 条，决定 35）：用户说有空了、要处理清单（"处理验证码的""全部重跑""重跑 3、7"），调用 `prepare_resume(gates=[...]或job_ids=[...], live=true)`：不给岗位就是整份清单，`gates` 按门槛种类筛（captcha、login_issue、sso_required、email_verification）。展示摘要后用准确的 job_ids、summary 和 `live=true` 调 `resume_applying`。
+**在场重跑清单**（spec 4.10 第 10 条，决定 36）：用户说有空了、要处理清单（"处理验证码的""全部重跑""重跑 3、7"），调用 `prepare_resume(gates=[...]或job_ids=[...], live=true)`：不给岗位就是整份清单，`gates` 按门槛种类筛（captcha、login_issue、sso_required、email_verification）。展示摘要后用准确的 job_ids、summary 和 `live=true` 调 `resume_applying`。
 
 - 一次只有一个岗位等用户。轮询 `apply_status()`（等的时候每 20–30 秒一次）；出现 `needs_you` 就马上告诉用户：序号、公司、网站、要做什么（`todo`）、还能等多久，并说可以回答"好了 / 跳过 / 不处理了 / 已投"。
 - 用户的话用 `gate_reply` 转告：好了 → `done`；跳过 → `skip`；不处理了 → `decline`；自己交了 → `submitted`。`decline`、`submitted` 只在用户真的这样说时调用，`user_report` 写定位、不写私人信息。用户说停下就 `stop_applying()`，等待马上结束，岗位留在清单上。

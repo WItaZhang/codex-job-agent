@@ -44,6 +44,7 @@ class Applicant(_Model):
     onsite_ok: list[Line] = []  # where on-site or hybrid jobs are fine; empty: ApplyPilot's single profile city
     relocation: Line | None = None  # the answer to relocation questions; None: ApplyPilot's "cannot relocate"
     chrome_user_data_dir: Path | None = None  # the applicant's own Chrome instance (decision 33); None: dedicated
+    open_answers: Path | None = None  # the open-answer bank (specs/open-answers.md, decision 35); None: no bank
 
     @field_validator("careful_companies")
     @classmethod
@@ -64,6 +65,8 @@ class Applicant(_Model):
             paths.append(self.resume_selection)
         if self.cover_letter_skill:
             paths.append(self.cover_letter_skill / "SKILL.md")
+        if self.open_answers:
+            paths.append(self.open_answers)
         return [str(path) for path in paths if not path.is_file()]
 
 
@@ -103,6 +106,7 @@ def load(data_dir: Path, applicant_dir: str) -> Applicant:
             "cover_letter_context": [resolve(p) for p in applicant.cover_letter_context],
             "apply_agent_read": [resolve(p) for p in applicant.apply_agent_read],
             "chrome_user_data_dir": applicant.chrome_user_data_dir and applicant.chrome_user_data_dir.expanduser(),
+            "open_answers": resolve(applicant.open_answers),
         }
     )
 

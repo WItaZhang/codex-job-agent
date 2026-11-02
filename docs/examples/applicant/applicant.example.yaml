@@ -29,6 +29,10 @@ chrome_user_data_dir: null        # optional: your own separate Chrome data fold
                                   # everyday browsing of that account (docs/usage.md). Not Chrome's default folder.
                                   # Empty: a dedicated empty profile in data/local/browser.
 
+open_answers: null                # optional: your open-answer bank, e.g. open_answers.yaml (see
+                                  # open_answers.example.yaml). Its accepted answers show the filling agent how you
+                                  # answer open questions. Empty: no bank, nothing changes.
+
 apply_agent_read: []              # optional: folders the apply agent may read (read-only) to answer application
                                   # questions, e.g. your knowledge base. Not the root or home folder, not anything
                                   # containing data/local or this profile.

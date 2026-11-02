@@ -155,7 +155,7 @@ apply:                            # 投递（spec 4.10）
     read_seconds: 120             # 代码读一次标签页（读回、接着做前读一眼）最长多久
     interval_seconds: 3           # agent 运行时多久看一次它的进程和投递用的 Chrome
     down_after: 3                 # 连续几次看不到投递用的 Chrome 才算它连不上（一次慢回答不算）
-  gate_wait:                      # 在场重跑等你处理的清单时，每个门槛怎么等你（spec 4.10 第 10 条，§10 第 119、121 条，决定 35）
+  gate_wait:                      # 在场重跑等你处理的清单时，每个门槛怎么等你（spec 4.10 第 10 条，§10 第 119、121 条，决定 36）
     timeout_seconds: 600          # 每次最多等你多久；到时限关掉标签页、留在清单上，算一次没解决的门槛
     poll_seconds: 5               # 多久看一次你的回答、标签页有没有被关掉、页面是不是写着已经交上
     max_waits: 3                  # 一次重跑里同一个岗位最多等你几次；再遇到门槛按到时限算
@@ -175,6 +175,8 @@ form_fill:                        # 填表模块（specs/form-fill.md；切片�
   watch_interval_seconds: 1       # 后台补录读页的间隔（spec 4.2）
   stuck_after: 3                  # 同一页连续几次 checkpoint("filled") 没换页就让填表 agent 停下（spec 4.2）
   network_max_mb: 30              # 第一页网络记录的上限（spec 6.2）
+open_answers:                     # 开放题答案库（specs/open-answers.md）；文件由 applicant.yaml 的 open_answers 指定
+  max_chars: 8000                 # 已接受的条目注入填表指令的那一段最多多少字符；超了是校验错误，从不截断
 llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null

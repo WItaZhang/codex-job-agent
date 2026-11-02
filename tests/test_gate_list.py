@@ -1,4 +1,4 @@
-"""The gate list (spec 4.10 item 10, section 9, section 10 items 116-121; decision 35; samples L1-L15 of
+"""The gate list (spec 4.10 item 10, section 9, section 10 items 116-121; decision 36; samples L1-L15 of
 specs/gate-list.plan.md): an unattended step records a job held at a gate on the list and closes its tab; when the user
 has time, the list is re-run live, one job at a time, the user clearing each gate in its tab, and each job's outcome is
 recorded again. All data is SYNTHETIC; nothing here starts Chrome or Claude Code, and the clock and the waits are
