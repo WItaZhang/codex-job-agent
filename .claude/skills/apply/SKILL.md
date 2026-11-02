@@ -27,7 +27,7 @@ description: 从投递清单自主准备求职信并分批投递；默认不抽�
 
 ## 1. 检查设置与已有运行
 
-先 `apply_status()`：其他会话在运行时不争用 Chrome；报告 notice、held 和可能已提交结果。`next` 存在且条件仍满足时可自主继续。
+先 `apply_status()`：其他会话在运行时不争用 Chrome；报告 notice、held 和可能已提交结果。`held` 就是等你处理的清单：按 `held_count` 报每种门槛的数量（例如"清单上 19 个验证码、9 个邮箱验证码、3 个要登录"），告诉用户有空时可以在场重跑（第 4 节）。`next` 存在且条件仍满足时可自主继续。
 
 再 `get_apply_setup()`：缺少资料、标准答案冲突、工具缺失时报告具体问题。已有资料可用于自主选择简历；缺少的事实不能从意图猜出。申请地点和搬家回答仍来自 applicant.yaml。Gmail 授权或人工验证属于实际能力问题。
 
@@ -39,7 +39,7 @@ description: 从投递清单自主准备求职信并分批投递；默认不抽�
 
 ## 3. 执行与收尾
 
-1. 展示 summary，直接 `start_applying(batch_id, summary)`，不再等待项目级用户批准。返回的 reminder、warning 原样告知；运行时不与投递 Chrome 争用。
+1. 展示 summary，直接 `start_applying(batch_id, summary)`，不再等待项目级用户批准。返回的 reminder、warning 原样告知；运行时不与投递 Chrome 争用。用户说了自己不在、要它一直投（"我出门了""你自己一直跑"），加 `unattended=true`：门槛岗位照样进清单，标签页由代码关掉；用户没这样说就不加（标签页留着）。不凭猜测判断用户在不在。
 2. 每隔两三分钟 `apply_status()`；输出进度、quiet_seconds、chrome_warning。用户叫停立即 `stop_applying()`，继续轮询至结束；自动提交中的岗位按原有规则收尾，不强杀造成提交不明。
 3. 优先报告 held、waiting、失败和报告路径，再列已投和 checklist。arbitration、ssn_required、payment_required、screening_requires_candidate_written_answers 保留停止规则；stalled 是待修复失败。没有实际解决的门槛不自动放弃、不盲目重试。
 4. waiting 表示已填好，不能当已提交。保护公司留给用户本人确认并提交；显式只填运行也保持不提交。
@@ -52,6 +52,13 @@ description: 从投递清单自主准备求职信并分批投递；默认不抽�
 实际门槛解决的用户消息或页面证据明确后，调用 `prepare_resume(job_ids)`、再使用其准确 job_ids/summary 调 `resume_applying`。不把“好了”作为授权口令。problems 未解决时跳过受影响岗位并报告，不关闭无关页面。
 
 恢复先核查原页面是否已提交；当前名单命中会变为 careful，原 careful 不自动升级。中断结果仍不明确时不启动重投。第三次门槛失败按现有规则计数，不新增自动放弃策略。
+
+**在场重跑清单**（spec 4.10 第 10 条，决定 35）：用户说有空了、要处理清单（"处理验证码的""全部重跑""重跑 3、7"），调用 `prepare_resume(gates=[...]或job_ids=[...], live=true)`：不给岗位就是整份清单，`gates` 按门槛种类筛（captcha、login_issue、sso_required、email_verification）。展示摘要后用准确的 job_ids、summary 和 `live=true` 调 `resume_applying`。
+
+- 一次只有一个岗位等用户。轮询 `apply_status()`（等的时候每 20–30 秒一次）；出现 `needs_you` 就马上告诉用户：序号、公司、网站、要做什么（`todo`）、还能等多久，并说可以回答"好了 / 跳过 / 不处理了 / 已投"。
+- 用户的话用 `gate_reply` 转告：好了 → `done`；跳过 → `skip`；不处理了 → `decline`；自己交了 → `submitted`。`decline`、`submitted` 只在用户真的这样说时调用，`user_report` 写定位、不写私人信息。用户说停下就 `stop_applying()`，等待马上结束，岗位留在清单上。
+- 不替用户回答"好了"，也不自己去处理门槛；验证码永远由用户本人在页面上做。名单公司"好了"之后仍由填表模块重填、停在提交前，由用户自己交。
+- 到时限（默认 10 分钟）的岗位回到清单，标签页关掉；同一岗位第三次没处理完算一次允许的失败。结束后报告每个岗位的结果：交上了、填好等你检查、没投成（原因）、回到清单、不处理了。
 
 需要从头重试且明确未提交时，按现有状态工具恢复 pending 后 `prepare_apply_batch(only=[...])`；only 不再意味着只填。明确要求只填则加 `stop_before_submit=true`。公司保护每次重查，不能绕过。
 

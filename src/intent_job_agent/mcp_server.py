@@ -77,6 +77,13 @@ Applying (project skill /apply):
   Never release autonomously. Old careful batches stay fill-only; observed readdition restores protection.
 - CAPTCHAs are never solved. Login/SSO/missing codes remain actual capability gates. Resume with evidence the gate
   is resolved via prepare_resume/resume_applying; no mandatory approval phrase. No automatic abandonment.
+- Held jobs are the gate list (apply_status held, held_count); report its counts by gate when /apply opens. When
+  the user says they are away and it should keep going, pass unattended=true to start_applying (a gated job's tab
+  is closed, the job stays on the list); otherwise leave it out. When the user says they have time now, re-run the
+  list live: prepare_resume(gates=[...] or job_ids, live=true), then resume_applying with its exact job_ids,
+  summary and live=true. One job at a time waits at its gate (apply_status needs_you): tell the user which job,
+  site and what to do; pass on what they say with gate_reply (done, skip; decline and submitted only on their actual
+  words). stop_applying ends a wait at once.
 - mark_applications defaults to historical user-report semantics: call that path only on actual user messages.
   Coordinator pending retries explicitly pass actor="delegated_coordinator"; never claim user success or clear
   unresolved interrupted/maybe_submitted. Actor and user_report cannot authenticate a human.
