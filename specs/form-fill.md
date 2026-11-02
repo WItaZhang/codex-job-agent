@@ -402,6 +402,7 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 所选简历的文本和 PDF。
   - 求职信的文本和 PDF。
   - 要求清单（`checklist.yaml`）的全部条目，供筛选题和选填栏作答时遵守（5.1）。评审仍然独立按它检查（4.5）。
+  - 开放题答案库（`applicant.yaml` 配置了 `open_answers` 时）：申请人已接受的开放题例子，接在要求清单后面，规则见 [open-answers.md](open-answers.md) 3.3、4.1（总规格决定 35）。
   - 招聘网站的邮箱和密码，用于注册和登录（spec 4.10 第 5 条）。
   - 本模块的规则（5.1–5.5）。
 - **上传的文件**：

@@ -25,10 +25,11 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict
 
-from .. import apply_bridge, browser_session, watchdog
+from .. import apply_bridge, browser_session, open_answers, watchdog
 from ..applicant import Applicant
 from ..config import Settings
 from ..domain import InvariantError
+from ..open_answers import Bank as OpenAnswerBank
 from . import checkpoint, readback, recording
 from .columns import mask_snapshot
 from .inputs import load_answers, load_checklist, load_list, profile_field_paths
@@ -133,6 +134,7 @@ class Inputs:
     answers: dict[str, AnswerEntry]  # references resolved, contact entries kept as references
     checklist: tuple[ChecklistItem, ...]
     redactor: Redactor
+    open_answers: OpenAnswerBank | None = None  # applicant.yaml's open-answer bank, checked; None: not configured
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,7 @@ class RunContext:
     checklist: tuple[ChecklistItem, ...]
     redactor: Redactor
     runner: "FormFillRunner"  # or a stand-in with the same four methods
+    open_answers: OpenAnswerBank | None = None  # added after the checklist (specs/open-answers.md 3.3)
 
 
 # --- inputs -----------------------------------------------------------------------------------------------------
@@ -194,9 +197,10 @@ def resolve(answers: dict[str, AnswerEntry], profile: dict, values: dict[str, st
 
 def load_inputs(list_path: str | Path, applicant: Applicant, settings: Settings) -> Inputs:
     """Every input checked before anything starts (specs/form-fill.md 2, 4.1). One error lists the problems of
-    every file; contact values are never echoed."""
+    every file; contact values are never echoed. The open-answer bank is checked too when applicant.yaml names
+    one (specs/open-answers.md 4.2)."""
     problems: list[str] = []
-    jobs = answers = checklist = redactor = None
+    jobs = answers = checklist = redactor = bank = None
     try:
         jobs = load_list(Path(list_path).expanduser(), {resume.id for resume in applicant.resumes})
     except InvariantError as error:
@@ -235,10 +239,15 @@ def load_inputs(list_path: str | Path, applicant: Applicant, settings: Settings)
             )
         except InvariantError as error:
             problems.append(str(error))
+    if applicant.open_answers is not None:
+        try:
+            bank = open_answers.load(applicant.open_answers, redactor, settings.open_answers.max_chars)
+        except InvariantError as error:
+            problems.append(str(error))
     if problems:
         message = "The form-fill run was not started:\n" + "\n".join(problems)
         raise InvariantError(redactor.mask(message) if redactor else message)  # an error may quote a contact value
-    return Inputs(jobs, answers, checklist, redactor)
+    return Inputs(jobs, answers, checklist, redactor, bank)
 
 
 # --- instructions -----------------------------------------------------------------------------------------------
@@ -270,9 +279,15 @@ def _sheet_line(key: str, entry: AnswerEntry) -> str:
     return f"{head} -> {entry.answer}" + (f" ({'; '.join(extras)})" if extras else "")
 
 
-def instructions(answers: dict[str, AnswerEntry], checklist: tuple[ChecklistItem, ...] | list) -> str:
-    """The answer sheet and the checklist, appended to the filling prompt. Contact entries are left out (the prompt
-    already carries the profile's contact details). from_profile / from_applicant must be resolved first."""
+def instructions(
+    answers: dict[str, AnswerEntry],
+    checklist: tuple[ChecklistItem, ...] | list,
+    bank: OpenAnswerBank | None = None,
+) -> str:
+    """The answer sheet and the checklist, appended to the filling prompt, then the applicant's accepted open
+    answers when there are any (specs/open-answers.md 3.3; without them the text is unchanged). Contact entries are
+    left out (the prompt already carries the profile's contact details). from_profile / from_applicant must be
+    resolved first."""
     unresolved = [
         key
         for key, entry in answers.items()
@@ -293,7 +308,8 @@ def instructions(answers: dict[str, AnswerEntry], checklist: tuple[ChecklistItem
         "Follow each rule when you answer screening questions, open questions and optional fields:",
         *([f"- {item.id}: {item.rule}" for item in checklist] or ["- (none)"]),
     ]
-    return "\n".join(lines)
+    examples = open_answers.section(bank)
+    return "\n".join(lines) + (f"\n\n{examples}" if examples else "")
 
 
 def run_rules(entry: ListEntry) -> str:
@@ -512,7 +528,9 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
             job_spec(entry, ctx.applicant, job_dir),
             log_path=job_dir / LOG_FILE,
             mask=ctx.redactor.mask,
-            extra_prompt=instructions(ctx.answers, ctx.checklist) + run_rules(entry) + CHECKPOINT_RULES,
+            extra_prompt=instructions(ctx.answers, ctx.checklist, ctx.open_answers)
+            + run_rules(entry)
+            + CHECKPOINT_RULES,
             gmail=True,  # search and read only: send_email is in form_fill.disallowed_tools (spec section 10 item 105)
             extra_disallowed=tuple(ctx.settings.form_fill.disallowed_tools),
             extra_servers={checkpoint.SERVER_NAME: checkpoint.server_entry(config)},

@@ -131,6 +131,7 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
      不要写 SSN 和银行卡。
    - `answers.yaml`、`checklist.yaml`：标准答案和要求清单，参照 [示例](../docs/examples/applicant/)。两步都照它们答题，自动提交的也一样；
      工作许可、期望薪资和 EEO 要和 `profile.json` 一致，不一致就不开始投递。
+   - 可选 `open_answers`：开放题答案库（见下面"开放题答案库"一节）。
 2. 本机需要：Chrome、Node.js（`npx`）、Claude Code 命令行。可选：Gmail MCP 授权（读邮箱验证码；填表 agent 只能搜索和读，不能发信）。
 3. 输入 `/apply`：
    - 先给这一批写求职信（子 agent 写，代码校验，打印成一页 PDF）。
@@ -149,6 +150,22 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
    - 不要求项目逐步批准；仲裁协议、SSN、银行卡或申请费，agent 会停下并告诉你。结束时给一张检查单：每个岗位打开过的其他网站、发出的邮件。
 4. 投递使用工作区自己的专属 Chrome profile：首次新建空目录，同工作区后续复用，需在该浏览器重新登录。不会复制日常 Chrome 资料，不接管已有固定 9222 端口。自动提交撤不回，网站可能封号；专属 profile 不是凭据加密或恶意同用户进程隔离保证。
 5. 也可以改用**你自己的一个独立 Chrome 实例**，日常浏览和投递共用它的登录状态（见下一节）。
+
+### 开放题答案库（可选）
+
+"Why this role?"、"Tell us about yourself"、"Anything else?" 这类开放题，agent 只有规则时写不出你的口吻，也不知道简历里没有的动机。
+把你已经定稿的答案放进答案库，agent 就照着学（[specs/open-answers.md](../specs/open-answers.md)）：
+
+1. 参照 [示例](../docs/examples/applicant/open_answers.example.yaml) 写 `data/local/applicant/open_answers.yaml`：每条有题型、原题、定稿、状态，
+   可以加你的原话、你否掉的说法和说明。只有 `status: accepted` 的会给 agent，`from` 写这条出自你哪次的消息或选择。
+2. `applicant.yaml` 写 `open_answers: open_answers.yaml`。
+3. 之后自动提交和填表模块都会在标准答案和要求清单后面带上这些例子：agent 学你选哪些事实和动机、怎么措辞，为每个岗位和每道题重新写，
+   不添加简历和投递资料里没有的事实，也不会因此跳过任何停下的规则。
+
+- 答案库里不能有联系方式（邮箱、电话、地址、所在城市、个人链接），代码按 `profile.json` 检查。
+- 已接受的条目合起来有字数上限（`configs/default.yaml` 的 `open_answers.max_chars`）。超了会报错，不会悄悄截断。
+- 写错了（格式不对、id 重复、超了上限），`get_apply_setup` 的 `answer_sheet_problems` 会写出来，投递和填表都不开始。
+- 答案库只给填表用的模型，不给打标签和分析用的模型，也不进数据库。
 
 ### 投递和日常浏览共用一个 Chrome（可选）
 

@@ -29,7 +29,18 @@ import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import applicant as applicant_files
-from . import apply_bridge, apply_fill, apply_list, applypilot_bridge, avature, duplicates, funnel, notify, watchdog
+from . import (
+    apply_bridge,
+    apply_fill,
+    apply_list,
+    applypilot_bridge,
+    avature,
+    duplicates,
+    funnel,
+    notify,
+    open_answers,
+    watchdog,
+)
 from .boards import BoardSpec, load_boards
 from .changes import (
     AddEntry,
@@ -1055,16 +1066,22 @@ class Toolbox:
         except InvariantError as error:
             return {"ready": False, "missing": [str(error)], "folder": str(folder), "programs": programs}
         missing = applicant.missing_files() + applicant_files.read_dir_problems(applicant, self.data_dir)
-        sheet_problems, conflicts = [], []
+        sheet_problems, conflicts, bank = [], [], {}
         if not missing:
             try:
                 conflicts = self._profile_conflicts(applicant, self._answer_sheet(applicant))
             except InvariantError as error:
                 sheet_problems.append(str(error))
+        if applicant.open_answers is not None:  # only the file and the count, never the text (open-answers 4.3)
+            bank = {"open_answers": {"file": str(applicant.open_answers), "accepted": None}}
+            if not missing and not sheet_problems:
+                bank["open_answers"]["accepted"] = len(self._open_answers(applicant, None).accepted)
         return {
             "ready": not (missing or sheet_problems or conflicts),
             "missing": missing,
-            "answer_sheet_problems": sheet_problems,  # answers.yaml or checklist.yaml (form-fill spec 2.3, 2.4)
+            # answers.yaml, checklist.yaml or the open-answer bank (form-fill spec 2.3, 2.4; open-answers spec 4.2)
+            "answer_sheet_problems": sheet_problems,
+            **bank,
             "profile_conflicts": conflicts,  # field names only (spec section 10 item 92)
             "folder": str(folder),
             "resumes": [{"id": r.id, "use_for": r.use_for} for r in applicant.resumes],
@@ -1439,8 +1456,9 @@ class Toolbox:
         return path
 
     def _answer_sheet(self, applicant) -> dict:
-        """answers.yaml resolved as for a run (form-fill spec 2.3), with checklist.yaml checked too. Errors are
-        masked: a contact value written into answers.yaml by mistake is never echoed."""
+        """answers.yaml resolved as for a run (form-fill spec 2.3), with checklist.yaml and the open-answer bank
+        (specs/open-answers.md 4.2) checked too. Errors are masked: a contact value written into answers.yaml by
+        mistake is never echoed."""
         try:
             fields = form_fill_inputs.profile_field_paths(applicant.profile)
             profile = json.loads(applicant.profile.read_text(encoding="utf-8"))
@@ -1451,9 +1469,14 @@ class Toolbox:
         try:
             sheet = form_fill_inputs.load_answers(folder / self.settings.form_fill.answers_file, fields, set(values))
             form_fill_inputs.load_checklist(folder / self.settings.form_fill.checklist_file)
+            if applicant.open_answers is not None:
+                self._open_answers(applicant, Redactor.from_profile(profile))
             return form_fill.resolve(sheet, profile, values)
         except InvariantError as error:
             raise InvariantError(Redactor.from_profile(profile).mask(str(error))) from None
+
+    def _open_answers(self, applicant, redactor: Redactor | None) -> open_answers.Bank:
+        return open_answers.load(applicant.open_answers, redactor, self.settings.open_answers.max_chars)
 
     def _profile_conflicts(self, applicant, answers) -> list[str]:
         """profile.json (read by code only, never returned) against answers.yaml on the one-to-one facts."""
@@ -1530,7 +1553,7 @@ class Toolbox:
         data["jobs"] = [actual.get(job["job_id"], job) for job in data["jobs"]]
         list_path = self._step_list(batch_id, phase, jobs)
         inputs = self._checked_inputs(applicant, list_path)
-        sheet = form_fill.instructions(inputs.answers, inputs.checklist)
+        sheet = form_fill.instructions(inputs.answers, inputs.checklist, inputs.open_answers)
         filled = {job["job_id"] for job in jobs if job["mode"] in apply_fill.FORM_FILL_MODES}
         specs = [
             self._apply_spec(job["job_id"], "stop")
@@ -1697,6 +1720,7 @@ class Toolbox:
             checklist=inputs.checklist,
             redactor=inputs.redactor,
             runner=self._browser(applicant),
+            open_answers=inputs.open_answers,
         )
 
     def _checked_inputs(self, applicant, list_path: Path):
@@ -2455,7 +2479,7 @@ class Toolbox:
         stamp = form_fill.new_run_id()
         list_path = self._step_list(None, "resume", items, stem=f"resume-{stamp}")
         inputs = self._checked_inputs(applicant, list_path)
-        sheet = form_fill.instructions(inputs.answers, inputs.checklist)
+        sheet = form_fill.instructions(inputs.answers, inputs.checklist, inputs.open_answers)
         entries = {entry.id: entry for entry in inputs.jobs.jobs}
         refill = [item["job_id"] for item in items if item["mode"] != "submit"]
         ctx = None
@@ -2687,6 +2711,7 @@ class Toolbox:
             or form_fill.FormFillRunner(
                 self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
             ),
+            open_answers=inputs.open_answers,
         )
         try:  # only a reminder (decision 23); it never starts Chrome, so other tool calls do not wait
             tabs = ctx.runner.open_tabs()
