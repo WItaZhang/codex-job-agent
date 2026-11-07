@@ -9,13 +9,19 @@ redactor (the applicant's own values from profile.json plus anything shaped like
 The bank goes only to the filling agents: never to the tagging or analysis models, and never into the database.
 """
 
+import os
+import re
+import uuid
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from .domain import InvariantError
+from .form_fill.compare import HIDDEN
 from .form_fill.inputs import _fail, _read_yaml, _text, _TextLoader, _top, _validate
-from .form_fill.redact import KINDS, Redactor
+from .form_fill.redact import FIELD_PLACEHOLDER, KINDS, PLACEHOLDER, Redactor
 
 FILE = "open_answers.yaml"
 # The closed set of question types, in the order the section lists them (spec 3.2). `other` comes last.
@@ -179,3 +185,119 @@ def load(path: str | Path, redactor: Redactor | None, max_chars: int) -> Bank:
         )
     _fail(path, problems)
     return bank
+
+
+# --- adding an entry (slice 3: specs/open-answers.md 4.6 item 5) ---------------------------------------------------
+
+# What masking leaves in a text read from a page: a final that holds one had contact details in it.
+MASK_MARKS = tuple(dict.fromkeys((*PLACEHOLDER.values(), *FIELD_PLACEHOLDER.values(), HIDDEN)))
+_ENTRIES = re.compile(r"^entries\s*:\s*(\[\s*\])?\s*(#.*)?$")
+_TOP_KEY = re.compile(r"^[^\s#-][^:]*:")
+_ITEM = re.compile(r"^(\s*)- ")
+
+
+class Rejected(InvariantError):
+    """An entry that cannot go into the bank as it is: it holds contact details (`contact`), or the section would be
+    over the budget (`budget`, with the size and the limit). Its text is never changed to make it fit."""
+
+    def __init__(self, kind: Literal["contact", "budget"], size: int | None = None, max_chars: int | None = None):
+        self.kind, self.size, self.max = kind, size, max_chars
+        if kind == "contact":
+            super().__init__("the entry contains contact details; it was not added (the text is never changed)")
+        else:
+            super().__init__(
+                f"with the entry the OPEN ANSWER EXAMPLES section would be {size} characters, over "
+                f"open_answers.max_chars {max_chars}; it was not added (the section is never cut)"
+            )
+
+
+class _Dumper(yaml.SafeDumper):
+    """Writes a multi-line text as a literal block, as the applicant writes one."""
+
+
+_Dumper.add_representer(
+    str,
+    lambda dumper, value: dumper.represent_scalar("tag:yaml.org,2002:str", value, style="|" if "\n" in value else None),
+)
+
+
+def _snippet(entry: Entry) -> list[str]:
+    data = {"id": entry.id, "type": entry.type, "question": entry.question, "text": entry.text, "status": entry.status}
+    if entry.source_words:
+        data["source_words"] = list(entry.source_words)
+    if entry.rejected:
+        data["rejected"] = list(entry.rejected)
+    if entry.notes:
+        data["notes"] = entry.notes
+    if entry.from_:
+        data["from"] = entry.from_
+    if entry.added:
+        data["added"] = entry.added
+    dumped = yaml.dump(
+        [data], Dumper=_Dumper, allow_unicode=True, sort_keys=False, default_flow_style=False, width=4096
+    )
+    return dumped.splitlines()
+
+
+def _appended(text: str, snippet: list[str]) -> str:
+    """The file's text with one more item at the end of `entries`: every line already there stays as it is."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if _ENTRIES.match(line)), None)
+    if start is None:
+        raise InvariantError("entries: is not a top-level line of its own; nothing was written")
+    end = next(
+        (i for i in range(start + 1, len(lines)) if _TOP_KEY.match(lines[i]) or lines[i].startswith(("---", "..."))),
+        len(lines),
+    )
+    if _ENTRIES.match(lines[start]).group(1):  # entries: []
+        lines[start], indent = "entries:", "  "
+    else:
+        found = next((m for m in map(_ITEM.match, lines[start + 1 : end]) if m), None)
+        indent = found.group(1) if found else "  "
+    while end > start + 1 and not lines[end - 1].strip():  # after the last item, before blank lines that follow it
+        end -= 1
+    block = [f"{indent}{line}" for line in snippet]
+    if lines[end - 1].strip() and not _ENTRIES.match(lines[end - 1]):
+        block = ["", *block]  # a blank line between entries, as the example file has
+    lines[end:end] = block
+    return "\n".join(lines) + "\n"
+
+
+def add_entry(path: str | Path, entry: dict, redactor: Redactor | None, max_chars: int) -> Entry:
+    """The one way code writes into the bank (4.6 item 5). The bank as it is must pass its checks (4.2); the new
+    entry must have no contact details (the redactor's, and no mark masking left) and keep the section within the
+    budget, else Rejected and nothing is written. Its id gets -2, -3 ... when taken. It is appended at the end of
+    `entries`, every line already in the file kept; the result is written to a temporary file and read back, and
+    only when it holds exactly the old entries and the new one does it replace the file."""
+    path = Path(path)
+    bank = load(path, redactor, max_chars)
+    taken, new_id, n = {e.id for e in bank.entries}, str(entry.get("id", "")), 1
+    while new_id in taken:
+        n += 1
+        new_id = f"{entry['id']}-{n}"
+    try:
+        new = Entry.model_validate({**entry, "id": new_id})
+    except ValidationError as error:
+        fields = sorted({".".join(map(str, e["loc"])) for e in error.errors()})
+        raise InvariantError(f"the new entry is not valid ({', '.join(fields)}); nothing was written") from None
+    texts = [str(getattr(new, name) or "") for name in ("question", "text", "notes", "from_")]
+    texts += [*new.source_words, *new.rejected]
+    contact = bool(redactor is not None and _contact_problems("new", new, redactor))
+    if contact or any(mark in text for text in texts for mark in MASK_MARKS):
+        raise Rejected("contact")
+    size = len(section(Bank(entries=(*bank.entries, new))))
+    if size > max_chars:
+        raise Rejected("budget", size, max_chars)
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        temp.write_text(_appended(path.read_text(encoding="utf-8"), _snippet(new)), encoding="utf-8")
+        try:
+            again = load(temp, redactor, max_chars)
+        except InvariantError:
+            again = None
+        if again is None or again.entries != (*bank.entries, new):
+            raise InvariantError(f"{path}: the entry could not be appended without changing the file; nothing written")
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+    return new

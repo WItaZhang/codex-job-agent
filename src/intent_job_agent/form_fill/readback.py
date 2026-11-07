@@ -5,6 +5,7 @@ Nothing here navigates, clicks, types or closes a tab. Everything is generic: no
 
 import json
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1102,9 +1103,157 @@ def _playwright(holder: dict):
         yield p
 
 
+def _leave_dialog(dialog) -> None:
+    """A dialog listener that does nothing: the dialog stays for the person or the agent it is for."""
+
+
+def _default_downloads(browser) -> None:
+    """Give downloads back to Chrome, right after connecting. Playwright's connect_over_cdp points the default
+    context's downloads at its own artifacts folder (Browser.setDownloadBehavior allowAndName), so a file the user
+    downloads meanwhile would land there under a GUID name, hidden, and stay (form-fill decision 41)."""
+    session = browser.new_browser_cdp_session()
+    try:
+        session.send("Browser.setDownloadBehavior", {"behavior": "default"})
+    finally:
+        session.detach()
+
+
+@contextmanager
+def _connected(holder: dict, binding, expected):
+    """A read-only connection to the applying Chrome for a glance at a tab. Every context gets a dialog listener that
+    does nothing first: Playwright dismisses the dialogs no one listens to (a confirm cancelled, a beforeunload
+    accepted), and a glance happens while the user or an agent may be answering one (form-fill decision 40; the
+    checkpoint service does the same). Downloads go back to Chrome's own. Leaving drops the connection; the browser
+    and its tabs stay."""
+    with _playwright(holder) as p:
+        browser = browser_session.connect(p, binding, expected=expected)
+        for context in browser.contexts:
+            context.on("dialog", _leave_dialog)
+        _default_downloads(browser)
+        yield browser
+
+
+class WatchReader:
+    """One read-only connection to the applying Chrome, kept for a whole watch of filled tabs (specs/open-answers.md
+    4.6 item 2; open-answers decision 8): a new driver and an attach to every tab on each read cost about a core for a
+    handful of tabs, one connection about a tenth of one. Playwright's sync API is thread-affine, so the reader lives
+    in the thread that made it, which calls every method.
+
+    - Every context gets the do-nothing dialog listener, contexts that appear later too, and downloads go back to
+      Chrome's own right after connecting.
+    - Pages are kept by CDP id; only pages not seen before are asked for theirs, when a tab is not found.
+    - A read that takes longer than `seconds` (a dialog left open holds it) kills this connection's driver, so the
+      read fails at once; the connection is dropped and the next poll connects again.
+    - `poll()` checks the owner once per poll without connecting again. `disconnect()` stops the driver: the browser and
+      its tabs stay. It never clicks, types, navigates or closes anything."""
+
+    def __init__(self, binding, *, expected, seconds: float = READ_SECONDS):
+        self.binding, self.expected, self.seconds = binding, expected, seconds
+        self.connects = 0
+        self._pw = None
+        self._browser = None
+        self._drivers: set = set()
+        self._ids: list[tuple] = []  # (page, CDP target id) of the pages asked so far
+        self._quiet: list = []  # the contexts that have the do-nothing dialog listener
+        self._broken = False
+        self._hung = False
+
+    def poll(self) -> None:
+        """Once per poll, before its reads: the owner is checked again (BrowserIdentityLost when it changed), and a
+        connection a hang or a drop broke is let go, so the next read connects again."""
+        browser_session.validate_owner(self.binding, expected=self.expected)
+        if self._broken or (self._browser is not None and not self._browser.is_connected()):
+            self.disconnect()
+
+    def read(self, target: dict) -> tuple[PageState, Snapshot]:
+        """(where the page stands, its fields not masked yet) for one open tab, read only."""
+        if self._broken:
+            raise ReadbackError("the connection broke in this poll; the next poll connects again")
+        if self._browser is None:
+            self._connect()
+        self._hung = False
+        timer = threading.Timer(self.seconds, self._kill)
+        timer.daemon = True
+        timer.start()
+        try:
+            self._listen()
+            raw = _extract(self._page(target))
+        except Exception as error:
+            if self._hung or not self._browser.is_connected():
+                self._broken = True
+            if self._hung:
+                raise ReadbackError(f"读标签页 {self.seconds:g} 秒没有回应，已断开，下一轮重新连") from error
+            raise
+        finally:
+            timer.cancel()
+        if self._hung:  # _extract keeps a frame it could not read as an error: what came back is not the page
+            self._broken = True
+            raise ReadbackError(f"读标签页 {self.seconds:g} 秒没有回应，已断开，下一轮重新连")
+        read_at = datetime.now().isoformat(timespec="seconds")
+        return page_state(raw), snapshot(raw, tab=str(target.get("id", "")), read_at=read_at)
+
+    def disconnect(self) -> None:
+        pw, self._pw, self._browser = self._pw, None, None
+        self._ids, self._quiet, self._drivers = [], [], set()
+        self._broken = self._hung = False
+        if pw is not None:
+            try:
+                pw.stop()  # drops the CDP connection; browser.close() is never called
+            except Exception:  # noqa: BLE001 - its driver may be gone already (a hang)
+                pass
+
+    def _connect(self) -> None:
+        from playwright.sync_api import sync_playwright
+
+        before = watchdog.children()
+        self._pw = sync_playwright().start()
+        self._drivers = watchdog.own_driver(self._pw, before)
+        try:
+            self._browser = browser_session.connect(self._pw, self.binding, expected=self.expected)
+            self._listen()
+            _default_downloads(self._browser)
+        except BaseException:
+            self.disconnect()
+            raise
+        self.connects += 1
+
+    def _kill(self) -> None:
+        self._hung = True
+        watchdog.kill_drivers(self._drivers)
+
+    def _listen(self) -> None:
+        for context in self._browser.contexts:
+            if not any(context is known for known in self._quiet):
+                context.on("dialog", _leave_dialog)
+                self._quiet.append(context)
+
+    def _page(self, target: dict):
+        tab = str(target.get("id"))
+        pages = [page for context in self._browser.contexts for page in context.pages if not page.is_closed()]
+        self._ids = [(page, tid) for page, tid in self._ids if any(page is p for p in pages)]
+        found = next((page for page, tid in self._ids if tid == tab), None)
+        if found is not None:
+            return found
+        for page in pages:  # the tab list changed: only the pages not asked before are asked for their id
+            if any(page is known for known, _ in self._ids):
+                continue
+            try:
+                session = page.context.new_cdp_session(page)
+                try:
+                    tid = session.send("Target.getTargetInfo")["targetInfo"]["targetId"]
+                finally:
+                    session.detach()
+            except Exception:  # noqa: BLE001 - a page that went away
+                continue
+            self._ids.append((page, tid))
+            if tid == tab:
+                return page
+        raise ReadbackError("job tab not found in the browser")
+
+
 def _glance(holder: dict, binding, target: dict, expected) -> dict:
-    with _playwright(holder) as p:  # leaving it drops the CDP connection; the browser and its tabs stay
-        return _extract(_find_page(browser_session.connect(p, binding, expected=expected), target))
+    with _connected(holder, binding, expected) as browser:
+        return _extract(_find_page(browser, target))
 
 
 def tab_state(binding, target: dict, seconds: float = READ_SECONDS, *, expected) -> PageState:

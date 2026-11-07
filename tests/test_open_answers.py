@@ -143,9 +143,9 @@ def test_the_question_types_are_a_closed_set_with_other_last():
 
 def test_the_budget_is_in_the_config():
     raw = yaml.safe_load((ROOT / "configs/default.yaml").read_text(encoding="utf-8"))
-    assert raw["open_answers"]["max_chars"] == BUDGET == 8000
+    assert raw["open_answers"]["max_chars"] == BUDGET == 16000
     old = {key: value for key, value in raw.items() if key != "open_answers"}  # an older workspace's settings
-    assert Settings.model_validate(old).open_answers.max_chars == 8000
+    assert Settings.model_validate(old).open_answers.max_chars == 16000
 
 
 def test_the_example_bank_loads():

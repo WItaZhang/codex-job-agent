@@ -1,0 +1,30 @@
+# SYNTHETIC test data for open-answers slice 3 (specs/open-answers.samples.md, P1-P3 and P13). The applicant
+# (Sam Example), the job and every answer are made up; nothing here comes from a real applicant or knowledge base.
+synthetic: true
+question: Why do you want to join Acme Robotics?
+draft: |-
+  I want to join Acme Robotics because I enjoy building machine learning systems.
+  My experience with ranking models fits the team's work on search.
+cases:
+  - id: P1
+    final: "  I want to join Acme Robotics because I enjoy building machine learning systems.\n\n  My experience with ranking   models fits the team's work on search.  "
+    kind: unchanged
+  - id: P2
+    final: |-
+      I want to join Acme Robotics because I enjoy building reliable machine learning systems.
+      My experience with ranking models fits the team's work on search.
+    kind: edited
+  - id: P3
+    final: |-
+      Search quality is the problem I keep coming back to.
+      At my last internship I owned the offline evaluation set, and I want that responsibility here.
+    kind: rewritten
+  - id: empty
+    final: ""
+    kind: rewritten
+anything_else_draft: My resume lists the projects I worked on.
+own_words_en: Ranking taught me to decide what I am optimizing before I tune anything.
+own_words_zh: 我想做搜索排序，因为它逼我先想清楚到底在优化什么。
+renderings:
+  - I want to work on search ranking because it makes me decide first what I am really optimizing.
+  - Search ranking draws me because it forces me to be clear about what I am optimizing before anything else.

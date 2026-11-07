@@ -176,7 +176,15 @@ form_fill:                        # 填表模块（specs/form-fill.md；切片�
   stuck_after: 3                  # 同一页连续几次 checkpoint("filled") 没换页就让填表 agent 停下（spec 4.2）
   network_max_mb: 30              # 第一页网络记录的上限（spec 6.2）
 open_answers:                     # 开放题答案库（specs/open-answers.md）；文件由 applicant.yaml 的 open_answers 指定
-  max_chars: 8000                 # 已接受的条目注入填表指令的那一段最多多少字符；超了是校验错误，从不截断
+  max_chars: 16000                # 已接受的条目注入填表指令的那一段最多多少字符；超了是校验错误，从不截断
+  pairs:                          # 草稿/定稿对（specs/open-answers.md 4.6）
+    dir: open-answers/pairs       # 每对一个 JSON 文件，位于 storage.data_dir 下（git 忽略）
+    rewritten_above: 0.5          # 改掉草稿的比例超过它算"重写"，不超过算"改过"；暂定，等有了真实的对再定（第 6 节第 3 问）
+    ask_reason_above: 0.5         # 改掉的比例超过它就问一个原因选择题；暂定，默认就是重写的那些
+  watch:                          # 运行结束后只读地看着填好的标签页，读回申请人的定稿（4.6 第 2 项）
+    timeout_seconds: 1800         # 一次最多看多久；写 null 就不限时（工具服务开着、还有对在等就一直看）。用户在 30 分钟和不限时之间还没选定
+    poll_seconds: 5               # 多久读一次每个标签页
+    read_seconds: 30              # 一次读最多多久（页面开着对话框时读会卡住）
 llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null

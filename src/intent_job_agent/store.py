@@ -625,10 +625,19 @@ class Store:
                 (pid, started, owner[0], owner[1]),
             )
 
-    def end_activity(self, owner: tuple[int, str]) -> None:
-        """`owner`'s step or resume is closed: only its own row goes (review #3)."""
+    def end_activity(self, owner: tuple[int, str], run_id: str | None = None) -> None:
+        """`owner`'s step or resume is closed: only its own row goes (review #3). With `run_id`, only while the row is
+        that run's: a watch of open answers that ends late never removes the row of a run started after it."""
         with self._tx():
-            self.db.execute("DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ?", (owner[0], owner[1]))
+            if run_id is None:
+                self.db.execute(
+                    "DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ?", (owner[0], owner[1])
+                )
+            else:
+                self.db.execute(
+                    "DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ? AND run_id = ?",
+                    (owner[0], owner[1], run_id),
+                )
 
     def protected_companies(self) -> list[str]:
         """Replay observed configuration entries and explicit user releases; never infer from postings."""

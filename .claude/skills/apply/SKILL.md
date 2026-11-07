@@ -27,7 +27,7 @@ description: 从投递清单自主准备求职信并分批投递；默认不抽�
 
 ## 1. 检查设置与已有运行
 
-先 `apply_status()`：其他会话在运行时不争用 Chrome；报告 notice、held 和可能已提交结果。`held` 就是等你处理的清单：按 `held_count` 报每种门槛的数量（例如"清单上 19 个验证码、9 个邮箱验证码、3 个要登录"），告诉用户有空时可以在场重跑（第 4 节）。`next` 存在且条件仍满足时可自主继续。
+先 `apply_status()`：其他会话在运行时不争用 Chrome（`other_session` 写着"读回开放题定稿"的只是只读地看标签页，开始新的一步时会让出来）；报告 notice、held 和可能已提交结果；有 `open_answers` 就照第 3 节第 4 条处理。`held` 就是等你处理的清单：按 `held_count` 报每种门槛的数量（例如"清单上 19 个验证码、9 个邮箱验证码、3 个要登录"），告诉用户有空时可以在场重跑（第 4 节）。`next` 存在且条件仍满足时可自主继续。
 
 再 `get_apply_setup()`：缺少资料、标准答案冲突、工具缺失时报告具体问题。已有资料可用于自主选择简历；缺少的事实不能从意图猜出。申请地点和搬家回答仍来自 applicant.yaml。Gmail 授权或人工验证属于实际能力问题。
 
@@ -43,6 +43,8 @@ description: 从投递清单自主准备求职信并分批投递；默认不抽�
 2. 每隔两三分钟 `apply_status()`；输出进度、quiet_seconds、chrome_warning。用户叫停立即 `stop_applying()`，继续轮询至结束；自动提交中的岗位按原有规则收尾，不强杀造成提交不明。
 3. 优先报告 held、waiting、失败和报告路径，再列已投和 checklist。arbitration、ssn_required、payment_required、screening_requires_candidate_written_answers 保留停止规则；stalled 是待修复失败。没有实际解决的门槛不自动放弃、不盲目重试。
 4. waiting 表示已填好，不能当已提交。保护公司留给用户本人确认并提交；显式只填运行也保持不提交。
+   - 开放题的草稿/定稿（specs/open-answers.md 4.6）：`apply_status` 有 `open_answers` 时调 `open_answer_pairs()`。它会只读地看着填好的标签页，告诉用户改完提交时会读回定稿；用户说"改完了"但还没交，就调 `open_answer_pairs(read_now=true)`（可以给 job_ids）。
+   - 返回的 `questions` 照选项原样问用户（选项在前，"其他（我自己说）""我改一下再收"在后，0 是跳过），一次一两道。用户的回答用 `open_answer_choice(question_id, option, user_report=…)` 转告：他自己写的话放进 `text`，一字不改；收进答案库换题型时给 `question_type`。用户写中文要收进答案库时，先给他 2–3 个忠实的英文译法（只换语言，不加内容），作为 `renderings` 传，再让他从新问题里选。不替用户选原因或决定收不收；用户没回答就不调。
 5. maybe_submitted 时停批，不得重投；interrupted 时先核查是否已提交。只有证据明确未提交才考虑重试。`already_applied` 不是新的成功提交。
 6. `next` 存在且没有实际阻塞时自主继续。默认没有 review 第一步，也没有“抽查失败阻止 rest”的关卡；不得宣称已经人工抽查。
 7. 只有用户真实报告已投/跳过时才调用 `mark_applications` 的相应用户状态；不得用它冒充代理提交结果。代理执行的实际结果由 runner 记录。

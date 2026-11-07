@@ -35,9 +35,11 @@ from . import (
     apply_list,
     applypilot_bridge,
     avature,
+    browser_session,
     duplicates,
     funnel,
     notify,
+    open_answer_pairs,
     open_answers,
     watchdog,
 )
@@ -61,6 +63,8 @@ from .form_fill import inputs as form_fill_inputs
 from .form_fill import readback as form_fill_readback
 from .form_fill import recording as form_fill_recording
 from .form_fill import runner as form_fill
+from .form_fill import watch as form_fill_watch
+from .form_fill.columns import mask_snapshot
 from .form_fill.models import JobList, JobReport
 from .form_fill.redact import Redactor
 from .form_fill.report import CONCLUSIONS as FORM_FILL_CONCLUSIONS
@@ -343,8 +347,10 @@ class Toolbox:
         self.form_fill_runner = None  # None: Chrome + Claude Code (form_fill.runner.FormFillRunner); tests pass a fake
         self.form_fill_in_background = True
         self.notifier = None  # None: a macOS notification when apply.notify is on (notify.mac); tests pass a fake
-        self.clock = time.monotonic  # the waits of a live re-run of the gate list (spec section 10 item 119);
-        self.sleep = time.sleep  # tests pass fakes
+        self.clock = time.monotonic  # the waits of a live re-run of the gate list (spec section 10 item 119) and of
+        self.sleep = time.sleep  # the watch of filled tabs (specs/open-answers.md 4.6); tests pass fakes
+        self._watch: dict | None = None  # the current or last watch of filled tabs for the applicant's finals
+        self.watch_in_background = True
         self._me: tuple[int, str] | None = None  # this tool server's pid and start time (spec section 10 item 111)
         self.engine = Engine(store, settings, NoModelClient())
 
@@ -1606,6 +1612,7 @@ class Toolbox:
         data["phases"][phase] = "running"
         data.pop("interrupted", None)  # the user has moved on from the cut-short step (review #9)
         owner = self._owner()
+        self._end_watch()  # a watch that started meanwhile makes way too (specs/open-answers.md 4.6)
         self.store.begin_activity(owner, "step", batch=(batch_id, phase, data.pop("day"), data))
         try:
             self.store.record_decision(
@@ -1749,6 +1756,7 @@ class Toolbox:
             redactor=inputs.redactor,
             runner=self._browser(applicant),
             open_answers=inputs.open_answers,
+            pairs_dir=self._pairs_dir(),
         )
 
     def _checked_inputs(self, applicant, list_path: Path):
@@ -1970,7 +1978,7 @@ class Toolbox:
                 if row["kind"] == "form_fill" and ours:
                     fill = self._form_fill_run
                     matching = fill is not None and fill.get("run_id") == row["run_id"]
-                    if not matching and watchdog.alive(*owner):
+                    if not (matching or self._own_watch(row)) and watchdog.alive(*owner):
                         return row  # another Toolbox in this same live process is not an orphan
                 run = self._apply_run
                 # A normal worker may finish after _sync_apply_results but before this transaction.
@@ -1995,6 +2003,7 @@ class Toolbox:
                     and not fill.get("closed")
                     and row["run_id"] == fill.get("run_id")
                 )
+                known = known or (ours and self._own_watch(row))  # this server's watch of filled tabs
                 if not known:
                     watchdog.kill_agent(row["agent_pid"], row["agent_started"])  # by identity (review #7)
                     watchdog.kill_orphans(self._agent_marks())
@@ -2063,8 +2072,15 @@ class Toolbox:
         self.store.save_apply_batch(batch_id, data.pop("day"), data)
 
     def _refuse_other_session(self) -> None:
+        """Nothing starts while another session runs a step, a resume or a fill. A watch of filled tabs only reads,
+        so it makes way: this server's own ends first, another session's coordination row is given up (its next
+        read finds that it no longer owns the Chrome and ends; specs/open-answers.md 4.6 item 2)."""
         self._owner()  # a server that cannot tell who it is starts nothing (review #1)
+        self._end_watch()
         other = self._recover()
+        if other is not None and other["kind"] == "form_fill" and _is_watch(other.get("run_id")):
+            self.store.end_activity((other["owner_pid"], other["owner_started"]), run_id=other["run_id"])
+            other = self._recover()
         if other is not None:
             raise InvariantError(self._other_view(other)["message"] + "；等它做完，或者在那个会话里说“停下”")
 
@@ -2073,7 +2089,9 @@ class Toolbox:
         """Another session's tool server runs a step or a resume (spec section 10 item 111)."""
         since = datetime.fromisoformat(row["since"]).astimezone().strftime("%H:%M")
         what = "接着做"
-        if row["kind"] == "form_fill":
+        if row["kind"] == "form_fill" and _is_watch(row.get("run_id")):
+            what = f"读回开放题定稿 {row['run_id']}（只读，开始新的一步时会让出来）"
+        elif row["kind"] == "form_fill":
             what = f"独立填表 {row['run_id']}"
         elif row["kind"] != "resume":
             what = f"批次 {row['batch_id']} 的{apply_fill.STEP_NAMES[row['phase']]}"
@@ -2147,6 +2165,7 @@ class Toolbox:
             if writer is not None:
                 writer.db.close()
             self._notify(run)
+            self._watch_after_run()  # the filled tabs' open answers wait for the applicant's finals
 
     @staticmethod
     def _activity(item: dict) -> dict:
@@ -2169,11 +2188,14 @@ class Toolbox:
         not started yet stay as they are (pending, or held for a resume); the job in progress, when the form-fill
         module fills it (it stops before submit), is ended now and goes back where it was, with no attempt recorded;
         one being auto-submitted finishes first, so a submission is never cut off halfway. Poll apply_status until
-        it is no longer running."""
+        it is no longer running. It also ends the watch of filled tabs for the applicant's finals, if one runs (the
+        pairs go on waiting; specs/open-answers.md 4.6)."""
         self._recover()  # a step that ended, or one a stopped server left, is closed first (review #2)
+        watched = self._end_watch(wait=False)
         run = self._apply_run
         if not _running(run):
-            return {"stopped": False, "message": "现在没有在跑的一步"}
+            message = "现在没有在跑的一步" + ("；也不再看填好的标签页里的开放题了" if watched else "")
+            return {"stopped": False, "message": message, **({"open_answers_watch": "stopped"} if watched else {})}
         run["stop"] = run["stop"] or time.time()
         waiting = next((item for item in run["jobs"] if item["state"] == "needs_you"), None)
         if waiting is not None:  # no agent runs while a live re-run waits for the user (item 121)
@@ -2222,6 +2244,9 @@ class Toolbox:
         if run is None:
             held = self._held_view()
             status = {"status": "idle", "held": held, "held_count": self._held_count(held), "next": None}
+            hint = self._pairs_hint()
+            if hint:  # open answers waiting for the applicant's final or answer (specs/open-answers.md 4.6)
+                status["open_answers"] = hint
             latest = self.store.latest_apply_batch()
             if latest is not None:
                 data = self._settle(latest)
@@ -2297,6 +2322,9 @@ class Toolbox:
         needs_you = self._needs_you_view(run)
         if needs_you is not None:
             status["needs_you"] = needs_you
+        hint = self._pairs_hint()
+        if hint:  # open answers waiting for the applicant's final or answer (specs/open-answers.md 4.6)
+            status["open_answers"] = hint
         if other is not None:
             status["other_session"] = self._other_view(other)
         used = [f"第 {row['n']} 个岗位运行时{line}" for row in jobs for line in row["chrome_use"]]
@@ -2616,6 +2644,7 @@ class Toolbox:
             self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
         )
         owner = self._owner()
+        self._end_watch()  # a watch that started meanwhile makes way too (specs/open-answers.md 4.6)
         self.store.begin_activity(owner, "resume", resume_jobs=list(job_ids))
         try:
             self.store.record_decision(
@@ -2860,40 +2889,43 @@ class Toolbox:
         }
         run["reply"] = None
         self._notify_now(item, hold["reason"])
-        tab, seen = self._kept_tab(hold), None
-        while True:
+        tab, seen = self._kept_tab(hold), {}
+
+        def interrupt():
             if run["stop"]:
                 return "stop", None
             reply, run["reply"] = run["reply"], None
-            if reply is not None:
-                return reply
-            if self.clock() - since >= wait.timeout_seconds:
-                return "timeout", None
-            if tab is not None:
+            return reply
+
+        def look(_, current: dict) -> str | None:  # only when the address moved: a glance at where the page stands
+            url = current.get("url", "")
+            if "url" not in seen:
+                seen["url"] = url
+            elif not form_fill_readback.same_url(url, seen["url"]):
+                seen["url"] = url
                 try:
-                    tabs = browser.targets()
-                except Exception:  # noqa: BLE001 - no tab list this time: look again next time
-                    tabs = None
-                if tabs is not None:
-                    current = next(
-                        (t for t in tabs if t.get("id") == tab["id"] and t.get("generation") == tab["generation"]),
-                        None,
-                    )
-                    if current is None:
-                        return "closed", None
-                    url = current.get("url", "")
-                    if seen is None:
-                        seen = url
-                    elif not form_fill_readback.same_url(url, seen):
-                        seen = url
-                        try:
-                            state = browser.tab_state(current)
-                        except Exception:  # noqa: BLE001 - the glance failed: keep waiting
-                            state = None
-                        if state is not None and state.received:
-                            item["waiting"]["received"] = state.received
-                            return "received", None
-            self.sleep(wait.poll_seconds)
+                    state = browser.tab_state(current)
+                except Exception:  # noqa: BLE001 - the glance failed: keep waiting
+                    state = None
+                if state is not None and state.received:
+                    item["waiting"]["received"] = state.received
+                    return "received"
+            return None
+
+        said, ended = form_fill_watch.wait(
+            browser,
+            {item["job_id"]: tab} if tab is not None else {},
+            since=since,
+            clock=self.clock,
+            sleep=self.sleep,
+            poll_seconds=wait.poll_seconds,
+            timeout_seconds=wait.timeout_seconds,
+            interrupt=interrupt,
+            look=look,
+        )
+        if said == "ended":  # the tab was closed, or the page says it was received
+            return ended[item["job_id"]], None
+        return ("timeout", None) if said == "timeout" else said
 
     def _notify_now(self, item: dict, reason: str) -> None:
         """The notification that one job of a live re-run needs the user now (spec section 10 item 119)."""
@@ -3022,6 +3054,7 @@ class Toolbox:
                 self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
             ),
             open_answers=inputs.open_answers,
+            pairs_dir=self._pairs_dir(),
         )
         try:  # only a reminder (decision 23); it never starts Chrome, so other tool calls do not wait
             tabs = ctx.runner.open_tabs()
@@ -3073,6 +3106,7 @@ class Toolbox:
             ],
         }
         owner = self._owner()
+        self._end_watch()  # a watch that started meanwhile makes way too (specs/open-answers.md 4.6)
         self.store.begin_activity(owner, "form_fill", run_id=run_id)
         run["closed"] = False
         self._form_fill_run = run
@@ -3105,6 +3139,7 @@ class Toolbox:
                 run["closed"] = True
                 if writer is not None:
                     writer.db.close()
+                self._watch_after_run()  # the filled tabs' open answers wait for the applicant's finals
 
         if self.form_fill_in_background:
             try:
@@ -3135,10 +3170,12 @@ class Toolbox:
         gate, tab_lost, readback_failed, system_error), the filling agent's own result, how many fields were read
         back, the saved page folder, the recording id, the automatic checks and the notes (contact details masked);
         the jobs not visited because they were recorded before (`skipped`), and the paths of feasibility.md and,
-        once the run is done, summary.md."""
+        once the run is done, summary.md. `open_answers`, when present: open answers waiting for the applicant's
+        final or questions waiting for the applicant (see open_answer_pairs)."""
         run = self._form_fill_run
+        hint = self._pairs_hint()
         if run is None:
-            return {"status": "idle"}
+            return {"status": "idle", **({"open_answers": hint} if hint else {})}
         jobs = []
         for item in run["jobs"]:
             outcome = item["outcome"]
@@ -3169,7 +3206,389 @@ class Toolbox:
             "summary": run.get("summary"),
             "skipped": run.get("skipped", []),
             "jobs": jobs,
+            **({"open_answers": hint} if hint else {}),
         }
+
+    # --- open-answer pairs (specs/open-answers.md 3.4, 4.6, 4.9; slice 3) -------------------------------------------
+
+    def _pairs_dir(self) -> Path:
+        return self.data_dir / self.settings.open_answers.pairs.dir
+
+    def _bank_path(self) -> Path | None:
+        """The open-answer bank applicant.yaml names, or None (not configured, or applicant.yaml unreadable)."""
+        try:
+            return applicant_files.load(self.data_dir, self.settings.apply.applicant_dir).open_answers
+        except Exception:  # noqa: BLE001 - no bank to offer
+            return None
+
+    @staticmethod
+    def _redactor(applicant) -> Redactor:
+        """The contact redactor from profile.json, read by code only; its values never leave this process."""
+        try:
+            return Redactor.from_profile(json.loads(applicant.profile.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as error:
+            raise InvariantError(f"profile.json 读不出来（{type(error).__name__}）") from None
+
+    def _own_watch(self, row: dict) -> bool:
+        """Whether an apply_running row is this server's watch of filled tabs, still open."""
+        watch = self._watch
+        return watch is not None and not watch.get("closed") and row.get("run_id") == watch["run_id"]
+
+    def _watch_after_run(self) -> None:
+        """At the end of a run: watch the filled tabs whose pairs wait for a final. Never breaks the run's end."""
+        try:
+            self._start_watch()
+        except Exception:  # noqa: BLE001 - the pairs go on waiting; open_answer_pairs starts the watch again
+            pass
+
+    def _start_watch(self, read_now: set[str] | None = None) -> dict | None:
+        """Watch the tabs of the pairs waiting for a final (4.6 item 2) while no run uses the applying Chrome.
+        `read_now`: the applicant said they are done editing those jobs (an empty set: all of them); a watch that
+        runs reads them at once. Returns the watch, or None (nothing waits, or a run holds the Chrome)."""
+        if self.settings.execution_mode == "local_only":
+            return None
+        watch = self._watch
+        if watch is not None and not watch.get("closed"):
+            if read_now is not None:
+                asked = watch.get("read_now")
+                watch["read_now"] = set() if not read_now or asked == set() else {*(asked or ()), *read_now}
+            return watch
+        if _running(self._apply_run) or _running(self._form_fill_run):
+            return None
+        if not any(pair.status == "watching" for pair in open_answer_pairs.PairStore(self._pairs_dir()).all()):
+            return None
+        watch = {
+            "run_id": f"{open_answer_pairs.WATCH_PREFIX}{form_fill.new_run_id()}",
+            "status": "running",
+            "stop": False,
+            "read_now": read_now,
+            "since": None,
+            "closed": False,
+            "thread": None,
+            "error": None,
+        }
+        self._watch = watch
+        if not self.watch_in_background:
+            self._watch_work(watch)
+            return watch
+        thread = threading.Thread(target=self._watch_work, args=(watch,), name="intent-agent-open-answers", daemon=True)
+        watch["thread"] = thread
+        try:
+            thread.start()
+        except RuntimeError:
+            watch.update(status="failed", closed=True)
+            raise
+        return watch
+
+    def _end_watch(self, wait: bool = True) -> bool:
+        """Stop this server's watch of filled tabs, if one runs; `wait`: until its thread has given up the applying
+        Chrome. Its pairs go on waiting. Returns whether a watch was running."""
+        watch = self._watch
+        if watch is None or watch.get("closed"):
+            return False
+        watch["stop"] = True
+        thread = watch.get("thread")
+        if wait and thread is not None and thread is not threading.current_thread():
+            limit = self.settings.open_answers.watch
+            thread.join(limit.read_seconds + limit.poll_seconds + 5)
+            if thread.is_alive():
+                raise InvariantError("读回开放题定稿的那一次读还没完（页面上可能开着对话框），过一会儿再试")
+        return True
+
+    def _watch_work(self, watch: dict) -> None:
+        """The watch (4.6 item 2) under its own coordination row, the only way code may read a page of the applying
+        Chrome (R1b); a run that started first keeps the Chrome and nothing is watched now."""
+        owner, writer = None, None
+        try:
+            owner = self._owner()
+            writer = Store(self.store.path, self.settings)
+            writer.begin_activity(owner, "form_fill", run_id=watch["run_id"])
+        except Exception:  # noqa: BLE001 - a run took the Chrome first: the pairs go on waiting
+            if writer is not None:
+                writer.db.close()
+            watch.update(status="busy", closed=True)
+            return
+        try:
+            watch["status"] = "stopped" if watch["stop"] else self._watch_tabs(watch)
+        except browser_session.BrowserIdentityLost:  # a run took over the Chrome, or the Chrome went away
+            watch["status"] = "stopped"
+        except Exception as error:  # noqa: BLE001 - the pairs go on waiting
+            watch.update(status="failed", error=type(error).__name__)
+        finally:
+            try:
+                writer.end_activity(owner, run_id=watch["run_id"])
+            finally:
+                writer.db.close()
+                watch["closed"] = True
+
+    def _watch_tabs(self, watch: dict) -> str:
+        """Read the tabs of the waiting pairs, read only, every poll (4.6 item 2): each pair keeps the last value this
+        watch read of its field; a tab ends when its page says received, it is closed, it leaves the job's site, or
+        the applicant says they are done ("改完了": read now). Returns how the watch ended: done, timeout, stopped."""
+        limits = self.settings.open_answers
+        applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        redactor = self._redactor(applicant)
+        store = open_answer_pairs.PairStore(self._pairs_dir(), redactor)
+        pairs = {pair.id: pair for pair in store.all() if pair.status == "watching"}
+        wid, browser = watch["run_id"], self._browser(applicant)
+
+        def settle(pair_ids, how, why=None) -> None:
+            for pid in pair_ids:
+                pairs[pid] = open_answer_pairs.settle(
+                    pairs[pid], how, wid, open_answer_pairs.now(), limits.pairs.rewritten_above, why
+                )
+                store.save(pairs[pid])
+
+        if browser.open_tabs() is None:  # the applying Chrome is not running: every kept tab is gone
+            settle(list(pairs), "closed", "投递用的 Chrome 没开着，标签页已经不在了；交上之前最后是什么不知道")
+            return "done"
+        browser.ensure_chrome()
+        reader = browser.watch_reader()  # one connection for the whole watch, in this thread (decision 8)
+        try:
+            return self._watch_loop(watch, browser, reader, pairs, store, redactor, settle)
+        finally:
+            reader.disconnect()  # ended, yielded, stopped or the owner changed: the connection goes with it
+
+    def _watch_loop(self, watch, browser, reader, pairs, store, redactor, settle) -> str:
+        limits, wid = self.settings.open_answers, watch["run_id"]
+        tabs: dict[tuple, dict] = {}
+        members: dict[tuple, list[str]] = {}
+        for pair in pairs.values():
+            key = (pair.tab.id, pair.tab.generation)
+            tabs[key] = {"id": pair.tab.id, "generation": pair.tab.generation}
+            members.setdefault(key, []).append(pair.id)
+
+        def look(key, current: dict) -> tuple[str | None, set[str]]:
+            """One read of one tab: (how it ended, or None; the pairs whose field this read showed)."""
+            ids = members[key]
+            if not open_answer_pairs.on_site(pairs[ids[0]], str(current.get("url", ""))):
+                return "left", set()  # never read off the job's site
+            try:
+                state, snap = reader.read(current)
+            except browser_session.BrowserIdentityLost:
+                raise
+            except Exception:  # noqa: BLE001 - this read failed (a hang drops the connection): read again next poll
+                return None, set()
+            if state.received:  # this read's values are not used: the page after the submit is not the form
+                return "received", set()
+            masked, _, _ = mask_snapshot(snap, redactor, {})
+            at, shown = open_answer_pairs.now(), set()
+            for pid in ids:
+                if open_answer_pairs.find_field(masked.fields, pairs[pid].field) is None:
+                    continue
+                shown.add(pid)
+                seen = open_answer_pairs.observe(pairs[pid], masked.fields, wid, at)
+                if seen is not None:
+                    pairs[pid] = seen
+                    store.save(seen)
+            return None, shown
+
+        def interrupt():
+            if watch["stop"]:
+                return "stop"
+            return "read_now" if watch.get("read_now") is not None else None
+
+        since = watch["since"] = self.clock()
+        while tabs:
+            said, ended = form_fill_watch.wait(
+                browser,
+                tabs,
+                since=since,
+                clock=self.clock,
+                sleep=self.sleep,
+                poll_seconds=limits.watch.poll_seconds,
+                timeout_seconds=limits.watch.timeout_seconds,
+                interrupt=interrupt,
+                look=lambda key, current: look(key, current)[0],
+                each_poll=reader.poll,  # the owner checked again; a connection a hang broke is let go
+            )
+            for key, how in ended.items():
+                settle(members.pop(key), how)
+            if said == "stop":
+                return "stopped"
+            if said == "timeout":
+                return "timeout"
+            if said == "read_now":
+                wanted, watch["read_now"] = watch["read_now"], None
+                reader.poll()
+                try:
+                    listed = browser.targets()
+                except Exception:  # noqa: BLE001 - no tab list now: the next looks go on as usual
+                    listed = None
+                for key in [
+                    k for k in tabs if listed is not None and (not wanted or pairs[members[k][0]].job_id in wanted)
+                ]:
+                    current = form_fill_watch.find_tab(listed, tabs[key])
+                    how, shown = ("closed", set()) if current is None else look(key, current)
+                    if how is None:  # the applicant is done with what this page shows; the rest goes on waiting
+                        settle(sorted(shown), "user_done")
+                        members[key] = [pid for pid in members[key] if pid not in shown]
+                    else:
+                        settle(members[key], how)
+                        members[key] = []
+                    if not members[key]:
+                        del tabs[key], members[key]
+        return "done"
+
+    def _pairs_hint(self) -> dict | None:
+        """What apply_status and form_fill_status say about the open-answer pairs, when something waits."""
+        try:
+            pairs = open_answer_pairs.PairStore(self._pairs_dir()).all()
+            bank = bool(pairs) and self._bank_path() is not None
+            limit = self.settings.open_answers.pairs.ask_reason_above
+            waiting = sum(1 for pair in pairs if pair.status == "watching")
+            asked = sum(len(open_answer_pairs.questions(p, ask_reason_above=limit, bank=bank)) for p in pairs)
+        except Exception:  # noqa: BLE001 - a status call never fails over the pairs
+            return None
+        if not (waiting or asked):
+            return None
+        watch = self._watch
+        return {
+            "waiting": waiting,
+            "questions": asked,
+            "watching": bool(watch is not None and not watch.get("closed")),
+            "see": "open_answer_pairs",
+        }
+
+    def _watch_view(self) -> dict | None:
+        watch = self._watch
+        if watch is None:
+            return None
+        view = {"run_id": watch["run_id"], "status": watch["status"]}
+        limit = self.settings.open_answers.watch.timeout_seconds
+        if watch["status"] == "running" and watch.get("since") is not None:
+            # no limit (null): it watches while this tool service runs and pairs wait
+            view["seconds_left"] = None if limit is None else max(0, int(limit - (self.clock() - watch["since"])))
+        return view
+
+    @_tool("prepare")
+    def open_answer_pairs(self, read_now: bool = False, job_ids: list[str] | None = None) -> dict:
+        """The applicant's open answers as draft/final pairs (specs/open-answers.md 4.6): the pairs still waiting for
+        the applicant's final, the watch of their tabs, and the questions waiting for the applicant, each with
+        numbered options (options first, the applicant's own words last, 0 skips; 4.9). Ask them as they are and pass
+        the actual reply on with open_answer_choice; never answer for the applicant. Call it after a step or a fill
+        and when the applicant comes back to check the filled tabs: when nothing watches the tabs of waiting pairs, it
+        starts watching them (code only reads the pages; it never clicks, types or submits). `read_now=true` when the
+        applicant says they are done editing ("改完了") but has not submitted yet: those jobs' tabs (`job_ids`, or
+        all) are read at once. It never returns a draft or a final: they are in the files under `pairs_dir`."""
+        wanted = set(job_ids or []) if read_now else None
+        busy = _running(self._apply_run) or _running(self._form_fill_run)
+        self._start_watch(read_now=wanted)
+        store = open_answer_pairs.PairStore(self._pairs_dir())
+        pairs = store.all()
+        bank = self._bank_path() is not None
+        limit = self.settings.open_answers.pairs.ask_reason_above
+        asked = [q for pair in pairs for q in open_answer_pairs.questions(pair, ask_reason_above=limit, bank=bank)]
+        waiting = [
+            {key: getattr(pair, key) for key in ("job_id", "company", "title", "type")}
+            | {"pair_id": pair.id, "question": pair.field.question}
+            for pair in pairs
+            if pair.status == "watching"
+        ]
+        watch = self._watch_view()
+        lines = []
+        if waiting:
+            jobs = len({item["job_id"] for item in waiting})
+            if busy:
+                lines.append(
+                    f"{len(waiting)} 道开放题在等定稿：一步或一次填表在跑，跑完以后代码接着看那 {jobs} 个标签页。"
+                )
+            elif watch is not None and watch["status"] == "running":
+                lines.append(
+                    f"正在只读地看着 {jobs} 个填好的标签页（{len(waiting)} 道开放题）："
+                    "申请人改完交上、关掉标签页时读回定稿。"
+                )
+            else:
+                lines.append(
+                    f"{len(waiting)} 道开放题在等定稿（{jobs} 个标签页）；申请人回来检查时再调一次，就接着看。"
+                )
+            lines.append("申请人改完了、还不想马上交，说“改完了”就调 read_now=true，代码马上读一次。")
+        if asked:
+            lines.append(
+                f"有 {len(asked)} 道选择题等申请人回答：照选项问，选项在前、他自己写的在后；"
+                "只转告他实际的回答（open_answer_choice），他写的话照原样传。"
+            )
+        if not lines:
+            lines.append("没有在等定稿的开放题，也没有要问申请人的选择题。")
+        result = {
+            "watch": watch,
+            "waiting": waiting,
+            "questions": asked,
+            "pairs_dir": str(self._pairs_dir()),
+            "message": "".join(lines),
+        }
+        if read_now:
+            result["reading_now"] = sorted(wanted) or "all"
+        return result
+
+    @_tool("prepare")
+    def open_answer_choice(
+        self,
+        question_id: str,
+        option: int,
+        user_report: str,
+        text: str | None = None,
+        question_type: str | None = None,
+        renderings: list[str] | None = None,
+    ) -> dict:
+        """Pass on the applicant's actual reply to one question from open_answer_pairs (specs/open-answers.md 4.6,
+        4.9): `option` as shown (0 skips and records nothing). `user_report`: the applicant's reply or where it is;
+        required, never choose for them. `text`: the applicant's own words, verbatim, for "其他（我自己说）" and the
+        options where they write the entry themselves; never rewrite them. `question_type`: for "收进，但题型改成另一
+        种". `renderings`: only when the applicant wrote their own words for the bank in Chinese: 2-3 faithful English
+        renderings, nothing added, which become a new question for them to pick from. Into the bank goes the final
+        as read back, or the applicant's own words, or the rendering they picked, unchanged, through the bank's one
+        checked entry point; contact details or a section over the budget keep it out, and the question then offers
+        不收 / 我改一下再收. Nothing here edits a text."""
+        pair_id, _, question = question_id.rpartition(":")
+        if not pair_id or question not in ("reason", "promote", "render"):
+            raise InvariantError(f"不是 open_answer_pairs 给的选择题编号：{question_id}")
+        applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
+        bank = applicant.open_answers
+        if question != "reason" and bank is None:
+            raise InvariantError("还没有答案库：applicant.yaml 没写 open_answers（docs/usage.md 开放题答案库一节）")
+        redactor = self._redactor(applicant)
+        store = open_answer_pairs.PairStore(self._pairs_dir(), redactor)
+        pair = store.load(pair_id)
+        limits = self.settings.open_answers
+
+        def promote(entry: dict) -> str:
+            return open_answers.add_entry(bank, entry, redactor, limits.max_chars).id
+
+        try:
+            updated, done = open_answer_pairs.apply_choice(
+                pair,
+                question,
+                option,
+                user_report=user_report,
+                text=text,
+                question_type=question_type,
+                renderings=renderings,
+                ask_reason_above=limits.pairs.ask_reason_above,
+                bank=bank is not None,
+                promote=promote,
+            )
+        except InvariantError as error:  # an error may quote the bank's text
+            raise InvariantError(redactor.mask(str(error))) from None
+        store.save(updated)
+        said = {
+            "reason": "记下了原因",
+            "skipped": "跳过了：什么都不记",
+            "declined": "不收：记下了这个选择",
+            "renderings": "记下了你写的话；请从几个英文译法里选一个（open_answer_pairs 里的新问题）",
+        }
+        if done["recorded"] == "promoted":
+            message = f"收进答案库了：{done['entry_id']}，从下一次投递起填表 agent 会学这一条"
+        elif done["recorded"] == "rejected" and done["why"] == "contact":
+            message = "收不进去：定稿里有联系方式（读回时已经打码）；可以选“不收”或“我改一下再收”，系统不会自己改字"
+        elif done["recorded"] == "rejected":
+            message = f"收不进去：加上这一条有 {done['size']} 字符，上限 {done['max']}；可以选“不收”或“我改一下再收”"
+        else:
+            message = said[done["recorded"]]
+        remaining = open_answer_pairs.questions(
+            updated, ask_reason_above=limits.pairs.ask_reason_above, bank=bank is not None
+        )
+        return {"question_id": question_id, **done, "message": message, "questions": remaining}
 
     @_tool("prepare")
     def rank_causes(self, analysis_id: str, order: list[str]) -> dict:
@@ -3304,6 +3723,11 @@ class Toolbox:
 
 def _running(run: dict | None) -> bool:
     return run is not None and run["status"] == "running"
+
+
+def _is_watch(run_id: str | None) -> bool:
+    """Whether an apply_running row's run is a watch of filled tabs (specs/open-answers.md 4.6): it only reads."""
+    return str(run_id or "").startswith(open_answer_pairs.WATCH_PREFIX)
 
 
 def _clock(at: float | None) -> str | None:

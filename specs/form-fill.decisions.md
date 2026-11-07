@@ -632,3 +632,21 @@
 甲方授权在R1b修复新增实际阻塞：原32像素断言不改，不skip、不改默认全页语义、不扩为生产像素审计。原单例多次失败且整块modal缺失，未取得敏感文字漏遮落盘证据；相同元素路径/边界/开启状态下，增加DOM读取改变复现概率，五组独立进程中原路径一次缺失、两帧等待五次保留42黑行。证据指向顶层modal绘制同步，未定位Chromium内部具体实现。采用截图前有界等待两帧，确保至少跨过一次绘制机会；不聚焦/滚动/修改页面，超时沿现有不存截图路径。保留原Playwright临时CSS涂黑和完整页面截图、原断言，加实际浏览器屏障和超时反例，不把等待等同像素内容认证。
 
 决定39预算与证据收敛：复用已有form_fill.checkpoint_timeout_seconds，由runner/独立checkpoint入口传入截图函数，不硬编码新3000ms阈值；等待失败明确记渲染未就绪。系统Chrome有头产品连接启用Playwright focus emulation，物理后台/最小化观测仍为runtime visible，不当作document.hidden实证，不改变产品焦点行为。用合成暂停rAF验证预算与不存截图；不声称所有平台后台已验证。
+
+## 2026-11-06 决定 40：开放题的草稿和定稿（open-answers 决定 6、7）
+
+- `checkpoint` 加可选参数 `open_answers`：填完一页时，填表 agent 列出这一页上自己写了开放题的栏（栏号、题型），代码从这次读回取原题和草稿，记进这次运行的录制（`open_answers.json`）。只是多记一份，不改 `checkpoint` 原有的录制和回答。
+- 填好、停在提交前的标签页，运行结束后由工具服务只读地看着，读回申请人改定的开放题（[open-answers.md](open-answers.md) 4.6）。和在场重跑等你（总规格决定 36）用同一段只看不动的轮询，读页面用读回的同一套代码。
+- 决定 35 当时没做的对话框处理器，这次加在"读一眼"上：/apply 接着做之前、在场重跑等你时、看开放题定稿时，连接上就给每个页面挂一个什么都不做的监听，页面弹出的对话框留给申请人或 agent 自己处理。填表 agent 退出后读回最后一页时仍不挂：那时页面开着的对话框会让读回到时限失败，和原来自动关掉它相比，两边各有坏处，这次不改。
+
+## 2026-11-06 决定 41：连上投递 Chrome 时，下载会被 Playwright 收走（open-answers 决定 8）
+
+- 协调者在一个用完就扔的无界面 Chrome 里核实（Playwright 1.56），本切片的开发会话用合成页面和临时资料又核实了一次：
+  - `connect_over_cdp` 连上以后，会给默认上下文设 `Browser.setDownloadBehavior allowAndName`，下载目录是它自己的 artifacts 目录。
+  - 连着的时候，用户在投递用的 Chrome 里下载的文件落进一个隐藏的 `playwright-artifacts-*` 目录，文件名是一串 GUID；不在用户的下载目录里，断开以后也还留在那里。
+  - 断开以后，下载恢复正常。
+  - 连上以后马上在浏览器的 CDP 会话里发 `Browser.setDownloadBehavior {"behavior": "default"}`，下载就落到 Chrome 自己的下载目录，这个连接照常能用。
+- 定下的：只读的"读一眼"（`readback._connected`：接着做之前、在场重跑等你时）和看开放题定稿的连接（`readback.WatchReader`），连上以后马上发这一条。测试在临时资料上核对：连着的时候下载，文件落在资料设定的下载目录里。
+- 没改、留给以后：
+  - 填表时的 checkpoint 服务。填表 agent 自己的 Playwright MCP 也会设下载行为，只改 checkpoint 的连接管不住；要连同填表 agent 那边一起看，另做。
+  - 填表 agent 退出后读回最后一页的那一次连接（`read_final_page`）也没改：那时用户不该在用这个 Chrome。

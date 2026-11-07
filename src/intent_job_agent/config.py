@@ -145,10 +145,29 @@ class FormFill(_Section):
     network_max_mb: int  # the first page's network record stops growing here (spec 6.2)
 
 
+class OpenAnswerPairs(_Section):
+    """Draft/final pairs (specs/open-answers.md 4.6). The two limits are provisional until real pairs exist (its
+    section 6, question 3)."""
+
+    dir: str = "open-answers/pairs"  # under storage.data_dir, one JSON file per pair
+    rewritten_above: float = Field(default=0.5, ge=0, le=1)  # a change above it is a rewrite, at most it an edit
+    ask_reason_above: float = Field(default=0.5, ge=0, le=1)  # a change above it gets the reason question
+
+
+class OpenAnswerWatch(_Section):
+    """How code watches a filled tab for the applicant's final (specs/open-answers.md 4.6, item 2)."""
+
+    timeout_seconds: float | None = Field(default=1800, gt=0)  # one watch at most; null: while pairs wait
+    poll_seconds: float = Field(default=5, gt=0)  # each tab is read once every poll
+    read_seconds: float = Field(default=30, gt=0)  # one read at most (a dialog left open holds a read)
+
+
 class OpenAnswers(_Section):
     """The applicant's open-answer bank (specs/open-answers.md); the file is named in applicant.yaml."""
 
-    max_chars: int = Field(default=8000, gt=0)  # the section the accepted entries make; over it is a problem, never cut
+    max_chars: int = Field(default=16000, gt=0)  # the section the accepted entries make; over it: a problem, never cut
+    pairs: OpenAnswerPairs = OpenAnswerPairs()
+    watch: OpenAnswerWatch = OpenAnswerWatch()
 
 
 class LLM(_Section):
