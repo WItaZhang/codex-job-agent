@@ -3,10 +3,11 @@
     python -P -m intent_job_agent.form_fill.checkpoint <checkpoint.json>
 
 A stdio MCP server the filling agent's Claude Code starts next to Playwright MCP; it ends with the agent. It offers
-one tool, checkpoint(stage, url): "blank" records the page before it is filled and returns its field numbers,
-"filled" reads it back. Between calls it reads the job's tabs every interval (the background read that stands in
-for a missing "filled") and records the first page's network responses. It only reads the pages: it never clicks,
-types, navigates or closes anything.
+one tool, checkpoint(stage, url, open_answers): "blank" records the page before it is filled and returns its field
+numbers, "filled" reads it back, and `open_answers` (with "filled") names the fields where the agent wrote an answer
+to an open question, recorded as drafts from this read (specs/open-answers.md 4.6). Between calls it reads the job's
+tabs every interval (the background read that stands in for a missing "filled") and records the first page's network
+responses. It only reads the pages: it never clicks, types, navigates or closes anything.
 
 One thread owns the browser connection (Playwright's sync API stays in the thread that started it); tool calls are
 handed to it and answered within the time limit. Only this code reads profile.json, to mask what it writes.
@@ -23,10 +24,13 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .. import browser_session
+from .. import browser_session, open_answer_pairs
+from ..open_answer_pairs import Draft, Mark
+from ..open_answers import QUESTION_TYPES
 from . import readback
+from .columns import is_contact
 from .models import AnswerEntry
 from .recorder import url_key
 from .recording import Capture, RecordingStore, mask_snapshot, network_entry
@@ -50,7 +54,16 @@ STOP_TEXT = (
 TOOL_DOC = """Record the form page you are on; it never changes the page. Call it with stage "blank" before you fill a
 page (it returns the page's field numbers) and with stage "filled" after filling it, before you click Next,
 Continue or Review (on the last page: before the submit button, which you never click). `url`: the page's Page URL
-from the browser's last answer."""
+from the browser's last answer. `open_answers` (with stage "filled"): each field on this page where you wrote an
+answer to an open question, by its number from the blank checkpoint and its type; the answer is taken from the page,
+for the applicant to review."""
+BAD_MARKS_TEXT = (
+    "open_answers is not valid (each item: field, the number the blank checkpoint gave such as p1.3, and type, one of "
+    + ", ".join(QUESTION_TYPES)
+    + "), so nothing was recorded. Call checkpoint again with valid open_answers."
+)
+BLANK_MARKS_TEXT = 'open_answers is read only with stage "filled": {fields} not recorded as open answers.'
+OPEN_ANSWERS_UNSAVED_TEXT = "The page was recorded, but its open answers could not be. Carry on with the form."
 
 
 class Config(BaseModel):
@@ -232,8 +245,9 @@ class Session:
             self.store.note_received(self.redactor.mask(state.received), masked.url)
         return masked, hide, hidden
 
-    def checkpoint(self, stage: str, url: str, queued_at: float | None = None) -> str:
-        """One tool call. Its time in checkpoints.json counts from when it was handed to the worker."""
+    def checkpoint(self, stage: str, url: str, queued_at: float | None = None, open_answers=None) -> str:
+        """One tool call. Its time in checkpoints.json counts from when it was handed to the worker. `open_answers`
+        (Mark items, or their dicts): the fields of this page holding the agent's answers to open questions."""
         started = queued_at if queued_at is not None else time.monotonic()
         log = {"stage": stage, "at": _now(), "agent_url": url, "tab": None, "tab_url": None}
 
@@ -244,6 +258,12 @@ class Session:
 
         if stage not in ("blank", "filled"):
             return done("bad_stage", 'stage must be "blank" or "filled". Nothing was recorded.')
+        try:  # the MCP schema checks it already; a direct call is checked the same way
+            marks = open_answer_pairs.MARKS.validate_python(
+                [m.model_dump() if isinstance(m, BaseModel) else m for m in open_answers or []]
+            )
+        except (ValidationError, TypeError):
+            return done("bad_open_answers", BAD_MARKS_TEXT)
         try:
             pages = self._pages()
             if stage == "blank" and self.cut is None:
@@ -275,17 +295,61 @@ class Session:
             raise
         except Exception as error:  # noqa: BLE001 - the page could not be read; the agent carries on
             return done("error", UNREAD_TEXT, error=type(error).__name__)
+        answers = ""
+        if marks and stage == "blank":
+            answers = BLANK_MARKS_TEXT.format(fields=", ".join(mark.field for mark in marks))
+        elif marks:
+            try:
+                answers = self._open_answers(obs, marks)
+            except Exception:  # noqa: BLE001 - the page is recorded all the same; only its open answers are not
+                answers = OPEN_ANSWERS_UNSAVED_TEXT
         more = {"page": obs.page, "fields": len(obs.fields)}
         if obs.stop:
-            return done("stop", STOP_TEXT.format(page=obs.page, times=self.config.stuck_after), **more)
+            text = STOP_TEXT.format(page=obs.page, times=self.config.stuck_after)
+            return done("stop", text + (f"\n{answers}" if answers else ""), **more)
         if stage == "filled":
-            return done("recorded", f"Recorded page p{obs.page}: {len(obs.fields)} fields read back.", **more)
+            text = f"Recorded page p{obs.page}: {len(obs.fields)} fields read back."
+            return done("recorded", text + (f"\n{answers}" if answers else ""), **more)
         lines = [f"Page p{obs.page}" + (f" ({obs.title})" if obs.title else "") + f": {len(obs.fields)} fields."]
         for f in obs.fields:
             question = f.question or "(no question text)"
             lines.append(f"- {f.id} {question}" + (" (required)" if f.required else ""))
         lines.append(DATA_NOTE)
+        if answers:
+            lines.append(answers)
         return done("recorded", "\n".join(lines), **more)
+
+    def _open_answers(self, obs, marks: list[Mark]) -> str:
+        """The marked fields of this filled read as drafts (specs/open-answers.md 4.6 item 1): the question and the
+        value from this read, already masked; a field marked again (the agent came back to the page) keeps the newer
+        value. What is not recorded is said by field number and why, never with a value."""
+        fields = {f.id: f for f in obs.fields}
+        drafts = {d.field: d for d in open_answer_pairs.read_drafts(self.store.fill_dir)}
+        kept, refused = [], []
+        for mark in marks:
+            field = fields.get(mark.field)
+            why = open_answer_pairs.draft_problem(field, lambda question: is_contact(question, self.sheet))
+            if why is not None:
+                refused.append(f"{mark.field} ({why})")
+                continue
+            drafts[mark.field] = Draft(
+                field=field.id,
+                page=obs.page,
+                type=mark.type,
+                question=field.question,
+                section=field.section,
+                occurrence=field.occurrence,
+                control=field.control,
+                text=field.value,
+                read_at=obs.read_at,
+            )
+            kept.append(mark.field)
+        if kept:
+            open_answer_pairs.write_drafts(self.store.fill_dir, list(drafts.values()), self.redactor.mask_json)
+        lines = [f"Open answers recorded: {', '.join(kept)}."] if kept else []
+        if refused:
+            lines.append(f"Not recorded as open answers: {', '.join(refused)}.")
+        return "\n".join(lines)
 
     def expired(self, stage: str, url: str, waited: float) -> None:
         """A call the agent was already told timed out, dropped before it ran: run late, a blank would record the
@@ -401,7 +465,7 @@ class Worker:
             future.cancel()  # not started yet: the worker drops it and calls on_expired
             raise
 
-    def checkpoint(self, stage: str, url: str) -> str:
+    def checkpoint(self, stage: str, url: str, open_answers=None) -> str:
         if self.error == "BrowserIdentityLost":
             return IDENTITY_LOST_TEXT
         if self.session is None:
@@ -409,7 +473,7 @@ class Worker:
         queued = time.monotonic()
         try:
             return self._call(
-                lambda: self.session.checkpoint(stage, url, queued_at=queued),
+                lambda: self.session.checkpoint(stage, url, queued_at=queued, open_answers=open_answers),
                 self.timeout,
                 on_expired=lambda: self.session.expired(stage, url, time.monotonic() - queued),
             )
@@ -430,13 +494,13 @@ class Worker:
 
 
 def build_server(worker):
-    """The MCP server with its one tool."""
+    """The MCP server with its one tool. `open_answers` has a schema: a type outside the closed set refuses the call."""
     from mcp.server.mcpserver import MCPServer
 
     server = MCPServer(name=SERVER_NAME, instructions="Records form pages for the form-fill module; never submits.")
 
-    def checkpoint(stage: Literal["blank", "filled"], url: str = "") -> str:
-        return worker.checkpoint(stage, url)
+    def checkpoint(stage: Literal["blank", "filled"], url: str = "", open_answers: list[Mark] | None = None) -> str:
+        return worker.checkpoint(stage, url, open_answers)
 
     server.add_tool(checkpoint, name=TOOL, description=TOOL_DOC)
     return server

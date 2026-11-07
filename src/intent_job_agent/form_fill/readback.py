@@ -1102,9 +1102,26 @@ def _playwright(holder: dict):
         yield p
 
 
+def _leave_dialog(dialog) -> None:
+    """A dialog listener that does nothing: the dialog stays for the person or the agent it is for."""
+
+
+@contextmanager
+def _connected(holder: dict, binding, expected):
+    """A read-only connection to the applying Chrome for a glance at a tab. Every context gets a dialog listener that
+    does nothing first: Playwright dismisses the dialogs no one listens to (a confirm cancelled, a beforeunload
+    accepted), and a glance happens while the user or an agent may be answering one (form-fill decision 40; the
+    checkpoint service does the same). Leaving drops the connection; the browser and its tabs stay."""
+    with _playwright(holder) as p:
+        browser = browser_session.connect(p, binding, expected=expected)
+        for context in browser.contexts:
+            context.on("dialog", _leave_dialog)
+        yield browser
+
+
 def _glance(holder: dict, binding, target: dict, expected) -> dict:
-    with _playwright(holder) as p:  # leaving it drops the CDP connection; the browser and its tabs stay
-        return _extract(_find_page(browser_session.connect(p, binding, expected=expected), target))
+    with _connected(holder, binding, expected) as browser:
+        return _extract(_find_page(browser, target))
 
 
 def tab_state(binding, target: dict, seconds: float = READ_SECONDS, *, expected) -> PageState:
@@ -1112,6 +1129,15 @@ def tab_state(binding, target: dict, seconds: float = READ_SECONDS, *, expected)
     tab before resuming it, and a page saying the application was received means the user submitted it there (spec
     section 10 item 100). At most `seconds`."""
     return page_state(_bounded(_glance, seconds, binding, target, expected))
+
+
+def tab_fields(binding, target: dict, seconds: float = READ_SECONDS, *, expected) -> tuple[PageState, Snapshot]:
+    """One glance at an open tab with its fields: where the page stands and the fields as the recorder reads them
+    (specs/open-answers.md 4.6 item 2: code watching a filled tab for the applicant's final). Read only, nothing
+    saved, the values not masked yet (the caller masks them before keeping any). At most `seconds`."""
+    raw = _bounded(_glance, seconds, binding, target, expected)
+    read_at = datetime.now().isoformat(timespec="seconds")
+    return page_state(raw), snapshot(raw, tab=str(target.get("id", "")), read_at=read_at)
 
 
 def read_final_page(

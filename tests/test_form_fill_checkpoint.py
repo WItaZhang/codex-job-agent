@@ -311,14 +311,14 @@ def test_the_service_offers_only_the_checkpoint_tool(tmp_path):
     import asyncio
 
     class Stub:
-        def checkpoint(self, stage, url):
+        def checkpoint(self, stage, url, open_answers=None):
             return f"{stage} {url}"
 
     server = checkpoint.build_server(Stub())
     tools = asyncio.run(server.list_tools())
     assert [tool.name for tool in tools] == ["checkpoint"]
     schema = tools[0].input_schema
-    assert set(schema["properties"]) == {"stage", "url"}
+    assert set(schema["properties"]) == {"stage", "url", "open_answers"}  # open answers: specs/open-answers.md 4.6
     assert schema["properties"]["stage"].get("enum") == ["blank", "filled"] or "anyOf" in schema["properties"]["stage"]
 
 
