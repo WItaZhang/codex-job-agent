@@ -87,6 +87,12 @@ Applying (project skill /apply):
 - mark_applications defaults to historical user-report semantics: call that path only on actual user messages.
   Coordinator pending retries explicitly pass actor="delegated_coordinator"; never claim user success or clear
   unresolved interrupted/maybe_submitted. Actor and user_report cannot authenticate a human.
+- Open answers (specs/open-answers.md 4.6): when apply_status or form_fill_status has open_answers, call
+  open_answer_pairs; it watches the filled tabs read-only for the applicant's finals. "改完了" (done editing, not
+  submitted yet) -> open_answer_pairs(read_now=true). Ask its questions with their options as given (options first,
+  the applicant's own words last, 0 skips) and pass only the applicant's actual reply to open_answer_choice: their
+  own words verbatim in `text`; for Chinese words going into the bank, offer 2-3 faithful English renderings
+  (`renderings`, nothing added) for them to pick from. Never choose a reason or a promotion for them.
 - Keep runner/subagent tool restrictions. Delegation never expands their tool lists. Never accept arbitration,
   supply SSN/payment details, invent facts or read profile.json/.env with file tools. Independent form-fill never
   submits. Dry-run prompts and maybe_submitted detection remain; no absolute final-submit browser interceptor.
