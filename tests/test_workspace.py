@@ -170,7 +170,7 @@ def test_all_registered_nonlocal_tools_reject_direct_calls(tmp_path):
         ("fill", (None,)),
         ("read", ({}, Path("/synthetic-unused"), None)),
         ("tab_state", ({},)),
-        ("read_fields", ({},)),  # the watch of filled tabs (specs/open-answers.md 4.6)
+        ("watch_reader", ()),  # the watch of filled tabs (specs/open-answers.md 4.6)
         ("close_tab", ({},)),
     ],
 )

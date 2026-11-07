@@ -3343,6 +3343,14 @@ class Toolbox:
             settle(list(pairs), "closed", "投递用的 Chrome 没开着，标签页已经不在了；交上之前最后是什么不知道")
             return "done"
         browser.ensure_chrome()
+        reader = browser.watch_reader()  # one connection for the whole watch, in this thread (decision 8)
+        try:
+            return self._watch_loop(watch, browser, reader, pairs, store, redactor, settle)
+        finally:
+            reader.disconnect()  # ended, yielded, stopped or the owner changed: the connection goes with it
+
+    def _watch_loop(self, watch, browser, reader, pairs, store, redactor, settle) -> str:
+        limits, wid = self.settings.open_answers, watch["run_id"]
         tabs: dict[tuple, dict] = {}
         members: dict[tuple, list[str]] = {}
         for pair in pairs.values():
@@ -3356,10 +3364,10 @@ class Toolbox:
             if not open_answer_pairs.on_site(pairs[ids[0]], str(current.get("url", ""))):
                 return "left", set()  # never read off the job's site
             try:
-                state, snap = browser.read_fields(current)
+                state, snap = reader.read(current)
             except browser_session.BrowserIdentityLost:
                 raise
-            except Exception:  # noqa: BLE001 - this read failed: read again next time
+            except Exception:  # noqa: BLE001 - this read failed (a hang drops the connection): read again next poll
                 return None, set()
             if state.received:  # this read's values are not used: the page after the submit is not the form
                 return "received", set()
@@ -3392,6 +3400,7 @@ class Toolbox:
                 timeout_seconds=limits.watch.timeout_seconds,
                 interrupt=interrupt,
                 look=lambda key, current: look(key, current)[0],
+                each_poll=reader.poll,  # the owner checked again; a connection a hang broke is let go
             )
             for key, how in ended.items():
                 settle(members.pop(key), how)
@@ -3401,6 +3410,7 @@ class Toolbox:
                 return "timeout"
             if said == "read_now":
                 wanted, watch["read_now"] = watch["read_now"], None
+                reader.poll()
                 try:
                     listed = browser.targets()
                 except Exception:  # noqa: BLE001 - no tab list now: the next looks go on as usual
@@ -3445,9 +3455,10 @@ class Toolbox:
         if watch is None:
             return None
         view = {"run_id": watch["run_id"], "status": watch["status"]}
+        limit = self.settings.open_answers.watch.timeout_seconds
         if watch["status"] == "running" and watch.get("since") is not None:
-            left = self.settings.open_answers.watch.timeout_seconds - (self.clock() - watch["since"])
-            view["seconds_left"] = max(0, int(left))
+            # no limit (null): it watches while this tool service runs and pairs wait
+            view["seconds_left"] = None if limit is None else max(0, int(limit - (self.clock() - watch["since"])))
         return view
 
     @_tool("prepare")

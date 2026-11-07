@@ -98,11 +98,46 @@ def thanks(job: str = "acme-ml-01") -> dict:
     return page
 
 
+class Reader:
+    """The watch's one connection (readback.WatchReader) as the fake Chrome has it. It connects at its first read
+    (counted in `chrome.connects`); a tab in `chrome.hang` does not answer once, which drops the connection until the
+    next poll, as a read past read_seconds does."""
+
+    def __init__(self, chrome):
+        self.chrome, self.connected, self.broken = chrome, False, False
+
+    def poll(self) -> None:
+        self.chrome.polls += 1
+        if self.broken:
+            self.disconnect()
+
+    def read(self, target):
+        if self.broken:
+            raise readback.ReadbackError("the connection broke in this poll")
+        if not self.connected:
+            self.chrome.connects += 1
+            self.connected = True
+        tab = target["id"]
+        if tab in self.chrome.hang:
+            self.chrome.hang.discard(tab)
+            self.broken = True
+            raise readback.ReadbackError("the page did not answer")
+        self.chrome.calls.append(f"read_fields {tab}")
+        pages = self.chrome.script.setdefault(tab, [form(tab.removeprefix("N-"))])
+        page = pages.pop(0) if len(pages) > 1 else pages[0]
+        return readback.page_state(page), readback.snapshot(page, tab=tab, read_at="2026-11-06T10:05:00")
+
+    def disconnect(self) -> None:
+        if self.connected:
+            self.chrome.calls.append("disconnect")
+        self.connected = self.broken = False
+
+
 class Chrome:
     """The applying Chrome, the filling agent and the CDP reads. The agent fills each job's one-page form in a new tab
     and calls the real checkpoint service (blank, then filled with `marks`), so the drafts are recorded by the real
-    code; it stops before submit. The reads made while code watches a filled tab come from `script`, one page per
-    read, the last one repeating."""
+    code; it stops before submit. The reads made while code watches a filled tab go through one Reader per watch and
+    come from `script`, one page per read, the last one repeating."""
 
     running = True
 
@@ -115,6 +150,8 @@ class Chrome:
         self.calls: list[str] = []
         self.answers: dict[str, str] = {}  # what the checkpoint service answered the agent's filled call
         self.prompts: list[str] = []
+        self.connects = self.polls = 0
+        self.hang: set[str] = set()
 
     def ensure_chrome(self):
         self.calls.append("ensure_chrome")
@@ -160,11 +197,9 @@ class Chrome:
         snap = readback.snapshot(page, tab=target["id"], read_at="2026-11-06T10:00:00")
         return readback.FinalPage(fields, readback.page_state(page), snap)
 
-    def read_fields(self, target):
-        self.calls.append(f"read_fields {target['id']}")
-        pages = self.script.setdefault(target["id"], [form(target["id"].removeprefix("N-"))])
-        page = pages.pop(0) if len(pages) > 1 else pages[0]
-        return readback.page_state(page), readback.snapshot(page, tab=target["id"], read_at="2026-11-06T10:05:00")
+    def watch_reader(self) -> Reader:
+        self.calls.append("watch_reader")
+        return Reader(self)
 
     def tab_state(self, target):
         self.calls.append("tab_state")
@@ -476,7 +511,8 @@ def test_the_final_is_the_last_read_before_the_page_says_received(box):  # P4
     assert why["kind"] == "edited" and 0 < why["change"] <= 0.5
     assert (other["kind"], other["change"], other["final"]["text"]) == ("unchanged", 0, DRAFT_ELSE)
     watched = [call for call in box.form_fill_runner.calls if call not in ("targets", "ensure_chrome")]
-    assert watched[-3:] == ["read_fields N-acme-ml-01"] * 3  # after the fill and the read back, only reads
+    after = watched[watched.index("read") + 1 :]  # after the fill and its read back: one connection, reads only
+    assert after == ["watch_reader", *["read_fields N-acme-ml-01"] * 3, "disconnect"]
 
 
 def test_a_closed_tab_keeps_the_last_read(box):  # P5
@@ -546,6 +582,55 @@ def test_the_watch_never_starts_the_applying_chrome(box):
     box.open_answer_pairs()
     assert "ensure_chrome" not in box.form_fill_runner.calls[calls:]
     assert pair(box, run_id)["status"] == "no_final"
+
+
+# --- one connection per watch (open-answers decision 8) --------------------------------------------------------
+
+
+def test_a_watch_keeps_one_connection_for_every_poll_and_every_tab(box):
+    script = {
+        "acme-ml-01": [form(), form(), form(why=EDITED_WHY), form(why=EDITED_WHY), thanks()],
+        "beta-ds-02": [form("beta-ds-02"), form("beta-ds-02"), form("beta-ds-02"), thanks("beta-ds-02")],
+    }
+    run(box, script, jobs=("acme-ml-01", "beta-ds-02"))
+    chrome = box.form_fill_runner
+    assert chrome.calls.count("read_fields N-acme-ml-01") == 5 and chrome.calls.count("read_fields N-beta-ds-02") == 4
+    assert chrome.polls == 5  # the owner is checked once a poll, without connecting again
+    assert (chrome.connects, chrome.calls.count("watch_reader"), chrome.calls.count("disconnect")) == (1, 1, 1)
+
+
+def test_a_read_that_hangs_drops_the_connection_and_the_next_poll_connects_again(box):
+    box.form_fill_runner.hang = {"N-acme-ml-01"}  # its first read does not answer
+    run_id = run(box, {"acme-ml-01": [form(why=EDITED_WHY), thanks()]})
+    chrome = box.form_fill_runner
+    assert chrome.connects == 2 and chrome.calls.count("watch_reader") == 1  # the same reader, connected again
+    assert pair(box, run_id)["final"]["text"] == flat(EDITED_WHY)  # the hang lost nothing
+
+
+def test_watching_again_after_yielding_connects_again(box):
+    short_watch(box)
+    run_id = run(box, {"acme-ml-01": [form(why=EDITED_WHY)]})  # the first watch ends at its time limit
+    assert (box.form_fill_runner.connects, box.form_fill_runner.calls.count("disconnect")) == (1, 1)
+    box.form_fill_runner.script["N-acme-ml-01"] = [form(why=EDITED_WHY), thanks()]
+    box.open_answer_pairs()  # watching resumes: a new connection
+    assert (box.form_fill_runner.connects, box.form_fill_runner.calls.count("disconnect")) == (2, 2)
+    assert pair(box, run_id)["status"] == "final"
+
+
+def test_no_time_limit_watches_while_pairs_wait(box):
+    watch = box.settings.open_answers.watch.model_copy(update={"timeout_seconds": None})
+    box.settings = box.settings.model_copy(
+        update={"open_answers": box.settings.open_answers.model_copy(update={"watch": watch})}
+    )
+    pages = [form()] * 400 + [form(why=EDITED_WHY), thanks()]  # far past the default 30 minutes at 5 s a poll
+    run_id = run(box, {"acme-ml-01": pages})
+    why = pair(box, run_id)
+    assert (why["final"]["ended"], why["final"]["text"]) == ("received", flat(EDITED_WHY))
+    assert box.clock.now - 1000 > 1800  # it ran past the default 30 minutes
+    raw_settings = yaml.safe_load((ROOT / "configs/default.yaml").read_text(encoding="utf-8"))
+    null = {**raw_settings, "open_answers": {"watch": {"timeout_seconds": None}}}  # timeout_seconds: null
+    assert Settings.model_validate(null).open_answers.watch.timeout_seconds is None
+    assert Settings.model_validate(raw_settings).open_answers.watch.timeout_seconds == 1800  # the default for now
 
 
 # --- P10-P13: the questions ----------------------------------------------------------------------------------------
@@ -799,13 +884,17 @@ def test_a_new_run_ends_the_watch_first_and_the_pairs_go_on_waiting(box):
     assert box.apply_status().get("other_session") is None  # this server's own watch, not another session
     wait_until(lambda: pair(box, first)["last_seen"] is not None)
     box.form_fill_runner.drafts["beta-ds-02"] = (DRAFT_WHY, DRAFT_ELSE)
+    disconnects = box.form_fill_runner.calls.count("disconnect")  # read before the new run starts its own reads
     second = box.start_form_fill(job_list(box, ("beta-ds-02",)))["run_id"]
     assert watch["closed"] and watch["status"] == "stopped"
+    assert disconnects == 0 and box.form_fill_runner.calls.count("disconnect") >= 1  # it let the Chrome go first
     assert pair(box, first)["status"] == "watching"  # it goes on waiting for its final
     wait_until(lambda: box._watch is not watch and box._watch is not None)
+    wait_until(lambda: box.form_fill_runner.connects == 2)  # watching resumes with a connection of its own
     box.stop_applying()  # "停下" also ends a watch
     wait_until(lambda: box._watch["closed"])
     assert box.store.activity() is None
+    assert box.form_fill_runner.calls.count("disconnect") == box.form_fill_runner.connects == 2
     assert pair(box, second, "beta-ds-02")["status"] == "watching"
 
 
@@ -866,6 +955,8 @@ def test_the_status_lists_the_watch_and_the_waiting_pairs(box):
 
 # --- real browser (synthetic local page) ------------------------------------------------------------------------
 
+DOWNLOAD = "<a id='get' href='data:text/plain,synthetic%20download' download='synthetic.txt'>get</a>"
+
 
 def _target_id(page) -> str:
     session = page.context.new_cdp_session(page)
@@ -875,42 +966,96 @@ def _target_id(page) -> str:
         session.detach()
 
 
-def test_tab_fields_reads_a_text_area_in_a_real_browser(tmp_path):
+def owned_profile(tmp_path) -> Path:
+    """The workspace's dedicated profile made before Chrome starts, its ownership recorded as browser_session makes
+    it, with Chrome's own download folder set to a temporary one (never the user's Downloads). Returns that folder."""
+    root = Path(tmp_path).resolve()
+    profile = root / "browser" / "profile"
+    (profile / "Default").mkdir(parents=True)
+    downloads = root / "downloads"
+    downloads.mkdir()
+    prefs = {"download": {"default_directory": str(downloads), "prompt_for_download": False}}
+    (profile / "Default" / "Preferences").write_text(json.dumps(prefs), encoding="utf-8")
+    marker = {"root": str(root), "db_path": str(root / "coord.db"), "profile": str(profile)}
+    (root / "browser" / "owned-profile.json").write_text(json.dumps(marker), encoding="utf-8")
+    return downloads
+
+
+def pump(page, done) -> None:
+    """Let this thread's Playwright deliver its events while another thread works."""
+    while not done():
+        page.wait_for_timeout(50)
+
+
+def test_the_watch_reader_keeps_one_connection_and_leaves_downloads_and_dialogs_to_the_user(tmp_path):
     sync_api = pytest.importorskip("playwright.sync_api")
+    downloads = owned_profile(tmp_path)
+    log, steps = [], {name: threading.Event() for name in ("read", "alert", "hung", "accepted", "again")}
     with sync_api.sync_playwright() as p:
         context, binding = start_owned(tmp_path, p)
         try:
             page = context.new_page()
-            page.set_content(
-                f"<h1>Apply</h1><label for='why'>{WHY}</label><textarea id='why'></textarea>"
-                "<button type='button'>Submit application</button>"
-            )
+            page.set_content(f"<h1>Apply</h1><label for='why'>{WHY}</label><textarea id='why'></textarea>{DOWNLOAD}")
             page.fill("#why", EDITED_WHY)
-            target = {"id": _target_id(page), "url": page.url, "generation": binding.generation}
-            result = {}
-            reader = threading.Thread(
-                target=lambda: result.update(
-                    read=readback.tab_fields(binding, target, 20, expected=(binding.root, binding.db_path))
-                )
-            )
-            reader.start()
-            while reader.is_alive():  # Playwright's sync API answers only while this thread asks it something
-                page.wait_for_timeout(50)
-            state, snap = result["read"]
+            dialogs = []
+            page.on("dialog", lambda dialog: dialogs.append(dialog))  # the person the dialog is for
+            target = {"id": _target_id(page)}
+
+            def watch():  # the watch's own thread: the reader is made, used and closed here
+                reader = readback.WatchReader(binding, expected=(binding.root, binding.db_path), seconds=1.5)
+                try:
+                    reader.poll()
+                    log.append(("read", reader.read(target), reader.connects))
+                    log.append(("read", reader.read(target), reader.connects))  # no new connection
+                    steps["read"].set()
+                    steps["alert"].wait(10)
+                    try:
+                        reader.read(target)  # an alert left open holds the read
+                    except readback.ReadbackError as error:
+                        log.append(("hung", str(error)))
+                    steps["hung"].set()
+                    steps["accepted"].wait(10)
+                    reader.poll()  # the next poll lets the broken connection go
+                    log.append(("read", reader.read(target), reader.connects))
+                finally:
+                    reader.disconnect()
+                    steps["again"].set()
+
+            thread = threading.Thread(target=watch)
+            thread.start()
+            pump(page, steps["read"].is_set)
+            page.click("#get")  # the user downloads a file while the watch is connected
+            page.evaluate("setTimeout(() => alert('synthetic'), 0)")
+            page.wait_for_timeout(300)
+            steps["alert"].set()
+            pump(page, steps["hung"].is_set)
+            dialogs[0].accept()  # still open: the reader never dismissed it
+            page.wait_for_timeout(200)
+            steps["accepted"].set()
+            pump(page, steps["again"].is_set)
+            deadline = time.monotonic() + 5
+            while not any(downloads.iterdir()) and time.monotonic() < deadline:
+                page.wait_for_timeout(100)
+            thread.join(5)
         finally:
             finish_owned(binding)
-    (field,) = [f for f in snap.fields if f.question == WHY]
-    assert (field.control, field.value) == ("textarea", flat(EDITED_WHY))
-    assert state.before_submit and not state.received
+    (first, second, hung, third) = log
+    for _, (state, snap), _ in (first, second, third):
+        (field,) = [f for f in snap.fields if f.question == WHY]
+        assert field.value == flat(EDITED_WHY) and not state.received
+    assert (first[2], second[2], third[2]) == (1, 1, 2)  # one connection, and a new one only after the hang
+    assert hung[0] == "hung" and "1.5" in hung[1]
+    assert [f.name for f in downloads.iterdir()] == ["synthetic.txt"]  # in Chrome's own download folder
 
 
-def test_a_read_only_connection_leaves_the_page_s_dialogs_alone(tmp_path):
+def test_a_glance_leaves_the_page_s_dialogs_and_downloads_alone(tmp_path):
     sync_api = pytest.importorskip("playwright.sync_api")
+    downloads = owned_profile(tmp_path)
     with sync_api.sync_playwright() as p:
         context, binding = start_owned(tmp_path, p)
         try:
             page = context.new_page()
-            page.set_content("<h1>Apply</h1>")
+            page.set_content(f"<h1>Apply</h1>{DOWNLOAD}")
             seen = []
             page.on("dialog", lambda dialog: seen.append(dialog))  # the person or agent the dialog is for
             connected, done = threading.Event(), threading.Event()
@@ -922,32 +1067,35 @@ def test_a_read_only_connection_leaves_the_page_s_dialogs_alone(tmp_path):
 
             holder = threading.Thread(target=hold)
             holder.start()
-            while not connected.is_set():
-                page.wait_for_timeout(50)
+            pump(page, connected.is_set)
+            page.click("#get")
             page.evaluate("setTimeout(() => { document.title = 'confirm=' + confirm('Submit?') }, 50)")
             page.wait_for_timeout(1500)
             done.set()
-            while holder.is_alive():
-                page.wait_for_timeout(50)
+            pump(page, lambda: not holder.is_alive())
             assert len(seen) == 1
             seen[0].accept()
             page.wait_for_timeout(300)
             title = page.title()
+            deadline = time.monotonic() + 5
+            while not any(downloads.iterdir()) and time.monotonic() < deadline:
+                page.wait_for_timeout(100)
         finally:
             finish_owned(binding)
     assert title == "confirm=true"  # not dismissed by the read-only connection meanwhile
+    assert [f.name for f in downloads.iterdir()] == ["synthetic.txt"]  # not in Playwright's artifacts folder
 
 
-def test_the_runner_reads_fields_through_the_readback(monkeypatch, tmp_path):
-    calls = []
-    monkeypatch.setattr(readback, "tab_fields", lambda *args, **kwargs: calls.append((args, kwargs)) or "read")
+def test_the_runner_hands_the_watch_one_reader(monkeypatch, tmp_path):
+    made = []
+    monkeypatch.setattr(readback, "WatchReader", lambda *args, **kwargs: made.append((args, kwargs)) or "reader")
     s = settings()
     s = s.model_copy(
         update={"storage": s.storage.model_copy(update={"data_dir": str(tmp_path), "db_path": str(tmp_path / "a.db")})}
     )
     ff = runner.FormFillRunner(tmp_path, s, tmp_path / "profile.json")
     ff.binding = synthetic_binding()
-    assert ff.read_fields({"id": "N1"}) == "read"
-    ((args, kwargs),) = calls
-    assert args == (ff.binding, {"id": "N1"}, s.open_answers.watch.read_seconds)
-    assert kwargs["expected"] == browser_session.scope(s)
+    assert ff.watch_reader() == "reader"
+    ((args, kwargs),) = made
+    assert args == (ff.binding,)
+    assert kwargs == {"expected": browser_session.scope(s), "seconds": s.open_answers.watch.read_seconds}

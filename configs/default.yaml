@@ -182,7 +182,7 @@ open_answers:                     # 开放题答案库（specs/open-answers.md�
     rewritten_above: 0.5          # 改掉草稿的比例超过它算"重写"，不超过算"改过"；暂定，等有了真实的对再定（第 6 节第 3 问）
     ask_reason_above: 0.5         # 改掉的比例超过它就问一个原因选择题；暂定，默认就是重写的那些
   watch:                          # 运行结束后只读地看着填好的标签页，读回申请人的定稿（4.6 第 2 项）
-    timeout_seconds: 1800         # 一次最多看多久
+    timeout_seconds: 1800         # 一次最多看多久；写 null 就不限时（工具服务开着、还有对在等就一直看）。用户在 30 分钟和不限时之间还没选定
     poll_seconds: 5               # 多久读一次每个标签页
     read_seconds: 30              # 一次读最多多久（页面开着对话框时读会卡住）
 llm:

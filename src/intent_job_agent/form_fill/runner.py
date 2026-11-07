@@ -1087,16 +1087,15 @@ class FormFillRunner:
             expected=browser_session.scope(self.settings),
         )
 
-    def read_fields(self, target: dict):
-        """(where the page stands, its fields not masked yet): one read-only glance while code watches a filled tab
-        for the applicant's final open answers (specs/open-answers.md 4.6 item 2), at most open_answers.watch's
-        read_seconds."""
-        self.settings.require_external("read_fields", self.data_dir, self.profile)
-        return readback.tab_fields(
+    def watch_reader(self) -> readback.WatchReader:
+        """The one read-only connection a watch of filled tabs keeps for the applicant's final open answers (specs/
+        open-answers.md 4.6 item 2), each read at most open_answers.watch's read_seconds. The watch's thread uses and
+        closes it."""
+        self.settings.require_external("watch_reader", self.data_dir, self.profile)
+        return readback.WatchReader(
             self._binding(),
-            target,
-            self.settings.open_answers.watch.read_seconds,
             expected=browser_session.scope(self.settings),
+            seconds=self.settings.open_answers.watch.read_seconds,
         )
 
     def close_tab(self, target: dict) -> bool:

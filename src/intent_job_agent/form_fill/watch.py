@@ -21,14 +21,16 @@ def wait(
     clock: Callable[[], float],
     sleep: Callable[[float], None],
     poll_seconds: float,
-    timeout_seconds: float,
+    timeout_seconds: float | None,
     interrupt: Callable[[], object | None],
     look: Callable[[Hashable, dict], str | None],
+    each_poll: Callable[[], None] | None = None,
 ) -> tuple[object, dict]:
     """Wait without touching any page. Each time round: `interrupt()` first (a stop, a reply: anything but None ends
-    the wait at once), then the time limit counted from `since`, then each tab in `tabs` (key -> kept tab): one gone
-    from the browser ends as "closed", one still there is passed to `look(key, current)`, whose answer (None: not
-    yet) ends it. Ended tabs are removed from `tabs`. A tab list that cannot be read is tried again next time.
+    the wait at once), then the time limit counted from `since` (None: no limit), then `each_poll()` when given (the
+    watch of filled tabs checks its one connection there), then each tab in `tabs` (key -> kept tab): one gone from
+    the browser ends as "closed", one still there is passed to `look(key, current)`, whose answer (None: not yet)
+    ends it. Ended tabs are removed from `tabs`. A tab list that cannot be read is tried again next time.
     Returns (the interrupt's answer, "timeout", or "ended" once every tab it started with has ended; {key: how it
     ended})."""
     ended: dict = {}
@@ -37,8 +39,10 @@ def wait(
         said = interrupt()
         if said is not None:
             return said, ended
-        if clock() - since >= timeout_seconds:
+        if timeout_seconds is not None and clock() - since >= timeout_seconds:
             return "timeout", ended
+        if tabs and each_poll is not None:
+            each_poll()
         if tabs:
             try:
                 listed = browser.targets()
