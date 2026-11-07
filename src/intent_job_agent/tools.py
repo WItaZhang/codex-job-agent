@@ -3221,6 +3221,14 @@ class Toolbox:
         except Exception:  # noqa: BLE001 - no bank to offer
             return None
 
+    @staticmethod
+    def _redactor(applicant) -> Redactor:
+        """The contact redactor from profile.json, read by code only; its values never leave this process."""
+        try:
+            return Redactor.from_profile(json.loads(applicant.profile.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as error:
+            raise InvariantError(f"profile.json 读不出来（{type(error).__name__}）") from None
+
     def _own_watch(self, row: dict) -> bool:
         """Whether an apply_running row is this server's watch of filled tabs, still open."""
         watch = self._watch
@@ -3319,7 +3327,7 @@ class Toolbox:
         the applicant says they are done ("改完了": read now). Returns how the watch ended: done, timeout, stopped."""
         limits = self.settings.open_answers
         applicant = applicant_files.load(self.data_dir, self.settings.apply.applicant_dir)
-        redactor = Redactor.from_profile(json.loads(applicant.profile.read_text(encoding="utf-8")))  # code only
+        redactor = self._redactor(applicant)
         store = open_answer_pairs.PairStore(self._pairs_dir(), redactor)
         pairs = {pair.id: pair for pair in store.all() if pair.status == "watching"}
         wid, browser = watch["run_id"], self._browser(applicant)
@@ -3528,7 +3536,7 @@ class Toolbox:
         bank = applicant.open_answers
         if question != "reason" and bank is None:
             raise InvariantError("还没有答案库：applicant.yaml 没写 open_answers（docs/usage.md 开放题答案库一节）")
-        redactor = Redactor.from_profile(json.loads(applicant.profile.read_text(encoding="utf-8")))  # code only
+        redactor = self._redactor(applicant)
         store = open_answer_pairs.PairStore(self._pairs_dir(), redactor)
         pair = store.load(pair_id)
         limits = self.settings.open_answers

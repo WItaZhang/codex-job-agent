@@ -505,6 +505,20 @@ def test_done_editing_reads_that_tab_at_once_and_the_others_go_on(box):  # P7
     assert (beta["final"]["ended"], beta["kind"]) == ("received", "unchanged")
 
 
+def test_done_editing_after_the_watch_ended_starts_a_new_one_that_reads_at_once(box):  # P7
+    short_watch(box)
+    run_id = run(box, {"acme-ml-01": [form()]})  # nobody edits within the watch: it ends at its time limit
+    assert pair(box, run_id)["status"] == "watching"
+    box.form_fill_runner.script["N-acme-ml-01"] = [form(why=REWRITTEN_WHY)]  # the applicant came back and edited
+    reads = box.form_fill_runner.calls.count("read_fields N-acme-ml-01")
+    status = box.open_answer_pairs(read_now=True)
+    assert status["reading_now"] == "all"
+    why = pair(box, run_id)
+    assert (why["final"]["ended"], why["final"]["text"], why["kind"]) == ("user_done", flat(REWRITTEN_WHY), "rewritten")
+    assert box.form_fill_runner.calls.count("read_fields N-acme-ml-01") == reads + 1  # one read, at once
+    assert pair(box, run_id, field="p1.4")["final"]["ended"] == "user_done"  # the same page shows both
+
+
 def test_only_what_this_watch_saw_counts(box):  # P8
     short_watch(box)
     script = {"acme-ml-01": [form(why=EDITED_WHY)], "beta-ds-02": [form("beta-ds-02")]}
