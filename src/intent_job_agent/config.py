@@ -148,7 +148,7 @@ class FormFill(_Section):
 class OpenAnswers(_Section):
     """The applicant's open-answer bank (specs/open-answers.md); the file is named in applicant.yaml."""
 
-    max_chars: int = Field(default=8000, gt=0)  # the section the accepted entries make; over it is a problem, never cut
+    max_chars: int = Field(default=16000, gt=0)  # the section the accepted entries make; over it: a problem, never cut
 
 
 class LLM(_Section):

@@ -2,7 +2,7 @@
 
 规格见 `open-answers.md`，计划见 `open-answers.plan.md`。下面的申请人（Sam Example）、联系方式和答案都是编的（synthetic），不来自任何真实申请人或知识库。O1–O7 的数据在 `tests/fixtures/open_answers/samples.yaml`，以那份文件为准；O8–O11 写在测试里（`tests/test_open_answers.py`）。
 
-共同设定：`profile.json` 里申请人的邮箱 `sam.synthetic@example.test`、电话 `555-0100`、地址 `1 Synthetic Way`、城市 `Austin`、领英 `https://www.linkedin.com/in/sam-synthetic`。`applicant.yaml` 写 `open_answers: open_answers.yaml`（O10 除外）。预算 `open_answers.max_chars: 8000`（O8 除外）。
+共同设定：`profile.json` 里申请人的邮箱 `sam.synthetic@example.test`、电话 `555-0100`、地址 `1 Synthetic Way`、城市 `Austin`、领英 `https://www.linkedin.com/in/sam-synthetic`。`applicant.yaml` 写 `open_answers: open_answers.yaml`（O10 除外）。预算 `open_answers.max_chars: 16000`（O8 除外）。
 
 ## O1 典型答案库
 
