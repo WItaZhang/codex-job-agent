@@ -103,6 +103,7 @@ Codex 与 Claude Code 的项目配置仅放行指定的提交级工具，不扩�
 
 岗位发现复刻自 [ApplyPilot](https://github.com/Pickle-Pixel/ApplyPilot)：用 JobSpy 按关键词和地点搜索 Indeed、LinkedIn、
 Glassdoor、ZipRecruiter、Google Jobs，另有 Workday 雇主搜索和 smartextract（解析招聘页面），最后打开岗位页面补全原文。
+这些都在后台进行，不开浏览器窗口：smartextract 读到内容太少的页面，会用不开窗口的 Chromium 再读一遍。想照 ApplyPilot 原样开窗口重读，在 `configs/default.yaml` 写 `discovery.show_browser_window: true`（窗口会跳到最前面）。
 
 另有可选的公司招聘板，写在 `boards.yaml` 里：Greenhouse、Lever、Ashby，以及用 Avature 搭建招聘站点的公司（如联想）。
 Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avature 的公司"：它按你的意图搜索候选站点，逐个试读第一页，

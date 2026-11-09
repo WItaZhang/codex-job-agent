@@ -19,6 +19,7 @@ discovery:
   applypilot_dir: applypilot      # ApplyPilot 工作库与配置的目录，位于 storage.data_dir 下
   enrich_limit: 100               # 补全原文时每个站点最多处理多少个岗位（ApplyPilot 默认值）
   proxy_env: INTENT_AGENT_PROXY   # 代理所在的环境变量，格式 host:port 或 host:port:user:pass
+  show_browser_window: false      # smartextract 重读内容太少的页面时：false 用不开窗口的 Chromium（新无头模式）；true 照 ApplyPilot 原样开窗口，会抢焦点（决定 37）
   avature:                        # Avature 招聘站点（spec §10 第 39–48 条）
     request_delay_seconds: 0.5    # 同一次抓取中两次请求之间的间隔
     max_pages: 300                # 每个站点最多读多少页列表，超过就算抓取失败

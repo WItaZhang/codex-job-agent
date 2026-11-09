@@ -42,6 +42,7 @@ class Discovery(_Section):
     applypilot_dir: str
     enrich_limit: int
     proxy_env: str
+    show_browser_window: bool = False  # smartextract's second read of a thin page; True: a visible window
     avature: AvatureDiscovery
 
 
