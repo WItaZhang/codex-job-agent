@@ -601,3 +601,19 @@ S1条件采用：锁定MCP0.0.83/Playwright1.56.0先证明精确WS、CDP browser
 3. 你在场重跑时关掉标签页算"跳过"（先这样，不算）。
 
 **规则写在** `spec.md` 4.10 第 10 条，5.1，§9，§10 第 116–121 条；配置 `apply.gate_wait`；计划和样例 `specs/gate-list.plan.md`。
+
+
+## 决定 37（2026-11-09）：smartextract 重读页面时不开窗口
+
+用户原话（2026-11-09）："怎么让fetchjob不要老跳窗口呢？这个用的是什么浏览器？"
+
+原因：/fetch-jobs 里只有 smartextract 会开看得见的浏览器窗口。JobSpy、Workday 和招聘板只发网络请求；补全原文和 smartextract 的第一次读用 Playwright 的无头浏览器（headless shell），没有窗口。smartextract 读到的页面清理后不到 5000 字、又不像验证码页时，调用 `collect_page_intelligence(url, headless=False)` 再读一遍：启动 Playwright 自带的 Chromium（`ms-playwright/chromium-*/…/Chromium.app`，不是 Google Chrome，也不是投递用的 Chrome-Jobs，没有登录任何账号），开一个窗口，读完就关。macOS 上它一启动就跳到最前面、抢走焦点。只读核对（进程和系统日志）：2026-11-09 用户的每日抓取在 12:57 到 12:59 之间启动了 7 次这样的窗口，每次 3 到 15 秒；第一次读用的 headless shell 不在 Dock 里出现，也没有抢焦点。
+
+决定：协调者定（决定 25），用户提出了要求。在适配层运行 smartextract 期间，它要开窗口的那次启动改成同一个完整 Chromium 的新无头模式（Playwright 的 `channel="chromium"`、`headless=True`）：浏览器和开窗口时是同一个，只是不开窗口。在本机（macOS 26.5）对一个 `data:` 页面核对过：这样启动的 Chromium 只登记成不进 Dock 的后台程序（`lsappinfo` 显示 `type="UIElement"`），每 50 毫秒查一次最前面的程序，前后都没变。第一次读（headless shell）、什么时候重读、等待和超时都不改；vendor 代码不改。新配置 `discovery.show_browser_window`，默认 `false`；写 `true` 恢复它原来开窗口的重读。
+
+没选：
+- 不重读，只用第一次读到的内容：内容少的页面多半就抓不到岗位，丢了它重读的用处。
+- 照旧开窗口，只把窗口放到屏幕外：新启动的程序照样抢焦点。
+- 照旧：用户明确不想要。
+
+代价和风险：有的网站给无头模式的内容可能比给有窗口的少，这些站点可能抓到的岗位变少；/fetch-jobs 的来源报告照旧列出读不出来的站点，真的少了可以把 `show_browser_window` 改回 `true`。不加任何规避网站检测的参数，也不承诺不遇到验证码。已经在跑的抓取用的是旧代码，新开的会话才用上。
