@@ -157,7 +157,7 @@ class OpenAnswerPairs(_Section):
 class OpenAnswerWatch(_Section):
     """How code watches a filled tab for the applicant's final (specs/open-answers.md 4.6, item 2)."""
 
-    timeout_seconds: float | None = Field(default=1800, gt=0)  # one watch at most; null: while pairs wait
+    timeout_seconds: float | None = Field(default=None, gt=0)  # one watch at most; null (default): while pairs wait
     poll_seconds: float = Field(default=5, gt=0)  # each tab is read once every poll
     read_seconds: float = Field(default=30, gt=0)  # one read at most (a dialog left open holds a read)
 

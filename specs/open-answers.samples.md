@@ -79,7 +79,7 @@ O1 里 `anything-else-gap` 有两条否掉的说法，注入段写成一行 `Rej
 
 规格见 4.6，计划见 `open-answers.slice3.plan.md`。草稿和定稿的文字在 `tests/fixtures/open_answers/pairs.yaml`（以那份文件为准），其余写在测试里（`tests/test_open_answer_pairs.py`）。
 
-共同设定：申请人还是 Sam Example（联系方式同上）。岗位 `acme-ml-01`（Acme Robotics，ML Engineer），表单只有一页、在 `jobs.example.test` 上：p1.1 First Name、p1.2 Email、p1.3 "Why do you want to join Acme Robotics?"（多行文本）、p1.4 "Is there anything else you would like us to know?"（多行文本）。填表 agent 填完调用 `checkpoint("filled", open_answers=[{p1.3, why_role}, {p1.4, anything_else}])`，停在提交前。配置用默认值：每 5 秒读一次，最多看 30 分钟，界线 0.5。
+共同设定：申请人还是 Sam Example（联系方式同上）。岗位 `acme-ml-01`（Acme Robotics，ML Engineer），表单只有一页、在 `jobs.example.test` 上：p1.1 First Name、p1.2 Email、p1.3 "Why do you want to join Acme Robotics?"（多行文本）、p1.4 "Is there anything else you would like us to know?"（多行文本）。填表 agent 填完调用 `checkpoint("filled", open_answers=[{p1.3, why_role}, {p1.4, anything_else}])`，停在提交前。配置用默认值：每 5 秒读一次，不限时，界线 0.5；要看到时限的样例（如 P8）把时限设成 20 秒。
 
 ### P1–P3 分类
 

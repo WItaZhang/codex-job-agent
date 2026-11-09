@@ -65,4 +65,4 @@ CLAUDE.md "验证" 的四条命令全部通过；`git merge main` 后再跑一�
 - 多页表单（Workday）前面页上的开放题；富文本编辑器里的答案。
 - 收进作者真实的答案库文件。
 - 两个真实的工具服务之间，看是不是真的让路。
-- 用户在 30 分钟和不限时之间选定以后，改 `open_answers.watch.timeout_seconds` 的默认值。
+- 用户在 30 分钟和不限时之间选定以后，改 `open_answers.watch.timeout_seconds` 的默认值。（2026-11-08 已改成不限时，决定 9。）
