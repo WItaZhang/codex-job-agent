@@ -10,6 +10,7 @@ import os
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +19,7 @@ import yaml
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from intent_job_agent import applypilot_bridge as bridge
+from intent_job_agent.config import Settings
 from intent_job_agent.domain import Job, Salary
 from intent_job_agent.store import Store
 from intent_job_agent.tools import SCHEDULED_TOOLS, TOOL_TIERS, Toolbox
@@ -26,7 +28,7 @@ from intent_job_agent.vendor.applypilot.discovery import smartextract as ap_smar
 from intent_job_agent.vendor.applypilot.discovery import workday as ap_workday
 from intent_job_agent.vendor.applypilot.enrichment import detail as ap_detail
 
-from .conftest import BASE_INTENT, BASE_VOCAB, settings
+from .conftest import BASE_INTENT, BASE_VOCAB, ROOT, settings
 
 LONG = "SYNTHETIC posting. " + "Build and ship machine learning systems with a small team. " * 8
 LLM_KEYS = ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL")
@@ -362,9 +364,97 @@ def test_an_interrupt_still_stops_smartextract(box, monkeypatch):
         raise KeyboardInterrupt
 
     monkeypatch.setattr(ap_smart, "_run_one_site", interrupted)
+    before = ap_smart.sync_playwright
     with pytest.raises(KeyboardInterrupt):
         bridge.run_sources(box.data_dir, box.settings, ["smartextract"], enrich=False)
     assert ap_smart._run_one_site is interrupted
+    assert ap_smart.sync_playwright is before  # the windowless launcher is put back too (decision 37)
+
+
+# --- smartextract reads a thin page again without a window (decision 37) --------------------------
+
+
+class _ThinPage(http.server.BaseHTTPRequestHandler):
+    """A SYNTHETIC careers page that reads almost empty and is no CAPTCHA, so smartextract reads it again."""
+
+    def do_GET(self):  # noqa: N802
+        body = b"<html><head><title>Careers</title></head><body><p>Loading jobs</p></body></html>"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def thin_site(box, monkeypatch):
+    """One SYNTHETIC smartextract site on the loopback interface; the model step plans JSON-LD and finds nothing."""
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ThinPage)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/careers"
+    monkeypatch.setenv("GEMINI_API_KEY", "synthetic-key")
+    site = {"name": "Synthetic Thin Board", "url": url, "type": "static"}
+    (box.data_dir / "sites.yaml").write_text(yaml.safe_dump({"sites": [site]}), encoding="utf-8")
+    searches(box)
+    plan = json.dumps({"strategy": "json_ld", "reasoning": "SYNTHETIC", "extraction": {"title": "title"}})
+    monkeypatch.setattr(ap_smart, "ask_llm", lambda prompt: (plan, 0.0, {"response_chars": len(plan)}))
+    yield site
+    server.shutdown()
+
+
+def recorded_launches(monkeypatch) -> list[dict]:
+    """The options each Chromium launch in smartextract reaches Playwright with. A launch asking for a window is
+    recorded and refused, so a test never opens one on the screen."""
+    real = ap_smart.sync_playwright
+    seen: list[dict] = []
+
+    @contextmanager
+    def recording():
+        with real() as playwright:
+            launch = playwright.chromium.launch
+
+            def record(**options):
+                seen.append(options)
+                if options.get("headless") is False:
+                    raise RuntimeError("SYNTHETIC: tests never open a browser window")
+                return launch(**options)
+
+            playwright.chromium.launch = record
+            yield playwright
+
+    monkeypatch.setattr(ap_smart, "sync_playwright", recording)
+    return seen
+
+
+def test_a_thin_page_is_read_again_without_a_window(box, monkeypatch, thin_site):
+    launches = recorded_launches(monkeypatch)
+    recording = ap_smart.sync_playwright
+    report = discover(box, sources=("smartextract",))["sources"]["smartextract"]
+    assert report["error"] is None and report["failed_sites"] == []  # read through; the page lists no jobs
+    assert launches == [
+        {"headless": True},  # the first read: Playwright's headless shell, as before
+        {"headless": True, "channel": "chromium"},  # the second: the full Chromium in its new headless mode
+    ]
+    assert ap_smart.sync_playwright is recording  # put back when the run ends
+
+
+def test_the_window_comes_back_only_when_the_setting_asks(box, monkeypatch, thin_site):
+    launches = recorded_launches(monkeypatch)
+    discovery = box.settings.discovery.model_copy(update={"show_browser_window": True})
+    box.settings = box.settings.model_copy(update={"discovery": discovery})
+    report = discover(box, sources=("smartextract",))["sources"]["smartextract"]
+    assert launches == [{"headless": True}, {"headless": False}]  # ApplyPilot's own visible second read
+    (failed,) = report["failed_sites"]
+    assert "tests never open a browser window" in failed["error"]
+
+
+def test_no_browser_window_by_default():
+    raw = yaml.safe_load((ROOT / "configs/default.yaml").read_text(encoding="utf-8"))
+    assert Settings.model_validate(raw).discovery.show_browser_window is False
+    del raw["discovery"]["show_browser_window"]
+    assert Settings.model_validate(raw).discovery.show_browser_window is False  # an older config gets the same
 
 
 def test_missing_searches_file_is_reported(box):

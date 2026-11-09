@@ -214,7 +214,8 @@ def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: 
                 else:
                     from .vendor.applypilot.discovery import smartextract
 
-                    with isolated_sites(smartextract) as report["failed_sites"]:
+                    show_window = settings.discovery.show_browser_window
+                    with isolated_sites(smartextract) as report["failed_sites"], windowless(smartextract, show_window):
                         report["stats"] = smartextract.run_smart_extract()
         except Exception as error:  # one source's failure must not stop the others
             report["error"] = f"{type(error).__name__}: {error}"
@@ -258,6 +259,40 @@ def isolated_sites(smartextract):
         yield failed
     finally:
         smartextract._run_one_site = original
+
+
+@contextmanager
+def windowless(smartextract, show_window: bool):
+    """While open, smartextract reads a thin page again without a window. It reads each page with Playwright's
+    headless shell and, when the cleaned page is under 5000 characters and looks like no CAPTCHA, reads it again in a
+    visible Chromium window, which on macOS comes to the front and takes the focus, once for every such page. Here
+    that second read starts the same full Chromium in its new headless mode (channel "chromium"): the same browser,
+    with no window. First reads, when to read again, the waits and the timeouts stay its own. `show_window`
+    (discovery.show_browser_window) keeps its visible window. Its own launcher is back when this closes (decision
+    37)."""
+    original = smartextract.sync_playwright
+    if not show_window:
+        smartextract.sync_playwright = lambda: _no_window(original)
+    try:
+        yield
+    finally:
+        smartextract.sync_playwright = original
+
+
+@contextmanager
+def _no_window(sync_playwright):
+    """One Playwright for smartextract whose Chromium opens no window: a launch asking for one starts the full
+    browser in its new headless mode instead; other launches are left as asked."""
+    with sync_playwright() as playwright:
+        launch = playwright.chromium.launch
+
+        def no_window(**options):
+            if options.get("headless") is False:
+                options = {**options, "headless": True, "channel": "chromium"}
+            return launch(**options)
+
+        playwright.chromium.launch = no_window  # this Playwright only
+        yield playwright
 
 
 def _error_line(text) -> str:
