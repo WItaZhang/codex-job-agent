@@ -330,10 +330,11 @@ def test_the_thresholds_and_the_watch_are_provisional_values_in_the_config():
     text = (ROOT / "configs/default.yaml").read_text(encoding="utf-8")
     loaded = yaml.safe_load(text)["open_answers"]
     assert loaded["pairs"] == {"dir": "open-answers/pairs", "rewritten_above": 0.5, "ask_reason_above": 0.5}
-    assert loaded["watch"] == {"timeout_seconds": 1800, "poll_seconds": 5, "read_seconds": 30}
+    assert loaded["watch"] == {"timeout_seconds": None, "poll_seconds": 5, "read_seconds": 30}  # decision 9
     old = {key: value for key, value in yaml.safe_load(text).items() if key != "open_answers"}  # an older workspace
     defaults = Settings.model_validate(old).open_answers
     assert (defaults.pairs.rewritten_above, defaults.watch.poll_seconds, defaults.max_chars) == (0.5, 5, 16000)
+    assert defaults.watch.timeout_seconds is None  # an older workspace gets no limit too
 
 
 # --- P9: the drafts the checkpoint service records -------------------------------------------------------------
@@ -617,20 +618,17 @@ def test_watching_again_after_yielding_connects_again(box):
     assert pair(box, run_id)["status"] == "final"
 
 
-def test_no_time_limit_watches_while_pairs_wait(box):
-    watch = box.settings.open_answers.watch.model_copy(update={"timeout_seconds": None})
-    box.settings = box.settings.model_copy(
-        update={"open_answers": box.settings.open_answers.model_copy(update={"watch": watch})}
-    )
-    pages = [form()] * 400 + [form(why=EDITED_WHY), thanks()]  # far past the default 30 minutes at 5 s a poll
+def test_no_time_limit_by_default_watches_while_pairs_wait(box):  # decision 9
+    raw_settings = yaml.safe_load((ROOT / "configs/default.yaml").read_text(encoding="utf-8"))
+    assert Settings.model_validate(raw_settings).open_answers.watch.timeout_seconds is None  # the default: no limit
+    assert box.settings.open_answers.watch.timeout_seconds is None
+    pages = [form()] * 400 + [form(why=EDITED_WHY), thanks()]  # far past 30 minutes at 5 s a poll
     run_id = run(box, {"acme-ml-01": pages})
     why = pair(box, run_id)
     assert (why["final"]["ended"], why["final"]["text"]) == ("received", flat(EDITED_WHY))
-    assert box.clock.now - 1000 > 1800  # it ran past the default 30 minutes
-    raw_settings = yaml.safe_load((ROOT / "configs/default.yaml").read_text(encoding="utf-8"))
-    null = {**raw_settings, "open_answers": {"watch": {"timeout_seconds": None}}}  # timeout_seconds: null
-    assert Settings.model_validate(null).open_answers.watch.timeout_seconds is None
-    assert Settings.model_validate(raw_settings).open_answers.watch.timeout_seconds == 1800  # the default for now
+    assert box.clock.now - 1000 > 1800  # it ran past 30 minutes
+    limited = {**raw_settings, "open_answers": {"watch": {"timeout_seconds": 1800}}}  # a limit can still be set
+    assert Settings.model_validate(limited).open_answers.watch.timeout_seconds == 1800
 
 
 # --- P10-P13: the questions ----------------------------------------------------------------------------------------
