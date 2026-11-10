@@ -21,7 +21,7 @@
 
 来源 run_id + job_id 是不可变接续键。SQLite 事务同时登记 apply_running 互斥和接续记录；并发/重复“继续”返回已有运行，不再启动第二个 agent。跨宿主重启保留关系。再次遇到门槛时用新的结果运行编号接续；中断而结果不明时拒绝自动重复执行。
 
-独立填表不改 applications/holds/偏好；只增加接续协调记录。当前 /apply 清单的 prepare_resume/resume_applying 仍按原流程重填，只填分支的原页路由不在本片实现范围。不能用独立接续入口冒充 held 状态已更新。
+独立填表不改 applications/holds/偏好；只增加接续协调记录。/apply 清单的 prepare_resume/resume_applying 已通过 [连续投递切片](apply-continuity.md) 接入同一原页执行能力，并在自己的流程里更新 held。不能用独立接续入口冒充 held 状态已更新。
 
 ## 验收
 

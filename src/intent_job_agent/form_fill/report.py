@@ -322,7 +322,7 @@ def _problems(report: JobReport) -> set[str]:
     return keys | {key for r in report.fields if r.result == "ambiguous" for key in r.candidates}
 
 
-def summary_md(run_id: str, reports, skipped=()) -> str:
+def summary_md(run_id: str, reports, skipped=(), blocked=()) -> str:
     """The run's summary. `skipped`: jobs not visited because they were recorded before (spec 4.1)."""
     reports = list(reports)
     counts = {c: sum(r.conclusion == c for r in reports) for c in CONCLUSIONS}
@@ -376,7 +376,15 @@ def summary_md(run_id: str, reports, skipped=()) -> str:
             last = CONCLUSIONS.get(item.get("last_conclusion") or "", item.get("last_conclusion") or "没有结论")
             lines.append(
                 f"- {item['job_id']}：已录制，请用重放重测（录制 {item['recording_id']}，"
-                f"上次运行 {item.get('last_run')} 的结论：{last}）。要再真实访问，在清单里写 revisit: true。"
+                f"上次运行 {item.get('last_run')} 的结论：{last}）。重新访问须提供绑定最新运行的一次重开原因。"
+            )
+        lines.append("")
+    if blocked:
+        lines += ["## 已有申请，未重新访问", ""]
+        for item in blocked:
+            lines.append(
+                f"- {item['job_id']}：{item['reason']}；原运行 {item.get('run_id')}，"
+                f"原岗位 {item.get('source_job_id')}。先检查原页并接续，未启动新申请。"
             )
         lines.append("")
     repeated = [f"- {key}：{'、'.join(jobs)}" for key, jobs in seen.items() if len(jobs) >= 2]
@@ -384,7 +392,7 @@ def summary_md(run_id: str, reports, skipped=()) -> str:
     return "\n".join(lines)
 
 
-def write_reports(run_dir: Path, reports, redactor, skipped=()) -> Path:
+def write_reports(run_dir: Path, reports, redactor, skipped=(), blocked=()) -> Path:
     """<job>.json for each report and summary.md, all masked, in the run folder. Returns summary.md's path."""
     run_dir = Path(run_dir)
     reports = list(reports)
@@ -393,5 +401,5 @@ def write_reports(run_dir: Path, reports, redactor, skipped=()) -> Path:
         text = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
         (run_dir / f"{report.job_id}.json").write_text(text, encoding="utf-8")
     summary = run_dir / "summary.md"
-    summary.write_text(redactor.mask(summary_md(run_dir.name, reports, skipped)), encoding="utf-8")
+    summary.write_text(redactor.mask(summary_md(run_dir.name, reports, skipped, blocked)), encoding="utf-8")
     return summary

@@ -2,7 +2,7 @@
 
 ## 1（2026-10-23）：B1/B2与S1/S2收敛（总决定29）
 
-甲方采纳/tmp/public-r1b-plan-review.md：四种身份失效结果明确，submit已launch结果不明held/interrupted，未launch无虚假attempt；stop不能覆盖安全优先级。旧或不同generation不接管旧tab，但必须保留从岗位地址重开并核查已提交的恢复路线。
+甲方采纳/tmp/public-r1b-plan-review.md：四种身份失效结果明确，submit已launch结果不明held/interrupted，未launch无虚假attempt；stop不能覆盖安全优先级。旧或不同generation不接管旧tab，但必须保留从岗位地址重开并核查已提交的恢复路线。 **恢复路线已被决定 11 及总决定 41 取代。**
 
 S1有条件采用：先用锁定MCP0.0.83/Playwright1.56.0空profile本地探针证明精确WS、CDP browserPID、PID/start/profile核验；成立后不用强制lsof，失败报告不退HTTP裸端口。GUID/CDP自报不认证恶意同用户进程。
 
@@ -59,3 +59,7 @@ CI39929809213实际页面为Layer 1 Sandbox=Namespace、PID namespaces=Yes、Net
 ## 10：合并准备实际modal失败阻塞整合（总决定29、模块决定39）
 
 旧429a735远端绿不能覆盖7d914ed合并准备本地原断言重复失败；甲方扩大本轮到最小截图绘制同步修复，未批准生产像素审计/视口降级。按form-fill决定39加入有界两帧等待，沿现有checkpoint_timeout_seconds预算传递并明确渲染未就绪；原32像素断言连续20次、四项、新HEAD Linux CI为门槛。两标签系统Chrome有头产品连接实际runtime visible（Playwright既有focus emulation），不当document.hidden证据或改默认焦点行为。根因是绘制时序相关观测，未定位Chromium内部原因；精确结果和残留风险见review末尾。先前文档交付不重跑同代码CI的安排被本次产品改动取代，仍不推送合并。
+
+## 11（2026-11-09）：既有宿主恢复优先保留原任务（总决定 41）
+
+用户要求减少重复任务和网站访问。按 [apply-continuity.md](apply-continuity.md) 修复旧 /apply 与独立填表：原页身份不足不再自动重开，明确代码关闭的记录才沿用原范围重新打开；held 只填接续的身份失效保留原 held 和本次诊断报告，不计新业务失败。总决定 29 的其他浏览器归属、启动仲裁和提交风险边界不变，不推进公众 runtime。

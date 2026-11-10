@@ -398,15 +398,24 @@ def test_the_chrome_runner_keeps_the_tab_of_a_held_job(box, monkeypatch):  # G5
 
 
 def test_the_chrome_runner_finds_a_resumed_tab_by_its_id(box, monkeypatch):  # G5, G14
+    from intent_job_agent import browser_session
+
     (job,) = add_jobs(box, ["Acme"])
     write_letters(box, [job])
-    tabs = [{"id": "N7", "type": "page", "url": "https://careers.zetapay.test/apply/review"}]
+    tabs = [{"id": "N7", "type": "page", "url": "https://careers.zetapay.test/apply/review", "generation": "synthetic"}]
+    monkeypatch.setattr(browser_session, "ensure", lambda settings, **kw: synthetic_binding())
     monkeypatch.setattr(apply_bridge.readback, "list_targets", lambda binding, **kwargs: tabs)
     monkeypatch.setattr(apply_bridge, "cdp_alive", lambda binding, **kwargs: True)
     monkeypatch.setattr(apply_bridge, "run_application", lambda *a, **k: apply_bridge.ApplyOutcome("held", "captcha"))
     runner = apply_bridge.ChromeRunner(box.data_dir, box.settings, box._applicant().profile)
     runner.binding = synthetic_binding()
-    spec = dataclasses.replace(box._apply_spec(job, "submit"), resume=True, resume_tab="N7", resume_url=tabs[0]["url"])
+    spec = dataclasses.replace(
+        box._apply_spec(job, "submit"),
+        resume=True,
+        resume_tab="N7",
+        resume_url=tabs[0]["url"],
+        resume_generation="synthetic",
+    )
     assert runner(spec).tab == {
         "id": "N7",
         "url": "https://careers.zetapay.test/apply/review",
@@ -600,7 +609,7 @@ def test_held_jobs_are_listed_from_the_database_after_a_restart(box, tmp_path): 
     status = fresh.apply_status()
     assert status["status"] == "idle"
     assert [(row["n"], row["company"], row["gate"], row["site"], row["then"]) for row in status["held"]] == [
-        (2, "Co1", "验证码", "jobs.example.test", "停在提交前（填表模块从岗位地址重填）"),
+        (2, "Co1", "验证码", "jobs.example.test", "原页接续并停在提交前"),
         (7, "Acme", "登录和注册都不成", "careers.acme.test", "自动提交"),
     ]
     row = status["held"][1]
@@ -680,7 +689,7 @@ STEP2 = "https://careers.acme.test/apply/step2"  # where the user's sign-in left
 
 def held_three(box):
     """2 Co1 (reviewed, CAPTCHA, its tab N2-j01), 7 Acme (auto-submit, login, tab N7 still open) and 8 Beta
-    (auto-submit, CAPTCHA, its tab closed by the user)."""
+    (auto-submit, CAPTCHA, its tab deliberately closed by an unattended run)."""
     jobs = add_jobs(box, COMPANIES)
     write_letters(box, jobs)
     box.apply_runner = GateRunner(
@@ -692,6 +701,7 @@ def held_three(box):
         tabs={"j06": ACME_TAB, "j07": {"id": "N8", "url": "https://careers.beta.test/apply"}},
     )
     batch = both_steps(box)
+    box.store.update_hold("j07", tab_id=None, generation=None, closed_by_runner=True)
     box.form_fill_runner.tabs.append({"id": "N7", "type": "page", "url": STEP2})  # the user signed in there
     box.apply_runner.outcomes = {}  # from now on every run goes through
     box.notices.clear()
@@ -699,8 +709,7 @@ def held_three(box):
 
 
 SUMMARY = (
-    "接着做 3 个：自动提交 2 个：7 Acme（回原标签页）、8 Beta（从岗位地址重开）；"
-    "停在提交前 1 个（填表模块从岗位地址重填）：2 Co1"
+    "接着做 3 个：自动提交 2 个：7 Acme（回原标签页）、8 Beta（从岗位地址重开）；停在提交前 1 个：2 Co1（回原标签页）"
 )
 HELD = ["j01", "j06", "j07"]
 
@@ -741,7 +750,8 @@ def test_resuming_takes_over_the_tab_submits_and_refills(box):  # G11 a, c; G13
     status = box.apply_status()
     assert status["phase"] == "resume" and status["next"] is None and status["held"] == []
     (refill,) = [row for row in status["jobs"] if row["job_id"] == "j01"]
-    assert any("原来等你处理的那个标签页可以关掉" in item for item in refill["todo"])
+    assert co1.resume and co1.resume_tab == "N2-j01"
+    assert not any("原来等你处理的那个标签页可以关掉" in item for item in refill["todo"])
     assert box.notices == [("投递：1 个填好等你检查", "接着做做完")]
     (decision,) = [d for d in box.store.decisions() if d["kind"] == "resume"]
     assert json.loads(decision["payload"]) == {
@@ -781,15 +791,15 @@ def test_a_tab_the_user_already_submitted_is_counted_without_an_agent(box):  # G
 
 def test_a_job_held_a_third_time_fails_at_its_gate(box):  # G14
     held_three(box)
-    box.apply_runner.outcomes = {"j07": ("held", "captcha", ["careers.beta.test: a CAPTCHA on the review page"])}
-    resumed(box, ["j07"])
-    hold = box.store.hold("j07")
-    assert (hold["times"], hold["reason"]) == (2, "captcha") and box.store.applications()["j07"]["status"] == "held"
-    assert box.notices == [("投递：1 个等你处理", "1 个验证码：8 Beta")]
-    resumed(box, ["j07"])
-    application = box.store.applications()["j07"]
+    box.apply_runner.outcomes = {"j06": ("held", "captcha", ["careers.acme.test: a CAPTCHA on the review page"])}
+    resumed(box, ["j06"])
+    hold = box.store.hold("j06")
+    assert (hold["times"], hold["reason"]) == (2, "captcha") and box.store.applications()["j06"]["status"] == "held"
+    assert box.notices == [("投递：1 个等你处理", "1 个验证码：7 Acme")]
+    resumed(box, ["j06"])
+    application = box.store.applications()["j06"]
     assert application["status"] == "failed" and application["note"].startswith("captcha；第三次卡在门槛")
-    assert box.store.hold("j07") is None
+    assert box.store.hold("j06") is None
     assert box.apply_stats()["weeks"][0]["allowed"] == {"captcha": 1}
 
 

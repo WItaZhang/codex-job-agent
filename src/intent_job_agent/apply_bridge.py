@@ -61,6 +61,7 @@ class ApplySpec:
     resume: bool = False  # resuming a job held at a gate, after the user handled it (spec section 10 item 100)
     resume_url: str | None = None  # the held tab's address now, when it is still open and the only one showing it
     resume_tab: str | None = None  # that tab's CDP id, to find it again after the run
+    resume_generation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +167,11 @@ def extra_rules(
 
 == ADDITIONAL RULES (these override anything above) ==
 - TABS: {_tabs(mode, resume, resume_url)}{files}
+- ACTION ORDER: Wait for one navigation or form action to finish, then inspect the current page and any validation
+  message before choosing the next action. Do not queue repeated Next/Continue/login clicks while a response is
+  pending. Do not reload or restart login to probe a human check. Keep the current application and its session.
+  Do not request another email code because a response is slow; inspect the current challenge first. A gate stays
+  on its page for the applicant. Resume at the current step and do not re-enter fields already correctly filled.
 {GATES_RULE}
 - ARBITRATION: never accept, tick or sign an arbitration agreement or a mandatory arbitration clause. Stop this
   application, write one line starting with "NOTE:" that quotes the agreement's first sentence, then output
@@ -865,7 +871,19 @@ class ChromeRunner:
 
         try:
             configure(self.data_dir, self.settings, self.profile)
-            if self.binding is None or not cdp_alive(self.binding, expected=browser_session.scope(self.settings)):
+            if spec.resume_tab:
+                if not spec.resume_generation:
+                    raise browser_session.BrowserIdentityLost(
+                        "Original browser generation is required for continuation"
+                    )
+                self.binding = browser_session.ensure(self.settings, existing_generation=spec.resume_generation)
+                current = self._tabs()
+                target = next((t for t in current or [] if t.get("id") == spec.resume_tab), None)
+                if target is None or target.get("generation") != spec.resume_generation:
+                    raise browser_session.BrowserIdentityLost("Original tab is unavailable; no replacement opened")
+                if target.get("url") != spec.resume_url or sum(t.get("url") == spec.resume_url for t in current) != 1:
+                    raise browser_session.BrowserIdentityLost("Original tab changed or its address is ambiguous")
+            elif self.binding is None or not cdp_alive(self.binding, expected=browser_session.scope(self.settings)):
                 self.binding = ensure_chrome(self.settings)
             extra = {"extra_prompt": spec.sheet} if spec.sheet else {}  # an empty sheet: /apply's run, unchanged
             before = self._tabs()
@@ -886,7 +904,7 @@ class ChromeRunner:
         self.settings.require_external("_tabs", self.data_dir, self.profile)
         try:
             return readback.list_targets(self.binding, expected=browser_session.scope(self.settings))
-        except Exception:  # noqa: BLE001 - no tab list: a held job is resumed from its address
+        except Exception:  # noqa: BLE001 - unknown tab identity cannot authorize continuation
             return None
 
     def _held_tab(self, spec: ApplySpec, before: list[dict] | None, outcome: ApplyOutcome) -> dict | None:

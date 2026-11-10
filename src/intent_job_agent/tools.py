@@ -99,6 +99,7 @@ class _FormFilled:
     emails: tuple = ()  # the form-fill module never sends email
     tab: dict | None = None  # the job's tab, kept for a held job (spec section 10 item 97)
     chrome: tuple[str, ...] = ()  # what changed in the applying Chrome that the agent did not do (item 114)
+    run_id: str | None = None
 
 
 LOCAL_READ_TOOLS = frozenset(
@@ -148,10 +149,8 @@ LEVEL_TEXT = {
 }
 UNSET = "未设置"
 APPROVED_VIA = "delegated_coordinator"
-# Added to a refilled job's to-dos: the held tab stays open, the new form is in a new tab (spec section 10 item 100).
 # The first to-do of a held form-fill job: it waits for the user, it is not run again (spec section 10 items 91, 97).
 HELD_TODO = "等你处理（{gate}）：请在投递用的 Chrome 里那个标签页里处理完，再恢复，系统会接着做（spec 4.10 第 10 条）。"
-CLOSE_OLD_TAB = "原来等你处理的那个标签页可以关掉：填好的表在新开的标签页里。"
 # What the user can say while a live re-run of the gate list waits at a gate (spec section 10 item 120).
 GATE_REPLIES = {
     "done": "好了：接着做",
@@ -1812,6 +1811,7 @@ class Toolbox:
             "generation": tab.get("generation"),
             "tab_url": tab.get("url"),
             "times": times,
+            "closed_by_runner": False,
         }
 
     @staticmethod
@@ -1824,11 +1824,12 @@ class Toolbox:
         tab = getattr(outcome, "tab", None) or {}
         if tab.get("id"):
             try:
-                browser.close_tab(tab)
-            except Exception:  # noqa: BLE001 - the job stays on the list; it is reopened from its address
-                pass
-        if outcome.status == "held":
-            writer.update_hold(job_id, tab_id=None, generation=None)
+                if browser.close_tab(tab) is not True:
+                    return
+            except Exception:  # noqa: BLE001 - keep the original binding when closing is unconfirmed
+                return
+            if outcome.status == "held":
+                writer.update_hold(job_id, tab_id=None, generation=None, closed_by_runner=True)
 
     @staticmethod
     def _masked(outcome: apply_bridge.ApplyOutcome, redactor: Redactor) -> apply_bridge.ApplyOutcome:
@@ -1849,10 +1850,10 @@ class Toolbox:
         used = [f"{watchdog.CHROME_USE}：{line}" for line in outcome.chrome]
         return "; ".join(x for x in [outcome.reason, *outcome.notes, *used] if x) or None
 
-    def _fill_one(self, entry, ctx) -> "_FormFilled":
+    def _fill_one(self, entry, ctx, *, resume=None) -> "_FormFilled":
         """One job through the form-fill module, then its report, as the apply list's status (spec section 10
         item 89). The run's reports and summary.md are written again after every job."""
-        outcome = form_fill.run_job(entry, ctx)
+        outcome = form_fill.run_job(entry, ctx, **({"resume": resume} if resume else {}))
         sites = tuple(outcome.other_sites)
         try:
             form_fill_report.run_report(ctx.run_id, self.data_dir, self.settings)
@@ -1898,7 +1899,26 @@ class Toolbox:
             if outcome.tab_id
             else None,
             chrome=tuple(outcome.chrome),
+            run_id=ctx.run_id,
         )
+
+    def _continue_fill(self, entry, ctx, source):
+        """One immutable attempt, even when a live batch encounters another gate on the same application."""
+        run_id = form_fill.new_run_id()
+        attempt = dataclasses.replace(ctx, run_id=run_id, run_dir=ctx.run_dir.parent / run_id)
+        jobs = JobList(jobs=[entry])
+        list_path = ctx.run_dir / f"{run_id}.json"
+        list_path.write_text(jobs.model_dump_json(indent=2), encoding="utf-8")
+        form_fill.begin_feasibility(attempt, list_path, jobs)
+        outcome = self._fill_one(entry, attempt, resume=source)
+        form_fill.finish_feasibility(attempt)
+        path = ctx.run_dir / form_fill_report.CONTINUATIONS_FILE
+        links = json.loads(path.read_text()) if path.exists() else []
+        links.append({"job_id": entry.id, "run_id": run_id})
+        staged = path.with_suffix(".tmp")
+        staged.write_text(json.dumps(links), encoding="utf-8")
+        staged.replace(path)
+        return outcome
 
     def _sync_apply_results(self) -> None:
         """Close this server's step or resume if it has ended and its thread could not close it itself."""
@@ -2403,7 +2423,7 @@ class Toolbox:
                     "gate": apply_fill.GATE_TEXT.get(hold["reason"], hold["reason"]),
                     "site": urlparse(hold["tab_url"] or job.url or "").hostname,
                     "todo": hold["note"],
-                    "then": "自动提交" if hold["mode"] == "submit" else "停在提交前（填表模块从岗位地址重填）",
+                    "then": "自动提交" if hold["mode"] == "submit" else "原页接续并停在提交前",
                     "times": hold["times"],
                     "interrupted": hold["resuming"] and hold["job_id"] not in resuming,
                     "held_at": hold["held_at"],
@@ -2488,24 +2508,36 @@ class Toolbox:
 
     @staticmethod
     def _held_tab(hold: dict, tabs: list[dict] | None) -> tuple[dict | None, int]:
-        """A held job's tab among the open ones: by its CDP id, else by the address kept (Chrome may have restarted).
-        Returns the tab and how many open tabs show its address; a tab is only taken when that is exactly one."""
+        """Only the saved CDP id in the saved browser generation; never adopt a same-address replacement."""
         pages = [
             tab
             for tab in tabs or []
             if tab.get("type") == "page" and hold.get("generation") and tab.get("generation") == hold["generation"]
         ]
         target = next((tab for tab in pages if hold["tab_id"] and tab.get("id") == hold["tab_id"]), None)
-        url = target.get("url", "") if target else hold["tab_url"]
+        if target is None:
+            return None, 0
+        url = target.get("url", "")
         if not url:
             return None, 0
         same = [tab for tab in pages if form_fill_readback.same_url(tab.get("url", ""), url)]
-        return (same[0] if len(same) == 1 else None), len(same)
+        return (target if len(same) == 1 else None), len(same)
+
+    @staticmethod
+    def _resume_problem(hold, target, job_url):
+        if target is None:
+            if hold.get("closed_by_runner") and not hold["tab_id"] and not hold["generation"]:
+                return None
+            return "原标签页或浏览器身份无法验证；保留任务，不重新开始"
+        parts = urlparse(target.get("url", ""))
+        allowed = {urlparse(url or "").hostname for url in (job_url, hold["tab_url"])}
+        if parts.scheme not in ("http", "https") or parts.hostname not in allowed:
+            return "原标签页已到其他站点；保留任务，不重新开始"
+        return None
 
     def _resume_plan(self, job_ids: list[str], tabs: list[dict] | None, live: bool = False) -> dict:
-        """How each named held job goes on (spec section 10 item 100): auto-submitted ones take over their tab when it
-        is open and the only one on its address, or start again from the job's address; reviewed and careful ones are
-        refilled by the form-fill module. A job whose address is open in several tabs is left out (`problems`)."""
+        """Resume each exact held tab; only an intentionally closed tab may be reopened.
+        Unknown identity, site changes and duplicate addresses stay held and appear in problems."""
         wanted = list(dict.fromkeys(job_ids))
         if not wanted:
             raise InvariantError("Name at least one held job to resume")
@@ -2547,6 +2579,9 @@ class Toolbox:
                     {"job_id": job_id, "problem": f"{name}：同一个地址开着 {count} 个标签页，关掉多余的再恢复"}
                 )
                 continue
+            if problem := self._resume_problem(hold, target, job.url):
+                problems.append({"job_id": job_id, "problem": problem})
+                continue
             item["tab"] = {"id": str(target["id"]), "url": str(target.get("url", ""))} if target else None
             items.append(item)
         minutes = self.settings.apply.gate_wait.timeout_seconds / 60 if live else None
@@ -2586,7 +2621,8 @@ class Toolbox:
             names = "、".join(name(item, "回原标签页" if item["tab"] else "从岗位地址重开") for item in submit)
             parts.append(f"自动提交 {len(submit)} 个：{names}")
         if refill:
-            parts.append(f"停在提交前 {len(refill)} 个（填表模块从岗位地址重填）：" + "、".join(map(name, refill)))
+            names = "、".join(name(item, "回原标签页" if item["tab"] else "代码关闭后重新打开") for item in refill)
+            parts.append(f"停在提交前 {len(refill)} 个：" + names)
         text = f"接着做 {len(items)} 个：" + "；".join(parts)
         if live_minutes is None:
             return text
@@ -2597,18 +2633,18 @@ class Toolbox:
     def _open_tabs(self, browser) -> list[dict] | None:
         try:
             return browser.open_tabs()  # never starts Chrome: not running, no tabs to go back to
-        except Exception:  # noqa: BLE001 - no tab list: the jobs start again from their addresses
-            return None
+        except Exception:
+            raise InvariantError("Cannot verify the original browser; no application was restarted") from None
 
     @_tool("prepare")
     def prepare_resume(
         self, job_ids: list[str] | None = None, gates: list[str] | None = None, live: bool = False
     ) -> dict:
         """Prepare a resume when actual evidence shows the gate was handled; no user approval phrase is required:
-        how each one goes on - auto-submitted ones back in their own tab (or from the job's address when it is
-        gone), then submitted; reviewed and careful ones refilled by the form-fill module and stopped before submit.
-        `summary` is for resume_applying, exactly as shown; `problems` are jobs left out (their address is open in
-        several tabs). Changes nothing.
+        All modes return to their exact original tab. Only a tab successfully closed by the runner is reopened.
+        Reviewed and careful jobs continue with the form-fill module and stop before submit.
+        `summary` is for resume_applying, exactly as shown; `problems` explains excluded jobs, including missing
+        identity and duplicate addresses. Changes nothing.
         The gate list (spec section 10 item 118): without `job_ids`, every job held at one of the four gates, in the
         order they stopped; `gates` (captcha, login_issue, sso_required, email_verification) keeps only those kinds.
         `live=true` when the user is at the computer now and clears each gate as it comes: one job at a time, each
@@ -2635,8 +2671,8 @@ class Toolbox:
         exactly as prepare_resume gave them. One by one in the background, each result recorded as it comes: a held
         tab showing receipt keeps the legacy submitted_by_user code, with actor=unknown in audit; automatic jobs
         are submitted from their tab (checked first for an earlier submission); reviewed and careful ones are
-        refilled and stop before submit. A job held a third time fails at its gate. Not while a step, a form-fill
-        run or another resume runs. Poll apply_status.
+        continued on their original tab and stop before submit. A job held a third time fails at its gate.
+        Not while a step, a form-fill run or another resume runs. Poll apply_status.
         `live=true` (as prepared): a live re-run of the gate list; at each gate the job waits for the user
         (apply_status `needs_you`; tell the user which job and site), and gate_reply passes on what the user says.
         `unattended=true`: as in start_applying, a job stopped at a gate again has its tab closed."""
@@ -2667,6 +2703,7 @@ class Toolbox:
         if refill:
             ctx = self._fill_context(applicant, inputs)
             form_fill.begin_feasibility(ctx, list_path, JobList(jobs=[entries[j] for j in refill]))
+            (ctx.run_dir / form_fill_report.CONTINUATIONS_FILE).write_text("[]", encoding="utf-8")
         runner = self.apply_runner or apply_bridge.ChromeRunner(
             self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
         )
@@ -2716,7 +2753,11 @@ class Toolbox:
             try:
                 writer = Store(self.store.path, self.settings)  # inside: a failure here still ends the run (review #4)
                 self._record_agents(writer)
-                browser.ensure_chrome()
+                retained = next((item for item in items if item["tab"]), None)
+                if retained:
+                    browser.resume_chrome(writer.hold(retained["job_id"])["generation"])
+                else:
+                    browser.ensure_chrome()
                 for item in run["jobs"]:
                     if run["stopped"] or run["stop"]:  # a form may have been submitted (item 90), or the user stopped
                         item["state"] = "stopped"
@@ -2733,6 +2774,7 @@ class Toolbox:
                             self._unattended_close(item["job_id"], outcome, writer, browser)
                     item["outcome"], item["finished"] = outcome, time.time()
                     if outcome and outcome.reason in (
+                        "continuation_blocked",
                         "browser_identity_lost_before_launch",
                         "browser_identity_lost",
                         "interrupted",
@@ -2781,12 +2823,16 @@ class Toolbox:
             )
         try:
             tabs = browser.targets()
-        except Exception:  # noqa: BLE001 - no tab list: start again from the job's address
-            tabs = None
+        except Exception:
+            writer.set_resuming([job_id], False)
+            return apply_bridge.ApplyOutcome("held", "continuation_blocked", ["无法验证原浏览器；未重新开始"])
         target, count = self._held_tab(hold, tabs)
         if count > 1:
             writer.set_resuming([job_id], False)
             return None
+        if problem := self._resume_problem(hold, target, self.store.job(job_id).url):
+            writer.set_resuming([job_id], False)
+            return apply_bridge.ApplyOutcome("held", "continuation_blocked", [problem])
         attempt = {"batch_id": hold["batch_id"], "phase": "resume", "mode": item["mode"], "via": item["via"]}
         state = None
         if target is not None:
@@ -2814,6 +2860,7 @@ class Toolbox:
                 resume=True,
                 resume_url=target.get("url") if target else None,
                 resume_tab=str(target["id"]) if target else None,
+                resume_generation=target["generation"] if target else None,
             )
             outcome = self._masked(runner(spec), redactor)
             if self._stopped(outcome):  # stopped before its agent started: still held, not being resumed (review #5)
@@ -2822,13 +2869,44 @@ class Toolbox:
             outcome = self._own_submission(outcome)
             note = self._note(outcome)
         else:
-            outcome = self._fill_one(entries[job_id], ctx)
+            entry = entries[job_id]
+            previous = next((a.get("run_id") for a in reversed(writer.apply_attempts()) if a["job_id"] == job_id), None)
+            source = (
+                form_fill_continuation.Source(
+                    previous or "",
+                    job_id,
+                    entry.url,
+                    entry.company,
+                    entry.title,
+                    hold["tab_url"],
+                    hold["tab_id"],
+                    hold["generation"],
+                    hold["held_at"],
+                    hold["reason"],
+                )
+                if target
+                else None
+            )
+            outcome = self._continue_fill(entry, ctx, source)
             if self._stopped(outcome):  # the user stopped the resume: still held, no longer being resumed (item 109)
                 writer.set_resuming([job_id], False)
                 return outcome
-            outcome = dataclasses.replace(self._own_submission(outcome), todo=(*outcome.todo, CLOSE_OLD_TAB))
-            note = apply_fill.note(outcome.reason, outcome.conclusion, ctx.run_id, outcome.notes)
-            attempt["run_id"] = ctx.run_id
+            outcome = self._own_submission(outcome)
+            note = apply_fill.note(outcome.reason, outcome.conclusion, outcome.run_id, outcome.notes)
+            attempt["run_id"] = outcome.run_id
+        if outcome.reason in (
+            "browser_identity_lost_before_launch",
+            "browser_identity_lost",
+            "tab_lost",
+            "system_error",
+        ):
+            writer.set_resuming([job_id], False)
+            return dataclasses.replace(
+                outcome,
+                status="held",
+                reason="continuation_blocked",
+                notes=(*outcome.notes, "原任务保留，未自动重新开始；先核对浏览器和原页"),
+            )
         if outcome.reason == "submitted_by_user":
             writer.record_decision(
                 None,
@@ -2963,13 +3041,14 @@ class Toolbox:
         except Exception:  # noqa: BLE001 - a notification never stops applying; apply_status says it too
             pass
 
-    def _close_kept_tab(self, hold, browser) -> None:
+    def _close_kept_tab(self, hold, browser) -> bool:
         tab = self._kept_tab(hold)
         if tab is not None:
             try:
-                browser.close_tab(tab)
+                return browser.close_tab(tab) is True
             except Exception:  # noqa: BLE001 - the job's record does not depend on it
                 pass
+        return False
 
     def _after_wait(self, answer, report, item, writer, run, browser, redactor):
         """How a wait at a gate ended, recorded (spec section 10 item 119)."""
@@ -2996,8 +3075,10 @@ class Toolbox:
             return apply_bridge.ApplyOutcome(status, None if answer == "submitted" else reason, [said])
         if answer in ("skip", "closed"):  # back on the list, not counted
             if answer == "skip":
-                self._close_kept_tab(hold, browser)
-            writer.update_hold(job_id, tab_id=None, generation=None)
+                if self._close_kept_tab(hold, browser):
+                    writer.update_hold(job_id, tab_id=None, generation=None, closed_by_runner=True)
+            else:
+                writer.update_hold(job_id, tab_id=None, generation=None, closed_by_runner=False)
             said = "你说跳过：留在等你处理的清单上" if answer == "skip" else "标签页被关掉了：算跳过，留在清单上"
             return apply_bridge.ApplyOutcome("held", reason, [said])
         return self._not_cleared(item, writer, browser)  # timeout
@@ -3008,13 +3089,17 @@ class Toolbox:
         job_id = item["job_id"]
         hold = writer.hold(job_id)
         reason = hold["reason"]
-        self._close_kept_tab(hold, browser)
+        closed = self._close_kept_tab(hold, browser)
         if hold["times"] >= 2:
             note = f"{reason}；第三次卡在门槛（在场重跑时没处理完）；{hold['note'] or ''}".rstrip("；")
             attempt = {"batch_id": hold["batch_id"], "phase": "resume", "mode": item["mode"], "via": item["via"]}
             writer.record_application_result(job_id, "failed", note, attempt={**attempt, "reason": reason})
             return apply_bridge.ApplyOutcome("failed", reason, ["第三次卡在门槛（在场重跑时没处理完）"])
-        writer.update_hold(job_id, tab_id=None, generation=None, times=hold["times"] + 1)
+        writer.update_hold(
+            job_id,
+            times=hold["times"] + 1,
+            **({"tab_id": None, "generation": None, "closed_by_runner": True} if closed else {}),
+        )
         return apply_bridge.ApplyOutcome("held", reason, ["在场重跑时没处理完：留在等你处理的清单上"])
 
     @_tool("prepare")
@@ -3239,9 +3324,10 @@ class Toolbox:
         background in the applying Chrome, one job at a time, and not while an apply step runs. Each job's pages
         are recorded as the agent fills them (recordings/<recording id>/) and listed in the run's feasibility.md
         for the user to mark against the open tab; at the end every job gets its report and the run a summary.md.
-        A job already recorded is not visited again unless its last run hit a gate, a login, a missing answer, a
-        broken page, a stuck agent or a lost tab, or the list says revisit: true: it is listed under `skipped` (its
-        recording can be retested without the site). Poll form_fill_status. `list_path`: the list file (absolute,
+        Existing incomplete visits are returned in blocked with their source run; inspect and resume the original
+        tab. Completed ones are skipped. A deliberate new visit needs revisit, restart_from naming the latest run
+        and restart_reason in the list. That instruction becomes stale after one visit. Poll form_fill_status.
+        `list_path`: the list file (absolute,
         or relative to the project folder).
         When mail, bank, payment, password-manager or school tabs are open in that Chrome, the result lists their
         sites under `personal_tabs` with a `warning`: show it to the user. A `warning` also says when that Chrome was
@@ -3277,12 +3363,14 @@ class Toolbox:
             tabs or [], self.settings.apply.blocked_origins, [e.url for e in inputs.jobs.jobs]
         )
         personal = [inputs.redactor.mask(origin) for origin in found]
-        visit, skipped = [], []
+        visit, skipped, blocked = [], [], []
         for entry in inputs.jobs.jobs:
             rec_id = form_fill_recording.recording_id(entry.url)
-            needed, last = form_fill_recording.needs_visit(form_fill.recordings_root(ctx) / rec_id, entry.revisit)
-            if needed:
+            action, last = form_fill_recording.plan_visit(form_fill.recordings_root(ctx) / rec_id, entry)
+            if action == "visit":
                 visit.append(entry)
+            elif action == "blocked":
+                blocked.append(self._blocked_visit(entry, rec_id, last))
             else:
                 skipped.append(
                     {
@@ -3292,9 +3380,12 @@ class Toolbox:
                         "last_conclusion": last.get("conclusion"),
                     }
                 )
+        if blocked and not visit:
+            return {"status": "blocked", "run_id": None, "jobs": 0, "blocked": blocked, "skipped": skipped}
         report = form_fill.begin_feasibility(ctx, list_path, inputs.jobs, personal, checked=tabs is not None)
         (ctx.run_dir / form_fill_report.SKIPPED_FILE).write_text(json.dumps(skipped, ensure_ascii=False), "utf-8")
         skipped_ids = {item["job_id"] for item in skipped}
+        blocked_ids = {item["job_id"] for item in blocked}
         run = {
             "run_id": run_id,
             "status": "running",
@@ -3305,13 +3396,14 @@ class Toolbox:
             "personal_tabs_checked": tabs is not None,
             "summary": None,
             "skipped": skipped,
+            "blocked": blocked,
             "jobs": [
                 {
                     "n": n,
                     "job_id": e.id,
                     "company": e.company,
                     "title": e.title,
-                    "state": "skipped" if e.id in skipped_ids else "queued",
+                    "state": "skipped" if e.id in skipped_ids else "blocked" if e.id in blocked_ids else "queued",
                     "outcome": None,
                     "recording_id": form_fill_recording.recording_id(e.url),
                 }
@@ -3330,8 +3422,28 @@ class Toolbox:
                 writer = Store(self.store.path, self.settings)
                 self._record_agents(writer)
                 for item, entry in zip(run["jobs"], inputs.jobs.jobs, strict=True):
-                    if item["state"] == "skipped":
+                    if item["state"] in ("skipped", "blocked"):
                         continue
+                    # Another caller may have finished between preparation and claiming the shared activity.
+                    action, prior = form_fill_recording.plan_visit(
+                        form_fill.recordings_root(ctx) / item["recording_id"], entry
+                    )
+                    if action != "visit":
+                        item["state"] = "blocked"
+                        run["blocked"].append(self._blocked_visit(entry, item["recording_id"], prior))
+                        continue
+                    if prior:
+                        writer.record_decision(
+                            None,
+                            "form_fill_restart",
+                            {
+                                "job_id": entry.id,
+                                "source_run": prior["run"],
+                                "run_id": run_id,
+                                "reason": ctx.redactor.mask(entry.restart_reason),
+                                "approved_via": APPROVED_VIA,
+                            },
+                        )
                     item["state"] = "running"
                     item["outcome"] = form_fill.run_job(entry, ctx)
                     item["state"] = "done"
@@ -3339,6 +3451,9 @@ class Toolbox:
                         run["error"] = item["outcome"].agent_result
                         run["status"] = "failed"
                         break
+                (ctx.run_dir / form_fill_report.BLOCKED_FILE).write_text(
+                    json.dumps(run["blocked"], ensure_ascii=False), encoding="utf-8"
+                )
                 form_fill.finish_feasibility(ctx)
                 run["summary"] = str(form_fill_report.run_report(run_id, self.data_dir, self.settings))
                 if run["status"] == "running":
@@ -3370,12 +3485,24 @@ class Toolbox:
             "feasibility": run["feasibility"],
             "personal_tabs": personal,
             "skipped": skipped,
+            "blocked": run["blocked"],
         }
         if personal:
             result["warning"] = form_fill.PERSONAL_TABS_WARNING.format(tabs="、".join(personal))
         elif tabs is None:
             result["warning"] = form_fill.PERSONAL_TABS_UNCHECKED
         return result
+
+    @staticmethod
+    def _blocked_visit(entry, recording_id, prior):
+        return {
+            "job_id": entry.id,
+            "source_job_id": prior.get("job_id"),
+            "recording_id": recording_id,
+            "run_id": prior.get("run"),
+            "reason": prior.get("reason", "resume_existing"),
+            "next": "Inspect the existing run with get_form_fill_gate and resume_form_fill; no new visit started",
+        }
 
     @_tool("prepare")
     def form_fill_status(self) -> dict:
@@ -3418,6 +3545,7 @@ class Toolbox:
             "personal_tabs_checked": run.get("personal_tabs_checked", True),
             "summary": run.get("summary"),
             "skipped": run.get("skipped", []),
+            "blocked": run.get("blocked", []),
             "jobs": jobs,
             **({"open_answers": hint} if hint else {}),
         }

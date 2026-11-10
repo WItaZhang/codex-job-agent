@@ -837,10 +837,10 @@ def test_a_job_recorded_before_is_not_visited_again(ff):
     assert "已录制，请用重放重测" in summary and "acme-ml-01" in summary
 
 
-def test_revisit_or_a_gate_last_time_visits_a_recorded_job_again(ff):
+def test_bound_restart_visits_once_and_an_unresolved_gate_stays_blocked(ff):
     box, path = ff
     jobs = yaml.safe_load(open(path, encoding="utf-8"))["jobs"]
-    jobs[0]["revisit"] = True
+    jobs[0].update(revisit=True, restart_from="old", restart_reason="Synthetic explicit restart")
     write_list(box.data_dir / "form-fill" / "lists", jobs)
     for job, conclusion, reason in (
         (jobs[0], "check_then_submit", None),
@@ -850,8 +850,12 @@ def test_revisit_or_a_gate_last_time_visits_a_recorded_job_again(ff):
         store.write_meta(job["url"], job["company"], job["title"])
         recording.note_conclusion(store.rec_dir, "old", conclusion, reason)
     result = box.start_form_fill(path)
-    assert [spec.job_id for spec, _ in box.form_fill_runner.calls] == ["acme-ml-01", "beta-ds-02"]
+    assert [spec.job_id for spec, _ in box.form_fill_runner.calls] == ["acme-ml-01"]
+    assert [item["job_id"] for item in result["blocked"]] == ["beta-ds-02"]
     assert result["skipped"] == []
+    assert box.form_fill_status()["blocked"] == result["blocked"]
+    summary = (run_dir(box, result) / "summary.md").read_text()
+    assert "beta-ds-02" in summary and "未重新访问" in summary
 
 
 def test_ignore_filled_on_page_goes_to_the_checkpoint_service(ff):

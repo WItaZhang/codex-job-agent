@@ -599,7 +599,9 @@ def test_an_auto_submitted_job_cut_short_by_a_restart_waits_for_the_user(box):  
     assert again.store.applications()["j07"]["status"] == "pending" and status["next"] is None
     assert "第 7 个（Co6）" in status["notice"] and "等你处理" in status["notice"]
     plan = again.prepare_resume(["j06"])
-    assert "7 Co6（上次工具服务中途停了，可能已经交过，请先看标签页；从岗位地址重开）" in plan["summary"]
+    assert plan["summary"] is None and plan["jobs"] == []
+    assert "原标签页或浏览器身份无法验证" in str(plan["problems"])
+    assert again.store.hold("j06") == hold  # unknown submission state must not trigger a new application
     again.mark_applications(["j06"], "skipped")  # "7 不处理了"
     week = again.apply_stats()["weeks"][0]
     assert week["to_fix"] == {"interrupted": 1} and week["not_counted"]["held"] == 1

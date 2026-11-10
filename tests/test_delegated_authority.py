@@ -127,6 +127,7 @@ def test_restored_hold_does_not_trust_old_submit_mode(box):
             "tab_id": None,
             "tab_url": None,
             "times": 1,
+            "closed_by_runner": True,  # synthetic confirmed unattended close; reopening is permitted
         },
     )
     change_list(box, ["Beta"])
@@ -212,6 +213,7 @@ def seed_hold(box, job_id, batch, n=1, mode="submit"):
             "tab_id": None,
             "tab_url": None,
             "times": 1,
+            "closed_by_runner": True,  # test company protection after a confirmed code close
         },
     )
 

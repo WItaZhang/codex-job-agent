@@ -553,7 +553,7 @@ def run_job(
             state = ctx.runner.tab_state(target)
             before = [tab for tab in before if tab.get("id") != target["id"]]
             spec = replace(spec, resume=True, resume_url=target["url"], resume_tab=target["id"])
-        store.write_meta(entry.url, entry.company, entry.title)
+        store.write_meta(entry.url, entry.company, entry.title, job_id=entry.id)
         store.begin_run()
         config = write_checkpoint_config(entry, ctx, job_dir, binding, before, target["id"] if target else None)
         if state is not None and state.received:
@@ -639,7 +639,7 @@ def run_job(
         "tab": seen.target.get("url") if seen.target else None,
         "tab_id": result.tab_id,
         "generation": result.generation,
-        "source_run": resume.run_id if resume else None,
+        "source_run": (resume.run_id or None) if resume else None,
         "checks": result.checks,
         "page": seen.state.model_dump(mode="json") if seen.state else None,
         "submit_warnings": list(seen.signs),
@@ -1165,7 +1165,9 @@ class FormFillRunner:
         """Close a job's own tab by its CDP id (spec section 10 item 116), only in the Chrome it was kept in: a tab
         kept in another generation (Chrome restarted, another instance) is never closed. False when not closed."""
         self.settings.require_external("close_tab", self.data_dir, self.profile)
-        binding = self.binding or self.ensure_chrome()
+        binding = self.binding or browser_session.inspect(self.settings)
+        if binding is None:
+            return False
         if not target.get("generation") or target.get("generation") != binding.generation:
             return False
         return apply_bridge.close_tab(

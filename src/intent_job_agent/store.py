@@ -70,7 +70,20 @@ CREATE TABLE IF NOT EXISTS form_fill_continuations (
 APPLICATION_STATUSES = ("pending", "applied", "skipped")  # what the user sets
 ATTEMPT_FIELDS = ("job_id", "batch_id", "phase", "mode", "via", "status", "reason", "run_id", "at")
 # A job held at a gate (spec section 10 item 97): where it stopped, its tab, which hold this is (1 or 2).
-HOLD_FIELDS = ("batch_id", "phase", "n", "mode", "via", "reason", "note", "tab_id", "tab_url", "times", "generation")
+HOLD_FIELDS = (
+    "batch_id",
+    "phase",
+    "n",
+    "mode",
+    "via",
+    "reason",
+    "note",
+    "tab_id",
+    "tab_url",
+    "times",
+    "generation",
+    "closed_by_runner",
+)
 # What the user's own attempt row says when the user decides a held job (spec section 10 item 104).
 HELD_BY_USER = {"applied": "applied", "skipped": "failed", "pending": "pending"}
 # What an application run reports: waiting = stopped before submit; held = stopped at a gate for the user (spec
@@ -113,6 +126,9 @@ class Store:
         if "generation" not in columns:
             with self._tx():
                 self.db.execute("ALTER TABLE apply_holds ADD COLUMN generation TEXT")
+        if "closed_by_runner" not in columns:
+            with self._tx():
+                self.db.execute("ALTER TABLE apply_holds ADD COLUMN closed_by_runner INTEGER NOT NULL DEFAULT 0")
 
     # --- transactions --------------------------------------------------------------
 
@@ -449,7 +465,7 @@ class Store:
         if (status == "held") != (hold is not None):
             raise InvariantError("A held result, and only a held result, comes with its hold")
         if hold is not None:
-            hold = {"generation": None, **hold}  # legacy records never authorize old-tab adoption
+            hold = {"generation": None, "closed_by_runner": False, **hold}  # legacy records prove neither
         if hold is not None and set(hold) != set(HOLD_FIELDS):
             raise InvariantError(f"A hold has exactly these fields: {list(HOLD_FIELDS)}")
         now = _now()
