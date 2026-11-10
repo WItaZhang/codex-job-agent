@@ -63,6 +63,8 @@ class ResumeBrowser(FakeBrowser):
 def ready(ff):
     box, path = ff
     browser = ResumeBrowser()
+    for item in browser.tabs:
+        item["generation"] = "owned-generation"
     box.form_fill_runner = browser
     folder = box.data_dir / box.settings.form_fill.dir / "runs" / "source" / "acme-ml-01"
     folder.mkdir(parents=True)
@@ -107,6 +109,51 @@ def test_manual_gate_clear_uses_original_tab_and_durable_receipt(ready):
         assert len(browser.calls) == 1
     finally:
         other.store.db.close()
+
+
+@pytest.mark.parametrize(
+    "change,code",
+    [
+        ("missing", "original_tab_missing"),
+        ("duplicate", "ambiguous_url"),
+        ("wrong_site", "site_changed"),
+        ("wrong_generation", "browser_generation_changed"),
+        ("unavailable", "browser_unavailable"),
+        ("failure", "inspection_failed"),
+        ("identity", "browser_identity_unverified"),
+    ],
+)
+def test_gate_reports_safe_specific_reason_without_actions(ready, monkeypatch, change, code):
+    box, _, browser, _ = ready
+    if change == "missing":
+        browser.tabs.pop()
+    elif change == "duplicate":
+        browser.tabs.append({**browser.tabs[-1], "id": "OTHER"})
+    elif change == "wrong_site":
+        browser.tabs[-1]["url"] = "https://unrelated.example.test/private?secret=synthetic-secret"
+    elif change == "wrong_generation":
+        for item in browser.tabs:
+            item["generation"] = "restarted"
+    elif change == "unavailable":
+        monkeypatch.setattr(browser, "open_tabs", lambda: None)
+    else:
+
+        def fail():
+            if change == "identity":
+                from intent_job_agent.browser_session import BrowserIdentityLost
+
+                raise BrowserIdentityLost("synthetic-secret /private/browser/path")
+            raise RuntimeError("synthetic-secret /private/applicant/path")
+
+        monkeypatch.setattr(browser, "open_tabs", fail)
+    before = list(browser.tabs)
+    result = box.get_form_fill_gate("source", "acme-ml-01")
+    assert not result["can_resume"] and result["reason_code"] == code
+    assert result["reason"] and "synthetic-secret" not in json.dumps(result)
+    assert "/private/" not in json.dumps(result)
+    assert browser.tabs == before and not browser.calls and not browser.ensured
+    assert box.store.activity() is None
+    assert box.store.form_fill_continuation("source", "acme-ml-01") is None
 
 
 def test_code_handoff_redacts_run_recording_and_receipt(ready):

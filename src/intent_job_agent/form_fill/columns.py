@@ -42,6 +42,10 @@ def mask_snapshot(snap: Snapshot, redactor: Redactor, sheet: dict[str, AnswerEnt
             )
         )
     masked = replace(
-        snap, url=redactor.mask(snap.url), marker=tuple(redactor.mask(m) for m in snap.marker), fields=tuple(fields)
+        snap,
+        url=redactor.mask(snap.url),
+        marker=tuple(redactor.mask(m) for m in snap.marker),
+        step=redactor.mask(snap.step),
+        fields=tuple(fields),
     )
     return masked, tuple(hide), hidden

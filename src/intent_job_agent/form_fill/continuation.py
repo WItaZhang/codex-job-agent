@@ -29,6 +29,14 @@ class Source(NamedTuple):
     gate: str
 
 
+class SelectionError(InvariantError):
+    """A stable metadata failure whose message contains no page contents or raw connection errors."""
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
 def load_source(data_dir, settings, run_id: str, job_id: str) -> Source:
     if not all(SAFE_ID.fullmatch(value) for value in (run_id, job_id)):
         raise InvariantError("Invalid form-fill run or job identifier")
@@ -65,16 +73,25 @@ def load_source(data_dir, settings, run_id: str, job_id: str) -> Source:
 
 
 def select_target(source: Source, tabs: list[dict] | None) -> dict:
-    pages = [t for t in (tabs or []) if t.get("type") == "page" and t.get("generation") == source.generation]
+    if tabs is None:
+        raise SelectionError("browser_unavailable", "Original browser is unavailable; no browser was started")
+    all_pages = [t for t in tabs if t.get("type") == "page"]
+    pages = [t for t in all_pages if t.get("generation") == source.generation]
+    if all_pages and not pages:
+        raise SelectionError(
+            "browser_generation_changed", "Original browser generation is unavailable; no browser was started"
+        )
     target = next((t for t in pages if t.get("id") == source.tab_id), None)
     if target is None:
-        raise InvariantError("Original tab/generation is no longer available; no new tab was opened")
+        raise SelectionError("original_tab_missing", "Original tab is no longer available; no new tab was opened")
     parts = urlsplit(target.get("url", ""))
     allowed = {urlsplit(url).hostname for url in (source.url, source.tab_url)}
     if parts.scheme not in ("http", "https") or parts.hostname not in allowed:
-        raise InvariantError("Original tab now belongs to a different site; continuation refused")
+        raise SelectionError("site_changed", "Original tab now belongs to a different site; continuation refused")
     if sum(t.get("url") == target.get("url") for t in pages) != 1:
-        raise InvariantError("More than one tab shows this address; continuation refused without guessing")
+        raise SelectionError(
+            "ambiguous_url", "More than one tab shows this address; continuation refused without guessing"
+        )
     return target
 
 

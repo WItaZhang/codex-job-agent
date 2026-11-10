@@ -3072,23 +3072,32 @@ class Toolbox:
         try:
             browser = self._form_fill_browser(self._applicant())
             target = form_fill_continuation.select_target(source, browser.open_tabs())
+        except form_fill_continuation.SelectionError as error:
+            reason_code, reason = error.code, str(error)
+        except browser_session.BrowserIdentityLost:
+            reason_code = "browser_identity_unverified"
+            reason = "Original browser identity could not be verified; nothing was opened"
         except Exception:
+            reason_code = "inspection_failed"
+            reason = "Original browser/tab inspection failed; nothing was opened"
+        else:
             return {
-                "can_resume": False,
+                "can_resume": True,
                 "run_id": run_id,
                 "job_id": job_id,
-                "reason": "Original browser/tab unavailable, changed or ambiguous; nothing was opened",
+                "gate": source.gate,
+                "tab_id": target["id"],
+                "generation": target["generation"],
+                "site": urlparse(target["url"]).hostname,
+                "inspection": "Exact browser/tab metadata; page state is rechecked before actions",
+                "next": "resume_form_fill with the matching list; supply only a current email code if needed",
             }
         return {
-            "can_resume": True,
+            "can_resume": False,
             "run_id": run_id,
             "job_id": job_id,
-            "gate": source.gate,
-            "tab_id": target["id"],
-            "generation": target["generation"],
-            "site": urlparse(target["url"]).hostname,
-            "inspection": "Exact browser/tab metadata; page state is rechecked before actions",
-            "next": "resume_form_fill with the matching list; supply only a current email code if needed",
+            "reason_code": reason_code,
+            "reason": reason,
         }
 
     @_tool("commit")

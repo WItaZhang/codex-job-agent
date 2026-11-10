@@ -246,7 +246,8 @@ EXTRACT_JS = r"""() => {
       const visible = shown(el) || (loose && (Array.from(el.labels || []).some(shown) || shown(el.parentElement)));
       if (!visible) continue;
       const host = el.parentElement && el.parentElement.closest(WIDGETS);
-      if (host) continue;  // read as part of the enclosing widget
+      // A native radio group is assembled from its inputs below; skipping both layers loses the whole group.
+      if (host && !(host.getAttribute("role") === "radiogroup" && type === "radio")) continue;
       if (role === "listbox" && (popups.has(el) || consumed.has(el))) continue;
       if (role === "radiogroup" && el.querySelector("input[type=radio]")) continue;
       if ((type === "radio" || type === "checkbox") && beside(el)) continue;
@@ -474,18 +475,33 @@ CONTACT_JS = r"""() => {
   };
   const walk = (el, parent) => {
     const tag = el.tagName.toUpperCase();
-    if (SKIP.has(tag)) return;
-    let text = el.textContent || "";
-    if (tag === "INPUT" || tag === "TEXTAREA") {
-      text = (el.type || "").toLowerCase() === "password" ? "" : (el.value || "");
-      text += " " + (el.getAttribute("placeholder") || "");
-    } else if (tag === "SELECT") {
-      text = Array.from(el.selectedOptions || []).map((o) => o.text).join(" ");
-    }
-    if (el.shadowRoot) text += " " + (el.shadowRoot.textContent || "");
+    if (SKIP.has(tag)) return "";
+    const style = getComputedStyle(el);
+    if (style.display === "none") return "";
+    const visible = style.visibility !== "hidden" && style.visibility !== "collapse";
     const i = nodes.length;
-    nodes.push({ i, parent, path: path(el), text });
-    if (tag !== "SELECT") for (const c of el.children) walk(c, i);
+    const node = { i, parent, path: path(el), text: "" };
+    nodes.push(node);
+    let text = "";
+    if (tag === "INPUT" || tag === "TEXTAREA") {
+      if (visible) {
+        const value = (el.type || "").toLowerCase() === "password" ? "" : el.value;
+        text = value || el.getAttribute("placeholder") || "";
+      }
+    } else if (tag === "SELECT") {
+      if (visible) text = Array.from(el.selectedOptions || []).map((o) => o.text).join(" ");
+    } else {
+      // Aggregate the same rendered descendants we inspect. textContent also contains skipped scripts and
+      // hidden metadata, which used to leave an unmatched secret on the form/body and black out everything.
+      for (const c of el.childNodes) {
+        if (c.nodeType === 3 && visible) text += c.data;
+        else if (c.nodeType === 1) text += walk(c, i);
+      }
+    }
+    // Shadow content remains conservatively protected at its host (there is no light-DOM CSS path to it).
+    if (el.shadowRoot) text += " " + (el.shadowRoot.textContent || "");
+    node.text = text;
+    return text;
   };
   if (!document.body) throw new Error("no body");
   walk(document.body, -1);
@@ -830,6 +846,7 @@ def snapshot(raw: dict, tab: str, read_at: str) -> Snapshot:
         password=password,
         paths=paths,
         frames=field_frames,
+        step=step,
     )
 
 

@@ -9,6 +9,8 @@
 
 原浏览器重启、标签页关闭、切到不相关网站或同地址存在多个页时，工具会拒绝接续。它不会新开页面或重新发送验证码。用户确实要从头重做时才用 `start_form_fill`。接续中断而结果不明时先核对已有运行，不能换编号绕过去重。再次遇到门槛，用该次新结果的 run_id 查询下一步。
 
+查询拒绝接续时的 `reason_code` 区分 `browser_unavailable`（浏览器不可用）、`browser_generation_changed`（已不是原浏览器实例）、`original_tab_missing`（原标签页不在）、`site_changed`（原页已到其他网站）和 `ambiguous_url`（同地址有多个页）。地址重复并不表示原页丢失；先保留原页，核对其他页的归属，不要据此重新开始申请。`browser_identity_unverified` 或 `inspection_failed` 表示检查未能完成，不足以断言页面已经关闭。返回的诊断不包含原始异常、私人页面内容或连接参数。
+
 ## 后端 Gmail 不可用时交接验证码
 
 使用者可先在原页面自行完成验证。若本人或已授权宿主已从**本次对应邮件**取得数字验证码，也可在上述接续调用中附 `verification_code` 和带时区的 `code_received_at`。仅限 4–12 位数字邮箱码；不接收 CAPTCHA 答案、密码或验证链接。默认要求邮件在最近 300 秒内收到，且不早于来源运行；可在 `form_fill.verification_code_max_age_seconds` 配置交接期限，网站仍可能提前判过期。
