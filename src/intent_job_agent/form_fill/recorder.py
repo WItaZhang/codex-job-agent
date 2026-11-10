@@ -3,9 +3,9 @@
 Pure logic over snapshots: one read of one tab, as readback.snapshot makes it. The state is plain JSON (state.json),
 so the runner numbers the read made after the filling agent quit the same way the checkpoint service did.
 
-- A page is the same page when the address (without query and fragment) is the same and one read's questions all
-  appear in the other (a follow-up appeared or went away), or when the title is the same and the two reads share a
-  question. The same title with no question in common (two or more on each side) is another page.
+- A changed explicit step is a new page even at the same address. Otherwise, one read's questions must all appear
+  in the other (a follow-up appeared or went away), or the same explicit step must not be wholly different (two
+  or more questions on each side, with none in common).
 - A field keeps its number for good: by its identity (origin, section, question, occurrence), else by its question
   among the numbers not yet used in this read (a new heading above it changed its section), else the page's next
   number, with `appeared_after` naming the nearest field above it that was numbered before.
@@ -35,6 +35,7 @@ class Snapshot:
     password: bool = False
     paths: tuple[str, ...] = ()  # each field's element (CSS path in its frame), for hiding it by column (5.6)
     frames: tuple[int, ...] = ()  # each field's frame (0: the page itself)
+    step: str = ""  # explicitly marked current step, distinct from fallback headings
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ class _Page:
     no: int
     url: str
     title: str
+    step: str = ""
     markers: list[tuple[str, ...]] = field(default_factory=list)
     questions: Counter = field(default_factory=Counter)  # of the last read kept
     numbers: dict[tuple, _Number] = field(default_factory=dict)
@@ -122,6 +124,8 @@ class Recorder:
         found = self._find(snap, questions)
         new = found is None
         page = self._new_page(snap) if new else self._pages[found - 1]
+        if snap.step and not page.step:
+            page.step = snap.step
         if snap.marker and snap.marker not in page.markers:
             page.markers.append(snap.marker)
         if not page.title and snap.marker:
@@ -166,23 +170,25 @@ class Recorder:
     def _find(self, snap: Snapshot, questions: Counter) -> int | None:
         key = url_key(snap.url)
         current = self._current.get(snap.tab)
-        if current is not None and self._same(self._pages[current - 1], key, snap.marker, questions):
+        if current is not None and self._same(self._pages[current - 1], key, snap.step, questions):
             return current
         for page in reversed(self._pages):
-            if page.no != current and self._same(page, key, snap.marker, questions):
+            if page.no != current and self._same(page, key, snap.step, questions):
                 return page.no
         return None
 
     @staticmethod
-    def _same(page: _Page, key: str, marker: tuple[str, ...], questions: Counter) -> bool:
+    def _same(page: _Page, key: str, step: str, questions: Counter) -> bool:
         if page.url != key:
+            return False
+        if step and page.step and step != page.step:
             return False
         if _within(page.questions, questions) or _within(questions, page.questions):
             return True
-        return bool(marker) and marker in page.markers and not _disjoint(page.questions, questions)
+        return bool(step) and step == page.step and not _disjoint(page.questions, questions)
 
     def _new_page(self, snap: Snapshot) -> _Page:
-        page = _Page(no=len(self._pages) + 1, url=url_key(snap.url), title=" / ".join(snap.marker))
+        page = _Page(no=len(self._pages) + 1, url=url_key(snap.url), title=" / ".join(snap.marker), step=snap.step)
         self._pages.append(page)
         return page
 
@@ -234,6 +240,7 @@ class Recorder:
                     "no": p.no,
                     "url": p.url,
                     "title": p.title,
+                    "step": p.step,
                     "markers": [list(m) for m in p.markers],
                     "questions": counter(p.questions),
                     "auto": counter(p.auto),
@@ -258,6 +265,7 @@ class Recorder:
                 no=raw["no"],
                 url=raw["url"],
                 title=raw.get("title", ""),
+                step=raw.get("step", ""),
                 markers=[tuple(m) for m in raw.get("markers", [])],
                 questions=counter(raw.get("questions")) or Counter(),
                 auto=counter(raw.get("auto")),
