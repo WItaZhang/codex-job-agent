@@ -32,6 +32,8 @@ from .report import job_report, write_reports
 
 META_FILE, READBACK_FILE = runner.META_FILE, "readback.json"
 SKIPPED_FILE = "skipped.json"  # the jobs a run did not visit because they were recorded before (spec 4.1)
+BLOCKED_FILE = "blocked.json"
+CONTINUATIONS_FILE = "continuations.json"
 
 
 def plain_contacts(answers: dict[str, AnswerEntry], profile: dict, redactor: Redactor) -> dict[str, AnswerEntry]:
@@ -166,7 +168,20 @@ def run_report(run_id: str, data_dir: Path, settings: Settings) -> Path:
         raise InvariantError(f"no run {run_id} under {run_dir.parent}")
     jobs = [_job(job_dir) for job_dir in sorted(run_dir.iterdir()) if job_dir.is_dir()]
     skipped = recording._read_json(run_dir / SKIPPED_FILE, []) or []
-    if not jobs and not skipped:
+    blocked = recording._read_json(run_dir / BLOCKED_FILE, []) or []
+    continuations = recording._read_json(run_dir / CONTINUATIONS_FILE)
+    if continuations is not None and not jobs:
+        sheet = load_sheet(data_dir, settings)
+        lines = [f"# 接续报告 {run_id}", "", "各次接续分别保存；同一岗位以最后一次结果为当前状态。", ""]
+        for item in continuations:
+            child, job = item["run_id"], item["job_id"]
+            if not runner.SAFE_ID.fullmatch(child) or not runner.SAFE_ID.fullmatch(job) or child == run_id:
+                raise InvariantError("Invalid continuation report reference")
+            lines.append(f"- {job}: [{child}](../{child}/summary.md)")
+        path = run_dir / "summary.md"
+        path.write_text(sheet.redactor.mask("\n".join(lines)), encoding="utf-8")
+        return path
+    if not jobs and not skipped and not blocked:
         raise InvariantError(f"run {run_id} has no job folders")
     jobs.sort(key=lambda job: str(job[0].get("started", "")))
     sheet = load_sheet(data_dir, settings)
@@ -182,7 +197,7 @@ def run_report(run_id: str, data_dir: Path, settings: Settings) -> Path:
         else:
             report = job_report(meta, fields, answers, contacts=contacts)
         reports.append(report)
-    return write_reports(run_dir, reports, sheet.redactor, skipped)
+    return write_reports(run_dir, reports, sheet.redactor, skipped, blocked)
 
 
 def main(argv=None) -> int:

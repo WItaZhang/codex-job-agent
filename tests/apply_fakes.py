@@ -75,6 +75,10 @@ class FormFillFake:
     def ensure_chrome(self) -> int:
         return synthetic_binding()
 
+    def resume_chrome(self, generation):
+        assert generation == "synthetic"
+        return synthetic_binding()
+
     def targets(self) -> list[dict]:
         return [{"generation": "synthetic", **tab} for tab in self.tabs]
 
@@ -84,8 +88,13 @@ class FormFillFake:
     def fill(self, spec, **options):
         self.fills.append((spec, options))
         outcome = self.box.apply_runner(spec)  # may raise, as a broken runner does
-        url = f"{spec.url}/apply"
-        navigate = {"type": "tool_use", "id": "t", "name": "mcp__playwright__browser_navigate", "input": {"url": url}}
+        url = spec.resume_url if spec.resume_tab else f"{spec.url}/apply"
+        navigate = {
+            "type": "tool_use",
+            "id": "t",
+            "name": "mcp__playwright__browser_snapshot" if spec.resume_tab else "mcp__playwright__browser_navigate",
+            "input": {} if spec.resume_tab else {"url": url},
+        }
         answer = {
             "type": "tool_result",
             "tool_use_id": "t",
@@ -95,7 +104,7 @@ class FormFillFake:
         log = options["log_path"]
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text("".join(options["mask"](line + "\n") for line in lines), encoding="utf-8")
-        if outcome.status != "pending" and spec.job_id not in self.no_tab:  # a run that never started opened no tab
+        if outcome.status != "pending" and spec.job_id not in self.no_tab and not spec.resume_tab:
             self.tabs.append({"id": f"N{len(self.fills)}-{spec.job_id}", "type": "page", "url": url})  # a new id
         notes, sites, emails = list(outcome.notes), list(outcome.other_sites), list(outcome.emails)
         return apply_bridge.ApplyOutcome(

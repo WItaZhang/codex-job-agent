@@ -158,6 +158,31 @@ def needs_visit(rec_dir: Path, revisit: bool) -> tuple[bool, dict | None]:
     return revisit or not done, last
 
 
+def plan_visit(rec_dir: Path, entry) -> tuple[str, dict | None]:
+    """Independent starts: an incomplete visit must resume; an explicit restart names its latest predecessor.
+    Recording metadata is written before launching the agent, so a crash before its final report is still a visit.
+    This reads only the recording index, never a private page or log."""
+    path = Path(rec_dir) / META_FILE
+    if not path.exists():
+        return "visit", None
+    meta = _read_json(path)
+    if not isinstance(meta, dict):
+        return "blocked", {"reason": "record_invalid"}
+    last = meta.get("last") if isinstance(meta.get("last"), dict) else {}
+    runs = meta.get("runs")
+    run = runs[-1] if isinstance(runs, list) and runs else last.get("run")
+    if not isinstance(run, str) or not run:
+        return "blocked", {"reason": "record_incomplete"}
+    prior = {"run": run, "job_id": meta.get("last_job_id"), "reason": "resume_existing"}
+    if last.get("run") == run:
+        prior["conclusion"] = last.get("conclusion")
+        if not entry.revisit and not needs_visit(rec_dir, False)[0]:
+            return "skipped", prior
+    if entry.revisit and entry.restart_from == run and entry.restart_reason and entry.restart_reason.strip():
+        return "visit", prior
+    return "blocked", prior
+
+
 # --- network records (spec 6.2) ---------------------------------------------------------------------------------
 
 
@@ -338,7 +363,7 @@ class RecordingStore:
 
     # meta.json
 
-    def write_meta(self, url: str, company: str, title: str) -> None:
+    def write_meta(self, url: str, company: str, title: str, *, job_id: str | None = None) -> None:
         meta = _read_json(self.rec_dir / META_FILE, {}) or {}
         runs = [r for r in meta.get("runs", []) if r != self.run_id] + [self.run_id]
         meta.update(
@@ -353,6 +378,8 @@ class RecordingStore:
         meta.setdefault("pages", 0)
         meta.setdefault("replay_capability", "check_only")  # slice 2b's self-check decides "fill"
         meta.setdefault("self_check", None)
+        if job_id is not None:
+            meta["last_job_id"] = job_id
         _write_json(self.rec_dir / META_FILE, self.redactor.mask_json(meta))
 
     def begin_run(self) -> None:

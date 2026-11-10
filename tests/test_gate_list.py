@@ -206,7 +206,8 @@ def test_a_tab_that_cannot_be_closed_still_leaves_the_job_on_the_list(box):  # L
     box.form_fill_runner.close_fails = True
     step(box, {"j01": [("held", "captcha", [CAPTCHA_NOTE])]}, unattended=True)
     hold = box.store.hold("j01")
-    assert hold["reason"] == "captcha" and hold["tab_id"] is None and hold["generation"] is None
+    assert hold["reason"] == "captcha" and hold["tab_id"] == "A1-j01" and hold["generation"] == "synthetic"
+    assert not hold["closed_by_runner"]
     assert box.store.applications()["j02"]["status"] == "applied"  # the step went on
 
 
@@ -234,8 +235,7 @@ def test_the_list_is_chosen_by_gate_kind_or_by_job(box):  # L5
     captcha = box.prepare_resume(gates=["captcha"], live=True)
     assert captcha["job_ids"] == ["j00", "j01"]
     assert captcha["summary"] == LIVE.format(n=2) + (
-        "接着做 2 个：自动提交 1 个：2 Acme（从岗位地址重开）；"
-        "停在提交前 1 个（填表模块从岗位地址重填）：1 Stripe, Inc."
+        "接着做 2 个：自动提交 1 个：2 Acme（从岗位地址重开）；停在提交前 1 个：1 Stripe, Inc.（代码关闭后重新打开）"
     )
     assert box.prepare_resume(live=True)["job_ids"] == ["j00", "j01", "j02"]  # the whole list by default
     assert box.prepare_resume(["j02", "j01"], live=True)["job_ids"] == ["j02", "j01"]

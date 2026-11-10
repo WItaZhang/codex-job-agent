@@ -34,6 +34,8 @@ class ListEntry(_Model):
     resume: str
     cover_letter: str
     revisit: bool = False
+    restart_from: str | None = None
+    restart_reason: str | None = None
     ignore_filled_on_page: int | None = Field(default=None, ge=1, strict=True)  # feasibility check 8 only (6.1)
 
 

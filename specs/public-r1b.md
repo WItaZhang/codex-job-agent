@@ -41,19 +41,19 @@ launch指agent已可能启动：Popen已成功或无法排除已经启动；仅�
 | submit，确定未launch | 保持原状态：新岗位pending，恢复岗位held | 不造interrupted/投递attempt；清resuming/本次占用，报告browser_identity_lost，停止本步；不能声称已访问/已提交 |
 | fill（review/careful），确定未launch | 同上保持原状态 | 无虚假attempt；停止本步，修复身份后沿现有流程重新准备 |
 | submit，已launch且结果不明 | held/interrupted，可能已提交 | 停止本owner启动的agent/driver；不得pending自动重投；保留身份失效原因，沿既有恢复的已提交核查流程处理 |
-| fill，已launch | failed/browser_identity_lost，要修复失败 | 停止自己的agent/driver，不记成功；不转换自动提交。若已观察到提交，则按maybe_submitted保守held并停批，优先于本行 |
+| fill，已launch | 新任务 failed/browser_identity_lost；held 接续保留原 held 并报告 continuation_blocked（总决定 41） | 停止自己的agent/driver，不记成功；不转换自动提交。若已观察到提交，则按maybe_submitted保守held并停批，优先于本行 |
 
-已持久化且可靠的成功证据不回退pending/失败；“已提交/可能已提交”证据优先。身份失效与用户stop同时发生：确定未launch则两者都保持原状态、无attempt，沿R1正常收尾，不造中断；已launch的submit且结果不明，身份失效优先于普通stop的pending逻辑，必须held/interrupted；已launch fill的身份失效优先于普通stop，按要修复失败处理。正常身份下的普通停止语义不变。页面多出/关闭但归属仍有效只报告、不操作页面；归属无法确认或连接断开不能与此混为“有人在用”的提示。
+已持久化且可靠的成功证据不回退pending/失败；“已提交/可能已提交”证据优先。身份失效与用户stop同时发生：确定未launch则两者都保持原状态、无attempt，沿R1正常收尾，不造中断；已launch的submit且结果不明，身份失效优先于普通stop的pending逻辑，必须held/interrupted；已launch fill的身份失效优先于普通stop：新任务按要修复失败处理，held 接续保留原任务并停止本步。正常身份下的普通停止语义不变。页面多出/关闭但归属仍有效只报告、不操作页面；归属无法确认或连接断开不能与此混为“有人在用”的提示。
 
 ## 5. held兼容与generation
 
-held记录保存browser generation。同一已验证generation沿用id、再唯一地址匹配；旧记录没有generation、不同generation、同profile重启的新generation，均不按id或地址接管旧标签页。
+held记录保存browser generation。同一已验证 generation 必须匹配保存的 id 且其当前地址唯一，不用同地址替身；旧记录没有generation、不同generation、同profile重启的新generation，均不按id或地址接管旧标签页。
 
-这些情况不堵死“接着做”：沿既有安全路线从岗位地址重新打开。submit恢复首先核查是否已提交/已经申请，结果不明仍保守held，不能无条件再交；fill由填表模块重填且永不提交。旧标签页不点击、不导航、不关闭。报告明确“旧实例不接管，走重新打开及核查”，不以任意source参数授权提交。不是重写整个恢复状态机。
+身份不明、旧实例或原页丢失时保留 held、报告具体问题，不自动重新打开。只有此前代码确认主动关闭本岗位页并持久化 closed_by_runner 的记录，按既有重跑范围允许重新打开。所有恢复首先核查已提交证据；只填路径接续原页且永不提交。旧标签页不点击、不导航、不关闭，不以任意 source 参数授权提交。具体见 [连续投递](apply-continuity.md) 和总决定 41；其余实例归属和失效判定沿用本规格。
 
 ## 6. 验收与范围外
 
-事件屏障：四种失效、各与stop竞争、真崩溃held、成功不回退、正常停止无虚假attempt；旧/不同generation恢复重开；fake9222、PID复用、陈旧DevToolsActivePort、重连换主、同工作区双会话/独立填表竞争、foreign kill0、日常profile读取/复制函数调用即失败；全库非vendor裸端口生产调用迁移清单及回归。真实探针验证准确WS、MCP、PID/start/profile，仅空本地页。
+事件屏障：四种失效、各与stop竞争、真崩溃held、成功不回退、正常停止无虚假attempt；旧/不同 generation 不接管、不自动重开，明确代码关闭记录才可重新打开；fake9222、PID复用、陈旧DevToolsActivePort、重连换主、同工作区双会话/独立填表竞争、foreign kill0、日常profile读取/复制函数调用即失败；全库非vendor裸端口生产调用迁移清单及回归。真实探针验证准确WS、MCP、PID/start/profile，仅空本地页。
 
 R4：legacy applicant跨目录资料权限、每用户授权/账号凭据；R5：保护公司可靠提交；R6：其余恢复/重复风险闭环及N2；R8：独立平台安装、升级发行、许可/完整公众验收。R1通过及本片探针通过均不能宣称公众自动业务可发布。
 
