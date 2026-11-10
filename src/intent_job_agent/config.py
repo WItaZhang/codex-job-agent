@@ -71,6 +71,15 @@ class ApplyMCP(_Section):
     gmail: str
 
 
+class ApplyGmail(_Section):
+    enabled: bool = True
+    oauth_path: str = "~/.gmail-mcp/gcp-oauth.keys.json"
+    credentials_path: str = "~/.gmail-mcp/credentials.json"
+    timeout_seconds: float = Field(default=15, gt=0)
+    # A health check must never select messages, even through a configuration edit.
+    probe_query: Literal["after:2100/01/01 before:2000/01/01"] = "after:2100/01/01 before:2000/01/01"
+
+
 class CoverLetterRules(_Section):
     min_words: int = Field(gt=0)
     max_words: int = Field(gt=0)
@@ -118,6 +127,7 @@ class Apply(_Section):
     logs_dir: str
     cover_letter: CoverLetterRules
     mcp: ApplyMCP
+    gmail: ApplyGmail = Field(default_factory=ApplyGmail)
     blocked_origins: list[str]
     builtin_tools: str
     file_tools: str

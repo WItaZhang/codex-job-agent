@@ -3,6 +3,7 @@
 import argparse
 import functools
 import json
+import os
 import socket
 import subprocess
 import tempfile
@@ -83,6 +84,8 @@ class AuditedRunner(gates.GateRunner):
 
 def fixture(root, *, seed=False, pause=False):
     root = require_root(root)
+    os.environ["GMAIL_OAUTH_PATH"] = str(root / "synthetic-missing-oauth.json")
+    os.environ["GMAIL_CREDENTIALS_PATH"] = str(root / "synthetic-missing-credentials.json")
     if seed:
         if (root / "data").exists():
             raise ValueError("Refuse to overwrite an existing fixture")
@@ -101,8 +104,8 @@ def fixture(root, *, seed=False, pause=False):
     if seed:
         ids = add_jobs(box, ["Synthetic Alpha", "Stripe, Inc.", "Synthetic Beta", "Synthetic Gamma"])
         write_letters(box, ids)
-        assert box.get_apply_setup()["ready"]
-        emit(root, "fixture", ids=ids, ready=True)
+        assert box.get_apply_setup()["materials_ready"]
+        emit(root, "fixture", ids=ids, materials_ready=True)
     return box
 
 
