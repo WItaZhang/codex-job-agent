@@ -144,6 +144,7 @@ class Apply(_Section):
 class FormFill(_Section):
     """The form-fill module (specs/form-fill.md); its model and timeout are apply.*'s."""
 
+    verification_code_max_age_seconds: float = Field(default=300, gt=0)
     dir: str  # under storage.data_dir: runs/<run>/<job>/ and the run's feasibility.md
     recordings_dir: str  # under dir: recordings/<recording id>/ (spec 6.2)
     answers_file: str  # under apply.applicant_dir

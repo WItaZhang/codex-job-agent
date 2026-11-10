@@ -171,6 +171,8 @@ def network_entry(event: dict, redactor: Redactor) -> tuple[dict | None, bool]:
     signed-in page). Cookies and auth-like headers are dropped. The address, every header kept and the body (read
     as text whatever its type says) are checked: any contact detail drops the response whole. Documents (PDF, Word)
     are never kept. Other methods keep nothing here (see request_entry)."""
+    if redactor.sensitive_handoff:
+        return None, True
     if str(event.get("method", "")).upper() != "GET":
         return None, False
     url, body = str(event.get("url", "")), event.get("body") or b""

@@ -5,6 +5,7 @@ anything shaped like an e-mail address or a phone number. Names are not contact 
 Raw values are never printed, logged or put in error messages; errors name only the field or kind.
 """
 
+import json
 import re
 from collections import Counter
 from collections.abc import Callable, Iterable
@@ -158,6 +159,36 @@ class Redactor:
         self._marks = marks or [PLACEHOLDER[kind] for kind, _ in patterns]
         # The placeholders of pages saved before VERSION: one per kind, and no mark of its own for someone else's.
         self._other = ("[email]", "[phone]") if legacy else (PLACEHOLDER["other_email"], PLACEHOLDER["other_phone"])
+        self.verification_code = None
+
+    @property
+    def sensitive_handoff(self) -> bool:
+        return self.verification_code is not None
+
+    def with_verification_code(self, code: str) -> "Redactor":
+        pattern = re.compile(r"[\s-]*".join(map(re.escape, code)))
+        result = Redactor([("password", pattern), *self._patterns], ["[verification code]", *self._marks])
+        result._other = self._other
+        result.verification_code = code
+        return result
+
+    def mask_log(self, line: str) -> str:
+        """Preserve structured logs while masking split code inputs as well as full codes."""
+
+        def mask_text(value):
+            if isinstance(value, str):
+                # Browser snapshots can describe separate one-character inputs across many lines.
+                return re.sub(r"(?<!\w)[0-9](?!\w)", "[verification digit]", self.mask(value))
+            if isinstance(value, dict):
+                return {key: mask_text(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [mask_text(item) for item in value]
+            return value
+
+        try:
+            return json.dumps(mask_text(self.mask_json(json.loads(line))), ensure_ascii=False) + "\n"
+        except (ValueError, TypeError):
+            return "[unstructured output withheld during email-code handoff]\n"
 
     def __repr__(self) -> str:
         return f"Redactor({len(self._patterns)} patterns)"
@@ -203,6 +234,8 @@ class Redactor:
         return _OTHER_PHONE.sub(phone, text), hits
 
     def mask(self, text: str) -> str:
+        if self.sensitive_handoff and len(text.strip()) == 1 and text.strip().isdigit():
+            return "[verification digit]"
         return self._apply(text)[0]
 
     def hits(self, text: str) -> Counter:
@@ -215,9 +248,19 @@ class Redactor:
         if isinstance(obj, str):
             return self.mask(obj)
         if isinstance(obj, dict):
-            return {self.mask_json(key): self.mask_json(value) for key, value in obj.items()}
+            return {
+                self.mask_json(key): "[verification digit]"
+                if self.verification_code
+                and key in ("value", "text", "answer")
+                and str(value) in self.verification_code
+                and len(str(value)) == 1
+                else self.mask_json(value)
+                for key, value in obj.items()
+            }
         if isinstance(obj, (list, tuple)):
             return [self.mask_json(item) for item in obj]
+        if self.verification_code and str(obj) == self.verification_code:
+            return "[verification code]"
         return obj
 
     def scan(self, paths: Iterable[str | Path]) -> dict[str, dict[str, int]]:

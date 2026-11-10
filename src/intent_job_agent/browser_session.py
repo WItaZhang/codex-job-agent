@@ -375,7 +375,7 @@ def _own_row(db_path):
     return row
 
 
-def ensure(settings):
+def ensure(settings, *, existing_generation=None):
     settings.require_external("browser.ensure")
     expected = scope(settings)
     root, db_path, _ = expected
@@ -387,6 +387,10 @@ def ensure(settings):
         )
         path = folder / "session.json"
         old = _current(path, expected)
+        if existing_generation is not None and (
+            old is None or old.generation != existing_generation or not watchdog.alive(old.pid, old.started)
+        ):
+            raise BrowserIdentityLost("Original browser generation unavailable; no browser started")
         if not _own(expected):
             _dedicated(folder, root, db_path)
         if old is not None:
@@ -395,6 +399,8 @@ def ensure(settings):
                 binding = BrowserBinding(**{**old.dump(), **owner})
                 _atomic(path, binding.dump())
                 return binding
+        if existing_generation is not None:
+            raise BrowserIdentityLost("Original browser ended before continuation; no browser started")
         return _launch(settings, expected, path, owner, lambda: _own_row(db_path) == row)
 
 

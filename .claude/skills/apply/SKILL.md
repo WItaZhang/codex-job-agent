@@ -29,7 +29,11 @@ description: 从投递清单自主准备求职信并分批投递；默认不抽�
 
 先 `apply_status()`：其他会话在运行时不争用 Chrome（`other_session` 写着"读回开放题定稿"的只是只读地看标签页，开始新的一步时会让出来）；报告 notice、held 和可能已提交结果；有 `open_answers` 就照第 3 节第 4 条处理。`held` 就是等你处理的清单：按 `held_count` 报每种门槛的数量（例如"清单上 19 个验证码、9 个邮箱验证码、3 个要登录"），告诉用户有空时可以在场重跑（第 4 节）。`next` 存在且条件仍满足时可自主继续。
 
-再 `get_apply_setup(check_connections=true)`（限当前使用者已授权的投递/邮箱检查范围；尚无此范围时用默认离线检查）：分别报告 `materials_ready`、`missing_programs`、`can_start_web` 和 `gmail.status`。缺少资料、标准答案冲突、必需程序缺失时先解决；程序存在不代表 Chrome 会话或 Claude 登录已验证，不能笼统说“全部准备就绪”。Gmail 缺配置、未授权或检查失败时给出 `gmail.next_action` 和 [配置指南](../../../docs/gmail-setup.md)。`can_start_web=true` 可在已有授权内继续网页申请，但明确邮箱验证码需人工处理、邮件投递不可用；文件存在或宿主自己的 Gmail 插件可用都不代表独立后端已连通。首次 Google 授权由本人按指南完成，不自动执行 auth、不在对话索要凭据。不要把重新运行说成从原验证码页恢复；当前没有把宿主读到的验证码交给等待中填表任务的入口。
+再 `get_apply_setup(check_connections=true)`（限当前使用者已授权的投递/邮箱检查范围；尚无此范围时用默认离线检查）：分别报告 `materials_ready`、`missing_programs`、`can_start_web` 和 `gmail.status`。缺少资料、标准答案冲突、必需程序缺失时先解决；程序存在不代表 Chrome 会话或 Claude 登录已验证，不能笼统说“全部准备就绪”。Gmail 缺配置、未授权或检查失败时给出 `gmail.next_action` 和 [配置指南](../../../docs/gmail-setup.md)。`can_start_web=true` 可在已有授权内继续网页申请，但明确邮箱验证码需人工处理、邮件投递不可用；文件存在或宿主自己的 Gmail 插件可用都不代表独立后端已连通。首次 Google 授权由本人按指南完成，不自动执行 auth、不在对话索要凭据。
+
+独立 `start_form_fill` 留下的门槛，先用 `get_form_fill_gate(run_id, job_id)` 检查。已有业务授权且原页仍匹配时，用 `resume_form_fill(list_path, run_id, job_id)` 接续；可附本次邮箱验证码及带时区的邮件接收时间，来源必须是本人或已获该用户授权的宿主邮箱读取。验证码不回显、不写经验库，不用于 CAPTCHA。返回已有 continuation 时沿用其编号，不能换来源绕过去重。原页失效则报告阻塞；只有用户确实要求从头重做才 `start_form_fill`，不把新运行说成原页恢复。该独立入口不更新 /apply 的 held 清单。详见 [接续指南](../../../docs/form-fill-resume.md)。
+
+`form_fill_status` 的运行 `done` 只表示执行已结束。逐项看 job 的 `status`、`agent_result` 和报告；`incomplete`、`gate` 或 `stuck` 都不是已填完，读回到几个字段也不能代表成功。
 
 已有资料可用于自主选择简历；缺少的事实不能从意图猜出。申请地点和搬家回答仍来自 applicant.yaml。
 

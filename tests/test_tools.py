@@ -74,6 +74,7 @@ def test_commit_tier_is_what_spec_5_1_lists():
         "start_applying",
         "resume_applying",  # resuming jobs held at a gate (spec 4.10 item 10)
         "start_form_fill",
+        "resume_form_fill",  # independent original-tab continuation, always fill-only
     }
 
 

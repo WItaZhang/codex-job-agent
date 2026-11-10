@@ -154,7 +154,7 @@ class JobReport(_Model):
     job_id: str
     company: str = ""
     title: str = ""
-    status: Literal["filled", "gate", "tab_lost", "readback_failed", "system_error"]
+    status: Literal["filled", "incomplete", "gate", "tab_lost", "readback_failed", "system_error"]
     agent_result: str | None = None
     conclusion: Conclusion
     not_filled_reason: str | None = None

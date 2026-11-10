@@ -1029,6 +1029,8 @@ def _masked_screenshot(page, redactor: Redactor, hide=(), *, render_seconds: flo
     """A full-page screenshot with every element showing a contact value, and every field at `hide` ((frame, path)
     of the fields matched to a contact entry), painted black for the shot only (Playwright adds the stylesheet for
     the shot and takes it away; the page is left as it is), or None and why when that cannot be done (5.6)."""
+    if getattr(redactor, "sensitive_handoff", False):
+        return None, "email-code handoff: screenshot withheld"
     try:
         if any(frame != 0 for frame, _ in hide):
             return None, "子框架里有对到联系方式的栏，涂不到"
@@ -1067,7 +1069,9 @@ def _read_live(holder: dict, binding, target: dict, redactor: Redactor, sheet, e
         return (
             raw,
             masked,
-            serialize(page, hide),
+            "<!-- withheld during email-code handoff -->"
+            if getattr(redactor, "sensitive_handoff", False)
+            else serialize(page, hide),
             *_masked_screenshot(page, redactor, hide, render_seconds=render_seconds),
         )
 

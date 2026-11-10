@@ -23,6 +23,9 @@ approval_mode = "approve"
 [mcp_servers.intent-agent.tools.resume_applying]
 approval_mode = "approve"
 
+[mcp_servers.intent-agent.tools.resume_form_fill]
+approval_mode = "approve"
+
 [mcp_servers.intent-agent.tools.start_applying]
 approval_mode = "approve"
 

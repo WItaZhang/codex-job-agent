@@ -60,6 +60,7 @@ from .discovery import DiscoveryError, fetch_board
 from .domain import DIMENSIONS, Compensation, IntentModel, InvariantError, Job, Level, Vocabulary
 from .engine import Engine
 from .form_fill import cli as form_fill_report
+from .form_fill import continuation as form_fill_continuation
 from .form_fill import inputs as form_fill_inputs
 from .form_fill import readback as form_fill_readback
 from .form_fill import recording as form_fill_recording
@@ -3045,6 +3046,183 @@ class Toolbox:
 
     # --- form filling (specs/form-fill.md; slice 1: specs/form-fill.plan.md) -----------------------------------
 
+    def _continuation_receipt(self, row: dict) -> dict:
+        if row["result"] is not None:
+            return {**row["result"], "reused": True}
+        activity = self.store.activity()
+        return {
+            "run_id": row["run_id"],
+            "reused": True,
+            "status": "running" if activity and activity.get("run_id") == row["run_id"] else "interrupted",
+            "message": "Existing continuation retained; no duplicate worker was started",
+        }
+
+    def _form_fill_browser(self, applicant):
+        return self.form_fill_runner or form_fill.FormFillRunner(
+            self.data_dir, self._browser_settings(), applicant.profile, applicant.apply_agent_read
+        )
+
+    @_tool("read")
+    def get_form_fill_gate(self, run_id: str, job_id: str) -> dict:
+        """Inspect a saved form-fill gate in its exact browser, without starting Chrome or an agent.
+        This checks metadata, not whether the user has cleared the page. No code or private page contents returned."""
+        if previous := self.store.form_fill_continuation(run_id, job_id):
+            return {"can_resume": False, "continuation": self._continuation_receipt(previous)}
+        source = form_fill_continuation.load_source(self.data_dir, self._browser_settings(), run_id, job_id)
+        try:
+            browser = self._form_fill_browser(self._applicant())
+            target = form_fill_continuation.select_target(source, browser.open_tabs())
+        except Exception:
+            return {
+                "can_resume": False,
+                "run_id": run_id,
+                "job_id": job_id,
+                "reason": "Original browser/tab unavailable, changed or ambiguous; nothing was opened",
+            }
+        return {
+            "can_resume": True,
+            "run_id": run_id,
+            "job_id": job_id,
+            "gate": source.gate,
+            "tab_id": target["id"],
+            "generation": target["generation"],
+            "site": urlparse(target["url"]).hostname,
+            "inspection": "Exact browser/tab metadata; page state is rechecked before actions",
+            "next": "resume_form_fill with the matching list; supply only a current email code if needed",
+        }
+
+    @_tool("commit")
+    def resume_form_fill(
+        self,
+        list_path: str,
+        run_id: str,
+        job_id: str,
+        verification_code: str | None = None,
+        code_received_at: str | None = None,
+    ) -> dict:
+        """Continue one original form-fill tab, always stopping before Submit. Never opens a replacement tab.
+        Repeated source run/job requests return the same durable continuation. A code is optional, only for that
+        email gate, with an ISO received time including timezone. It is not persisted for retries. Use only within
+        this user's authorized application scope. A host may retain tool arguments in its own transcript."""
+        if previous := self.store.form_fill_continuation(run_id, job_id):
+            return self._continuation_receipt(previous)
+        try:
+            if _running(self._form_fill_run) or _running(self._apply_run):
+                raise InvariantError("A browser task is still running")
+            self._refuse_other_session()
+        except InvariantError:
+            # Another caller may have reserved this exact continuation after our first lookup.
+            if previous := self.store.form_fill_continuation(run_id, job_id):
+                return self._continuation_receipt(previous)
+            raise
+        applicant = self._ready_applicant()
+        settings = self._browser_settings()
+        source = form_fill_continuation.load_source(self.data_dir, settings, run_id, job_id)
+        inputs = form_fill.load_inputs(list_path, applicant, self.settings)
+        entries = [e for e in inputs.jobs.jobs if e.id == job_id]
+        if len(entries) != 1 or (entries[0].url, entries[0].company, entries[0].title) != (
+            source.url,
+            source.company,
+            source.title,
+        ):
+            raise InvariantError("The list does not match the original application")
+        entry = entries[0]
+        browser = self._form_fill_browser(applicant)
+        form_fill_continuation.select_target(source, browser.open_tabs())
+        if verification_code is not None:
+            verification_code = form_fill_continuation.validate_code(
+                source,
+                verification_code,
+                code_received_at,
+                max_age=self.settings.form_fill.verification_code_max_age_seconds,
+            )
+        next_id = form_fill.new_run_id()
+        ctx = form_fill.RunContext(
+            next_id,
+            self.data_dir / self.settings.form_fill.dir / "runs" / next_id,
+            settings,
+            applicant,
+            inputs.answers,
+            inputs.checklist,
+            inputs.redactor,
+            browser,
+            inputs.open_answers,
+            self._pairs_dir(),
+        )
+        owner = self._owner()
+        self._end_watch()
+        row, created = self.store.reserve_form_fill_continuation(run_id, job_id, next_id, owner)
+        if not created:
+            return self._continuation_receipt(row)
+        jobs = JobList(jobs=(entry,))
+        run = {
+            "run_id": next_id,
+            "status": "running",
+            "error": None,
+            "list": str(Path(list_path).resolve()),
+            "feasibility": str(ctx.run_dir / form_fill.REPORT_FILE),
+            "summary": None,
+            "skipped": [],
+            "closed": False,
+            "source_run": run_id,
+            "jobs": [
+                {
+                    "n": 1,
+                    "job_id": job_id,
+                    "company": entry.company,
+                    "title": entry.title,
+                    "state": "running",
+                    "outcome": None,
+                    "recording_id": form_fill_recording.recording_id(entry.url),
+                }
+            ],
+        }
+        self._form_fill_run = run
+
+        # The secret lives only in this closure and the one child environment; never in run or the database.
+        def work():
+            writer = None
+            try:
+                writer = Store(self.store.path, self.settings)
+                self._record_agents(writer)
+                form_fill.begin_feasibility(ctx, list_path, jobs)
+                outcome = form_fill.run_job(entry, ctx, resume=source, verification_code=verification_code)
+                run["jobs"][0].update(state="done", outcome=outcome)
+                form_fill.finish_feasibility(ctx)
+                run["summary"] = str(form_fill_report.run_report(next_id, self.data_dir, self.settings))
+                run["status"] = "done"
+            except Exception:
+                # Exceptions may quote a supplied code; only a fixed diagnostic crosses this boundary.
+                run.update(status="failed", error="Continuation failed; inspect its redacted report before retrying")
+            finally:
+                try:
+                    watchdog.LIVE.listen(None)
+                    result = self.form_fill_status()
+                    (writer or self.store).finish_form_fill_continuation(run_id, job_id, result)
+                finally:
+                    try:
+                        (writer or self.store).end_activity(owner, run_id=next_id)
+                    finally:
+                        run["closed"] = True
+                        if writer is not None:
+                            writer.db.close()
+
+        if self.form_fill_in_background:
+            try:
+                threading.Thread(target=work, name="intent-agent-form-fill-resume", daemon=True).start()
+            except BaseException:
+                try:
+                    self.store.finish_form_fill_continuation(run_id, job_id, {"run_id": next_id, "status": "failed"})
+                finally:
+                    try:
+                        self.store.end_activity(owner, run_id=next_id)
+                    finally:
+                        run.update(status="failed", closed=True)
+                raise
+        else:
+            work()
+        return {"run_id": next_id, "source_run": run_id, "job_id": job_id, "status": run["status"], "reused": False}
+
     @_tool("commit")
     def start_form_fill(self, list_path: str) -> dict:
         """Fill every job on a form-fill list up to the final submit button and stop there; never submits. Checks
@@ -3193,8 +3371,8 @@ class Toolbox:
     @_tool("prepare")
     def form_fill_status(self) -> dict:
         """Progress of the current or last form-fill run (it never submits): per job the state, the status (filled,
-        gate, tab_lost, readback_failed, system_error), the filling agent's own result, how many fields were read
-        back, the saved page folder, the recording id, the automatic checks and the notes (contact details masked);
+        incomplete, gate, tab_lost, readback_failed, system_error), the filling agent's own result, how many fields
+        were read back, the page folder, the recording id, the automatic checks and notes (contact details masked);
         the jobs not visited because they were recorded before (`skipped`), and the paths of feasibility.md and,
         once the run is done, summary.md. `open_answers`, when present: open answers waiting for the applicant's
         final or questions waiting for the applicant (see open_answer_pairs)."""
