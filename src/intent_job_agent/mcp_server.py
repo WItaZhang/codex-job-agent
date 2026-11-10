@@ -62,7 +62,12 @@ Applying (project skill /apply):
 - Establish this user's explicit automatic-submission scope first; an ambiguous /apply is not consent.
   Prepare reviewable materials and use stop_before_submit=true until scope is explicit; existing explicit
   delegation persists until revoked. Project allow/approve is tool availability, not business permission.
-- get_apply_setup first, then apply_status: list the jobs still held at a gate (`held`) before a new batch.
+- get_apply_setup(check_connections=true) within this user's authorized application/email-check scope;
+  otherwise use its offline default. Report materials_ready, missing_programs and gmail.status separately.
+  can_start_web checks materials/program presence, not browser/model login. Unavailable Gmail permits web-only
+  work but requires manual email verification; follow docs/gmail-setup.md for user-completed authorization.
+  Host Gmail authorization does not transfer to the independent worker. Never call file presence "ready".
+  apply_status lists the jobs still held at a gate (`held`) before a new batch.
 - prepare_apply_batch picks the batch; cover letters are written by cover-letter-writer subagents and saved with
   save_cover_letter, which checks them.
 - start_applying starts a step with its exact returned summary. Default review_first=0: no mandatory first-five

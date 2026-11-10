@@ -17,6 +17,14 @@ assert FIXTURES["synthetic"] is True
 
 BASE_INTENT = FIXTURES["base_intent"]
 
+
+@pytest.fixture(autouse=True)
+def isolated_gmail_paths(tmp_path, monkeypatch):
+    """No test may inspect the developer's Gmail credentials or start a real mailbox check."""
+    monkeypatch.setenv("GMAIL_OAUTH_PATH", str(tmp_path / "synthetic-gmail" / "oauth.json"))
+    monkeypatch.setenv("GMAIL_CREDENTIALS_PATH", str(tmp_path / "synthetic-gmail" / "credentials.json"))
+
+
 # Keys the synthetic user's vocabulary already knows. Keys outside this list are "new keys".
 BASE_VOCAB = {
     "role": {"ml_engineering": [], "backend_engineering": ["后端", "server_side"], "data_science": []},

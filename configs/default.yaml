@@ -55,6 +55,12 @@ apply:                            # 投递（spec 4.10）
   mcp:                            # 投递 agent 用的 MCP 服务，固定版本
     playwright: "@playwright/mcp@0.0.83"
     gmail: "@gongrzhe/server-gmail-autoauth-mcp@1.1.11"
+  gmail:
+    enabled: true                # false: 网页照常，邮箱验证码改为人工处理，不能邮件投递
+    oauth_path: "~/.gmail-mcp/gcp-oauth.keys.json"
+    credentials_path: "~/.gmail-mcp/credentials.json"
+    timeout_seconds: 15
+    probe_query: "after:2100/01/01 before:2000/01/01" # 互斥日期，只验证连接，不选取邮件
   blocked_origins:                # 投递用的浏览器打不开的网站（不是严格的安全边界，不拦重定向）
     - https://mail.google.com
     - https://myaccount.google.com

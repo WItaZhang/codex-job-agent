@@ -38,6 +38,7 @@ from . import (
     browser_session,
     duplicates,
     funnel,
+    gmail_setup,
     notify,
     open_answer_pairs,
     open_answers,
@@ -1068,9 +1069,10 @@ class Toolbox:
         return applicant
 
     @_tool("read")
-    def get_apply_setup(self) -> dict:
+    def get_apply_setup(self, check_connections: bool = False) -> dict:
         """Whether applying is set up: the applicant files (never their contents), resumes, what is plugged in,
-        and the programs a run needs on this machine. Contact details are never returned."""
+        and required programs. Default is offline. Within authorized business/check scope,
+        check_connections verifies Gmail with an empty search, never authorization or mail contents."""
         if self.settings.execution_mode == "local_only":
             try:
                 applicant = self._applicant()
@@ -1079,6 +1081,9 @@ class Toolbox:
                 missing = [str(error)]
             return {
                 "ready": False,
+                "materials_ready": None,  # Answer/profile consistency is deliberately not inspected in this mode.
+                "can_start_web": False,
+                "gmail": gmail_setup.status(self.settings),
                 "execution_mode": "local_only",
                 "execution_disabled": True,
                 "reason": "Business execution disabled pending R4/R5",
@@ -1087,11 +1092,28 @@ class Toolbox:
             }
         folder = applicant_files.folder(self.data_dir, self.settings.apply.applicant_dir)
         programs = {name: shutil.which(name) is not None for name in ("claude", "npx")}
-        programs["chrome"] = _chrome_found()
+        browser = self.settings.apply.browser_executable
+        programs["chrome"] = shutil.which(browser) is not None if browser else _chrome_found()
+        mail = gmail_setup.status(self.settings, connect=check_connections)
+        prerequisites = {
+            "programs": programs,
+            "missing_programs": [name for name, found in programs.items() if not found],
+            "gmail": mail,
+            "ready_scope": "Applicant materials, program presence and enabled Gmail search only; "
+            "not model login, browser session, website access or application success.",
+            "warnings": [] if mail["ready"] else [mail["next_action"]],
+        }
         try:
             applicant = self._applicant()
         except InvariantError as error:
-            return {"ready": False, "missing": [str(error)], "folder": str(folder), "programs": programs}
+            return {
+                **prerequisites,
+                "ready": False,
+                "materials_ready": False,
+                "can_start_web": False,
+                "missing": [str(error)],
+                "folder": str(folder),
+            }
         missing = applicant.missing_files() + applicant_files.read_dir_problems(applicant, self.data_dir)
         sheet_problems, conflicts, bank = [], [], {}
         if not missing:
@@ -1103,8 +1125,13 @@ class Toolbox:
             bank = {"open_answers": {"file": str(applicant.open_answers), "accepted": None}}
             if not missing and not sheet_problems:
                 bank["open_answers"]["accepted"] = len(self._open_answers(applicant, None).accepted)
+        materials_ready = not (missing or sheet_problems or conflicts)
+        can_start_web = materials_ready and all(programs.values())
         return {
-            "ready": not (missing or sheet_problems or conflicts),
+            **prerequisites,
+            "materials_ready": materials_ready,
+            "can_start_web": can_start_web,
+            "ready": can_start_web and (mail["ready"] or not mail["enabled"]),
             "missing": missing,
             # answers.yaml, checklist.yaml or the open-answer bank (form-fill spec 2.3, 2.4; open-answers spec 4.2)
             "answer_sheet_problems": sheet_problems,
@@ -1119,7 +1146,6 @@ class Toolbox:
             "onsite_ok": list(applicant.onsite_ok),
             "relocation": applicant.relocation,
             "review_first": self.settings.apply.review_first,
-            "programs": programs,
         }
 
     @_tool("read")

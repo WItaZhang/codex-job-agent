@@ -133,7 +133,7 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
    - `answers.yaml`、`checklist.yaml`：标准答案和要求清单，参照 [示例](../docs/examples/applicant/)。两步都照它们答题，自动提交的也一样；
      工作许可、期望薪资和 EEO 要和 `profile.json` 一致，不一致就不开始投递。
    - 可选 `open_answers`：开放题答案库（见下面"开放题答案库"一节）。
-2. 本机需要：Chrome、Node.js（`npx`）、Claude Code 命令行。可选：Gmail MCP 授权（读邮箱验证码；填表 agent 只能搜索和读，不能发信）。
+2. 本机需要：Chrome、Node.js（`npx`）、Claude Code 命令行。可选邮箱能力按 [Gmail 配置与检查](gmail-setup.md) 完成独立后端授权；宿主里 Gmail 插件可用不代表后端可用。填表 agent 只能搜索和读，不能发信。检查会分别报告资料、程序和 Gmail；未配置 Gmail 仍可网页填表，邮箱验证码需人工处理、邮件投递不可用。
 3. 输入 `/apply`：
    - 先给这一批写求职信（子 agent 写，代码校验，打印成一页 PDF）。
    - 先确定你授权的范围：明确“自动投递当前清单/这些岗位”即可，依据当前会话或宿主可用历史中的明确授权沿用至撤销；跨会话取决于宿主保留的上下文，项目不会自动记忆。没有可查授权证据、只有含糊/apply时，先准备材料和只填，展示具体批次及非保护公司范围供你一次选择。默认 review_first=0，已授权的非保护公司自动投递，无需人工抽查前 5 份。要只填不交，可显式 stop_before_submit=true；独立填表模块保持不提交。

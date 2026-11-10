@@ -33,7 +33,7 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
-from . import applypilot_bridge, watchdog
+from . import applypilot_bridge, gmail_setup, watchdog
 from .config import Settings
 from .domain import InvariantError
 from .form_fill import readback
@@ -360,8 +360,8 @@ def mcp_config(settings: Settings, binding, gmail: bool = True, extra_servers: d
             ],
         },
     }
-    if gmail:
-        servers["gmail"] = {"command": "npx", "args": ["-y", settings.apply.mcp.gmail]}
+    if gmail and settings.apply.gmail.enabled:
+        servers["gmail"] = gmail_setup.server_config(settings)
     servers.update(extra_servers or {})
     return {"mcpServers": servers}
 
@@ -608,7 +608,7 @@ def run_application(
 ) -> ApplyOutcome:
     """One headless run. The keyword options are the form-fill module's (specs/form-fill.plan.md section 1,
     form-fill.slice2a.plan.md): its own log file, each log line passed through `mask` before it is written, text
-    added after the prompt, no Gmail server (written to its own MCP config file, so /apply's stays as it is), more
+    added after the prompt, optional Gmail (written to its own MCP config file, so /apply's stays as it is), more
     refused tools, its own servers (the checkpoint service) and their allowed tools. Without them the run is
     /apply's, unchanged."""
     from . import browser_session
@@ -619,6 +619,22 @@ def run_application(
     data_dir, profile = Path(data_dir).resolve(), Path(profile).resolve()
     text = build_prompt(spec, data_dir, settings, profile, read_dirs) + extra_prompt
     own = extra_servers or not gmail  # the form-fill module's servers go to their own file; /apply's stays as is
+    mail = gmail_setup.status(settings, connect=True) if gmail else {"ready": False, "status": "disabled"}
+    gmail = gmail and mail["ready"]
+    mail_note = ""
+    if not gmail:
+        # Removing the service alone leaves stale pre-approval in the command. Remove
+        # every configured/additional Gmail allow entry and explicitly refuse Gmail.
+        mail_tools = tuple(t for t in (*settings.apply.allowed_tools, *extra_allowed) if t.startswith("mcp__gmail"))
+        extra_disallowed = (*extra_disallowed, *mail_tools, "mcp__gmail")
+        mail_note = f"Gmail unavailable ({mail['status']}); email verification needs manual handling."
+        text += (
+            "\n" + mail_note + " Continue browser-only work where possible. "
+            "Do not claim you searched Gmail or that no message arrived. "
+            "If email verification or an email-only application is required, stop at that gate, "
+            "explain Gmail is unavailable in NOTES and emit RESULT:FAILED:email_verification. "
+            "Do not send email or open another mail service.\n"
+        )
     mcp_path = config.APP_DIR / (".mcp-form-fill-0.json" if own else ".mcp-apply-0.json")
     mcp_path.write_text(json.dumps(mcp_config(settings, binding, gmail=gmail, extra_servers=extra_servers)), "utf-8")
     if log_path is None:
@@ -774,6 +790,8 @@ def run_application(
         said = [last[-1][:300]] if last else [f"exit code {proc.returncode}"]
     if why == "stalled":
         said.append(f"投递 agent {limits.stall_seconds:g} 秒没有任何输出，算卡住，已结束它")
+    if mail_note:
+        said.append(mail_note)
     return ApplyOutcome(
         status, reason, said, seen["other_sites"], seen["emails"], str(log_path), None, last_url(events), used
     )

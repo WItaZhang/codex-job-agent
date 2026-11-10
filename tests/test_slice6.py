@@ -178,7 +178,8 @@ def test_setup_reports_what_is_missing(box):
 def test_setup_and_materials_never_return_contact_details(box, tmp_path):
     write_applicant(box.data_dir)
     setup = box.get_apply_setup()
-    assert setup["ready"] is True and [r["id"] for r in setup["resumes"]] == ["ml", "infra"]
+    assert setup["materials_ready"] is True and [r["id"] for r in setup["resumes"]] == ["ml", "infra"]
+    assert setup["ready"] is False  # Synthetic applicant files do not authorize Gmail.
     materials = box.get_cover_letter_materials()
     assert "cover-letter" in materials["skill"]["source"]  # the project's general skill by default
     assert materials["resumes"][0] == {"id": "ml", "use_for": "ML roles"}
@@ -706,8 +707,12 @@ sys.exit(1)
 """
 
 
-def fake_claude(tmp_path, monkeypatch, script):
+def fake_claude(tmp_path, monkeypatch, script, *, gmail_ready=True):
     fake_browser_identity(monkeypatch)
+    if gmail_ready:
+        # Existing runner scenarios assume a working synthetic mailbox. Tests for
+        # degraded startup opt out and use isolated nonexistent credential paths.
+        monkeypatch.setattr(apply_bridge.gmail_setup, "status", lambda *a, **k: {"ready": True, "status": "ready"})
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     fake = bin_dir / "claude"
@@ -1047,12 +1052,14 @@ FORM_FILL_DISALLOWED = (
 )
 
 
-def test_without_the_new_options_the_apply_command_and_servers_are_unchanged():
+def test_apply_command_stays_restricted_and_gmail_uses_the_configured_wrapper():
     s = settings()
     assert apply_bridge.claude_command(s, Path("/x/mcp.json")) == APPLY_COMMAND
     servers = apply_bridge.mcp_config(s, synthetic_binding())["mcpServers"]
     assert list(servers) == ["playwright", "gmail"]
-    assert servers["gmail"] == {"command": "npx", "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp@1.1.11"]}
+    from intent_job_agent import gmail_setup
+
+    assert servers["gmail"] == gmail_setup.server_config(s)
     assert servers["playwright"]["args"][:4] == [
         "-y",
         "@playwright/mcp@0.0.83",
@@ -1142,14 +1149,17 @@ def test_form_fill_options_change_only_the_form_fill_run(box, tmp_path, monkeypa
     assert Path(argv[argv.index("--mcp-config") + 1]).name == ".mcp-form-fill-0.json"
     assert list(json.loads(seen["mcp"])["mcpServers"]) == ["playwright"]
     assert apply_mcp.read_text(encoding="utf-8") == "left alone"  # /apply's file is untouched
-    assert argv[argv.index("--disallowedTools") + 1].endswith(",".join(FORM_FILL_DISALLOWED))
+    assert set(FORM_FILL_DISALLOWED) <= set(argv[argv.index("--disallowedTools") + 1].split(","))
+    assert "mcp__gmail" not in argv[argv.index("--allowedTools") + 1]
     base = apply_bridge.build_prompt(spec, box.data_dir, box.settings, profile)
-    assert seen["prompt"] == base + "\n\n== ANSWER SHEET ==\n- name.first -> Sam"
+    assert seen["prompt"].startswith(base + "\n\n== ANSWER SHEET ==\n- name.first -> Sam")
+    assert "Gmail unavailable (disabled)" in seen["prompt"]
     written = log_path.read_text(encoding="utf-8")
     assert outcome.log == str(log_path) and "[email]" in written and "sam.synthetic" not in written
     assert len(written.splitlines()) == 2
     assert not (box.data_dir / box.settings.apply.logs_dir / f"{job}.jsonl").exists()
-    assert outcome.status == "waiting" and outcome.notes == ["dry run"]
+    assert outcome.status == "waiting" and outcome.notes[0] == "dry run"
+    assert "Gmail unavailable (disabled)" in outcome.notes[-1]
 
 
 def test_the_checkpoint_service_is_only_added_when_asked():
