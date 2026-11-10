@@ -722,8 +722,8 @@ suggestions: [{n, kind: checklist | asks, rule | {key, phrase}}]
   - 页面显示已经申请过。
 - **重跑和接着做**：
   - 代码在 `meta.json` 里存下这个岗位标签页最后的地址和 CDP 标签页编号。
-  - 现在重跑一律新开标签页，从岗位地址从头做（`spec.md` §10 第 91 条）。/apply 里等你处理的岗位，证据表明门槛已解决后，也由本模块新开标签页从岗位地址重填（`spec.md` §10 第 100 条）；原来那个标签页留着，由用户自己关。
-  - 回到原来的标签页接着填（仅同一已验证generation内先按编号再唯一地址找；旧或不同generation直接走岗位地址重开，不接管旧tab）要放开 checkpoint 只录新开标签页的规则（4.2）并改读回，留到下一刀（总规格决定 22）。
+  - `start_form_fill` 从头重跑时新开标签页，从岗位地址开始（`spec.md` §10 第 91 条）。/apply 里等你处理的岗位，证据表明门槛已解决后，当前仍由本模块新开标签页从岗位地址重填（`spec.md` §10 第 100 条）；原来那个标签页留着，由用户自己关。不能把这两个入口说成原页接续。
+  - 原页接续使用 [form-fill-resume.md](form-fill-resume.md) 的独立入口，仅接管同 generation、同编号且可唯一选择的原标签页，录制与读回共用该归属。失效时不自动重开；重复继续不重复启动。顶层 `incomplete` 表示 agent 卡住或尚未填完，不能因页面可读就报告 `filled`。
   - 重跑算一次真实访问，录制里另存一份（6.2）。
 - 本模块不判断地点资格，也不挑岗位，清单上有的就填。
 - **不符合申请资格**：页面写明不收这类申请人、如实作答会被系统自动拒的（例如不收在读学生），填表 agent 停在那一页，用 "NOTE:" 引用原文，结果是 `not_eligible`，结论是"不符合申请资格"（3.2）。ApplyPilot 原有指令里给工作许可用的 `not_eligible_work_auth` 也算这一种。永远不编一个不真实的答案去过这道题（用户 2026-10-17）。这不是挑岗位：岗位照样在清单上，投不投由用户决定。
@@ -1031,10 +1031,11 @@ data/local/form-fill/
     - 两宿主项目配置仅放行该工具的逐次调用，不扩大 runner 工具白名单；不附加 requiresUserInteraction 标记，宿主强制审批仍遵守。
   - `replay_form_fill(recordings)`，准备级：只在录制上重放。
   - `form_fill_status()`，准备级：查看进度和结果。
+  - `get_form_fill_gate(run_id, job_id)`，读级；`resume_form_fill(list_path, run_id, job_id, verification_code?, code_received_at?)`，提交级：按原页接续规格检查并恢复，不提交申请。
   - `get_form_fill_report(run, id)`，读级：返回报告，联系方式打码。
   - `get_redacted_resume(resume_id)`，读级：返回按 5.6 打码后的简历文本，起草标准答案时用（2.3）。`get_resume` 不变，仍返回原文。
 - 对话里的入口是项目 skill `/form-fill`（在 Codex 里是 `$form-fill`），它只编排上面这些工具。
-- **不依赖领域数据**：输入都是文件；输出是标签页、文件和工具返回值。不读也不写岗位、意图、label、applications、apply_attempts、holds。唯一例外是跨会话互斥和失联收尾所需的运行协调行apply_running及管理锁（决定38、[R1b](public-r1b.md)）。独立填表登记kind=form_fill及runid；恢复按runid匹配self._form_fill_run，正常running/收尾不误kill；真失联只清自己进程并结束协调记录，不走_close_interrupted，不写投递领域状态。other_session按独立填表显示，不误称投递批次。
+- **不依赖领域数据**：输入都是文件；输出是标签页、文件和工具返回值。不读也不写岗位、意图、label、applications、apply_attempts、holds。协调例外是跨会话互斥和失联收尾所需的运行协调行apply_running、原页接续去重记录form_fill_continuations及管理锁（决定38、42、[R1b](public-r1b.md)）。独立填表登记kind=form_fill及runid；恢复按runid匹配self._form_fill_run，正常running/收尾不误kill；真失联只清自己进程并结束协调记录，不走_close_interrupted，不写投递领域状态。other_session按独立填表显示，不误称投递批次。
 - **和 /apply 共用的部分**：投递用的Chrome（空专属profile、generation/PID/start/profile归属和精确WS绑定）、MCP 的固定版本、打不开的网站名单、受限读文件。这些都从 `apply_bridge.py` 复用，不改 vendor。
   - `apply_bridge.mcp_config` 和 `claude_command` 现在固定加载 Gmail 服务，放行名单读的是 `apply.allowed_tools`。
   - 本模块要给它们加参数，传入：

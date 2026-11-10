@@ -37,6 +37,7 @@ from . import applypilot_bridge, gmail_setup, watchdog
 from .config import Settings
 from .domain import InvariantError
 from .form_fill import readback
+from .form_fill.continuation import CODE_ENV
 
 RESULT_CODES = ("APPLIED", "EXPIRED", "CAPTCHA", "LOGIN_ISSUE")
 
@@ -605,6 +606,7 @@ def run_application(
     extra_disallowed: tuple = (),
     extra_servers: dict | None = None,
     extra_allowed: tuple = (),
+    email_code: str | None = None,
 ) -> ApplyOutcome:
     """One headless run. The keyword options are the form-fill module's (specs/form-fill.plan.md section 1,
     form-fill.slice2a.plan.md): its own log file, each log line passed through `mask` before it is written, text
@@ -631,7 +633,8 @@ def run_application(
         text += (
             "\n" + mail_note + " Continue browser-only work where possible. "
             "Do not claim you searched Gmail or that no message arrived. "
-            "If email verification or an email-only application is required, stop at that gate, "
+            "If email verification is required and no one-time email code was supplied in this run, or an email-only "
+            "application is required, stop at that gate, "
             "explain Gmail is unavailable in NOTES and emit RESULT:FAILED:email_verification. "
             "Do not send email or open another mail service.\n"
         )
@@ -645,6 +648,9 @@ def run_application(
         log_path = Path(log_path).resolve()
         log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    env.pop(CODE_ENV, None)
+    if email_code is not None:
+        env[CODE_ENV] = email_code
     env.pop("CLAUDECODE", None)
     env.pop("CLAUDE_CODE_ENTRYPOINT", None)
     env.pop("CAPSOLVER_API_KEY", None)  # nothing in a run may solve a CAPTCHA (spec section 10 item 98)

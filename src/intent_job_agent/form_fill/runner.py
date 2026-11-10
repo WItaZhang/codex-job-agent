@@ -17,7 +17,7 @@ details, and only code reads profile.json.
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import get_args
@@ -30,7 +30,7 @@ from ..applicant import Applicant
 from ..config import Settings
 from ..domain import InvariantError
 from ..open_answers import Bank as OpenAnswerBank
-from . import checkpoint, readback, recording
+from . import checkpoint, continuation, readback, recording
 from .columns import mask_snapshot
 from .inputs import load_answers, load_checklist, load_list, profile_field_paths
 from .models import RECORD_FIELDS, AnswerEntry, ChecklistItem, JobList, JobReport, ListEntry, PageState, ReadField
@@ -321,8 +321,14 @@ def instructions(
     return "\n".join(lines) + (f"\n\n{examples}" if examples else "")
 
 
-def run_rules(entry: ListEntry) -> str:
-    return RUN_RULES + (NO_LETTER if entry.cover_letter == "none" else "")
+def run_rules(entry: ListEntry, *, resuming=False) -> str:
+    rules = RUN_RULES
+    if resuming:
+        rules = rules.replace(
+            "never use the tabs that were open before you started",
+            "use only the explicitly identified original application tab",
+        )
+    return rules + (NO_LETTER if entry.cover_letter == "none" else "")
 
 
 # --- reading a run ----------------------------------------------------------------------------------------------
@@ -484,7 +490,7 @@ def recording_store(ctx: RunContext, url: str) -> RecordingStore:
     )
 
 
-def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, binding, before) -> Path:
+def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, binding, before, resume_tab=None) -> Path:
     """checkpoint.json for this job's checkpoint service: paths and limits only, no contact detail."""
     form_fill = ctx.settings.form_fill
     root, db_path, browser_profile = browser_session.scope(ctx.settings)
@@ -494,6 +500,7 @@ def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, bi
         db_path=db_path,
         browser_profile=browser_profile,
         before=[str(t.get("id")) for t in before],
+        resume_tab=resume_tab,
         recordings_dir=str(recordings_root(ctx)),
         rec_id=recording_id(entry.url),
         run_id=ctx.run_id,
@@ -514,11 +521,19 @@ def write_checkpoint_config(entry: ListEntry, ctx: RunContext, job_dir: Path, bi
     return path
 
 
-def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
+def run_job(
+    entry: ListEntry,
+    ctx: RunContext,
+    *,
+    resume: continuation.Source | None = None,
+    verification_code: str | None = None,
+) -> JobOutcome:
     """Fill one job up to the final submit button (never submits) with the checkpoint service recording each page,
     find its tab, read the page it ended on back, close the recording, and write meta.json and the job's section of
     feasibility.md. A failure is this job's own; the run goes on."""
     ctx.settings.require_external("form-fill execution", ctx.run_dir)
+    if verification_code is not None:
+        ctx = replace(ctx, redactor=ctx.redactor.with_verification_code(verification_code))
     job_dir = ctx.run_dir / entry.id
     job_dir.mkdir(parents=True, exist_ok=True)
     started = _now()
@@ -527,24 +542,43 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
     seen = _Seen()
     status, page_dir, agent, sites, chrome = "system_error", None, None, (), ()
     store = recording_store(ctx, entry.url)
+    target = None
     try:
-        binding = ctx.runner.ensure_chrome()
+        binding = ctx.runner.resume_chrome(resume.generation) if resume else ctx.runner.ensure_chrome()
         before = ctx.runner.targets()
+        state = None
+        spec = job_spec(entry, ctx.applicant, job_dir)
+        if resume:
+            target = continuation.select_target(resume, before)
+            state = ctx.runner.tab_state(target)
+            before = [tab for tab in before if tab.get("id") != target["id"]]
+            spec = replace(spec, resume=True, resume_url=target["url"], resume_tab=target["id"])
         store.write_meta(entry.url, entry.company, entry.title)
         store.begin_run()
-        config = write_checkpoint_config(entry, ctx, job_dir, binding, before)
-        outcome = ctx.runner.fill(
-            job_spec(entry, ctx.applicant, job_dir),
-            log_path=job_dir / LOG_FILE,
-            mask=ctx.redactor.mask,
-            extra_prompt=instructions(ctx.answers, ctx.checklist, ctx.open_answers)
-            + run_rules(entry)
-            + CHECKPOINT_RULES,
-            gmail=True,  # search and read only: send_email is in form_fill.disallowed_tools (spec section 10 item 105)
-            extra_disallowed=tuple(ctx.settings.form_fill.disallowed_tools),
-            extra_servers={checkpoint.SERVER_NAME: checkpoint.server_entry(config)},
-            extra_allowed=(checkpoint.ALLOWED_TOOL,),
-        )
+        config = write_checkpoint_config(entry, ctx, job_dir, binding, before, target["id"] if target else None)
+        if state is not None and state.received:
+            outcome = apply_bridge.ApplyOutcome(
+                "failed", "already_applied", ["Original page already shows receipt; no agent launched"]
+            )
+        else:
+            if resume:  # Recheck after the read-only glance, immediately before agent launch.
+                target = continuation.select_target(resume, ctx.runner.targets())
+                spec = replace(spec, resume_url=target["url"])
+            options = dict(
+                log_path=job_dir / LOG_FILE,
+                mask=ctx.redactor.mask_log if verification_code else ctx.redactor.mask,
+                extra_prompt=instructions(ctx.answers, ctx.checklist, ctx.open_answers)
+                + run_rules(entry, resuming=resume is not None)
+                + CHECKPOINT_RULES
+                + (continuation.resume_rules(target, verification_code) if target else ""),
+                gmail=True,
+                extra_disallowed=tuple(ctx.settings.form_fill.disallowed_tools),
+                extra_servers={checkpoint.SERVER_NAME: checkpoint.server_entry(config)},
+                extra_allowed=(checkpoint.ALLOWED_TOOL,),
+            )
+            if verification_code is not None:
+                options["email_code"] = verification_code
+            outcome = ctx.runner.fill(spec, **options)
     except browser_session.BrowserIdentityLost as error:
         agent = "browser_identity_lost_before_launch"
         notes.append(_error(error))
@@ -558,7 +592,11 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         notes.extend(f"{watchdog.CHROME_USE}：{line}" for line in chrome)
         if outcome.status != "pending":  # pending: the agent never started (apply_bridge.outcome_status)
             seen.filled, seen.tabs_before = True, len(_pages(before))
-            status, page_dir = _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store)
+            status, page_dir = _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store, target)
+    if verification_code:
+        notes.append(
+            "Email-code handoff: raw page, screenshots and network bodies withheld; normalized readback is redacted"
+        )
     received = None
     if (store.fill_dir / recording.STATE_FILE).is_file():  # the recording was begun for this run
         try:
@@ -600,6 +638,8 @@ def run_job(entry: ListEntry, ctx: RunContext) -> JobOutcome:
         "fields": result.fields,
         "tab": seen.target.get("url") if seen.target else None,
         "tab_id": result.tab_id,
+        "generation": result.generation,
+        "source_run": resume.run_id if resume else None,
         "checks": result.checks,
         "page": seen.state.model_dump(mode="json") if seen.state else None,
         "submit_warnings": list(seen.signs),
@@ -623,7 +663,7 @@ def _open_answer_pairs(entry, ctx, store, status, seen, received, checks, notes)
     many. A failure here is noted and the job's result stands."""
     if (
         ctx.pairs_dir is None
-        or status != "filled"
+        or status not in ("filled", "incomplete")
         or received
         or seen.target is None
         or checks.get("not_submitted") is False
@@ -648,7 +688,9 @@ def _open_answer_pairs(entry, ctx, store, status, seen, received, checks, notes)
     return len(pairs)
 
 
-def _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store) -> tuple[str, str | None]:
+def _after_fill(
+    entry, ctx, job_dir, before, outcome, seen, notes, checks, store, resume_target=None
+) -> tuple[str, str | None]:
     log = outcome.log or job_dir / LOG_FILE
     events, urls = read_log(log)
     seen.browser_errors = tuple(browser_errors(log))
@@ -663,7 +705,17 @@ def _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store
     except Exception as error:  # noqa: BLE001 - the browser went away: the tab is lost
         after = None
         notes.append(f"the browser's tabs could not be listed after the run: {_error(error)}")
-    seen.target = readback.find_job_tab(before, after, seen.last_url) if after is not None else None
+    if resume_target:
+        seen.target = next(
+            (
+                t
+                for t in (after or [])
+                if t.get("id") == resume_target["id"] and t.get("generation") == resume_target["generation"]
+            ),
+            None,
+        )
+    else:
+        seen.target = readback.find_job_tab(before, after, seen.last_url) if after is not None else None
     checks["tab_found"] = seen.target is not None
     status, page_dir = "tab_lost", None
     if seen.target is None:
@@ -684,7 +736,11 @@ def _after_fill(entry, ctx, job_dir, before, outcome, seen, notes, checks, store
     checks["not_submitted"] = not_submitted(outcome, seen.state, seen.signs)
     seen.moved = tuple(other_tabs(before, after)) if after is not None else ("（标签页列不出来）",)
     checks["other_tabs_unchanged"] = not seen.moved
-    return ("gate" if gate else status), page_dir
+    if gate:
+        return "gate", page_dir
+    if status == "filled" and agent_result(outcome) != "dry_run":
+        status = "incomplete"
+    return status, page_dir
 
 
 def record_final(store: RecordingStore, final: readback.FinalPage, target: dict, ctx: RunContext) -> None:
@@ -1044,6 +1100,13 @@ class FormFillRunner:
     def targets(self) -> list[dict]:
         self.settings.require_external("targets", self.data_dir, self.profile)
         return readback.list_targets(self._binding(), expected=browser_session.scope(self.settings))
+
+    def resume_chrome(self, generation: str) -> browser_session.BrowserBinding:
+        self.settings.require_external("resume_chrome", self.data_dir, self.profile)
+        apply_bridge.configure(self.data_dir, self.settings, self.profile)
+        # Validate and adopt under the management lock; never launch a replacement during a race.
+        self.binding = browser_session.ensure(self.settings, existing_generation=generation)
+        return self.binding
 
     def open_tabs(self) -> list[dict] | None:
         """The applying Chrome's tabs when it already runs, None when it does not. It never starts Chrome: the tool

@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS apply_running (id INTEGER PRIMARY KEY CHECK (id = 1),
                                           owner_started TEXT NOT NULL, kind TEXT NOT NULL, batch_id TEXT,
                                           phase TEXT, job_id TEXT, mode TEXT, via TEXT, agent_pid INTEGER,
                                           agent_started TEXT, since TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS form_fill_continuations (
+    source_run TEXT NOT NULL, job_id TEXT NOT NULL, run_id TEXT NOT NULL UNIQUE,
+    result TEXT, PRIMARY KEY(source_run, job_id));
 """
 
 
@@ -589,6 +592,35 @@ class Store:
     def activity(self) -> dict | None:
         row = self.db.execute("SELECT * FROM apply_running WHERE id = 1").fetchone()
         return dict(row) if row else None
+
+    def form_fill_continuation(self, source_run: str, job_id: str) -> dict | None:
+        row = self.db.execute(
+            "SELECT run_id, result FROM form_fill_continuations WHERE source_run=? AND job_id=?",
+            (source_run, job_id),
+        ).fetchone()
+        return (
+            {"run_id": row["run_id"], "result": json.loads(row["result"]) if row["result"] else None} if row else None
+        )
+
+    def reserve_form_fill_continuation(self, source_run: str, job_id: str, run_id: str, owner: tuple) -> tuple:
+        """One durable successor, atomically reserved with global browser ownership. Never stores codes."""
+        with self.exclusive():
+            previous = self.form_fill_continuation(source_run, job_id)
+            if previous is not None:
+                return previous, False
+            self.begin_activity(owner, "form_fill", run_id=run_id)
+            self.db.execute(
+                "INSERT INTO form_fill_continuations(source_run, job_id, run_id) VALUES (?, ?, ?)",
+                (source_run, job_id, run_id),
+            )
+            return {"run_id": run_id, "result": None}, True
+
+    def finish_form_fill_continuation(self, source_run: str, job_id: str, result: dict) -> None:
+        with self._tx():
+            self.db.execute(
+                "UPDATE form_fill_continuations SET result=? WHERE source_run=? AND job_id=? AND run_id=?",
+                (json.dumps(result, ensure_ascii=False), source_run, job_id, result["run_id"]),
+            )
 
     def resume_jobs(self) -> set[str]:
         """Persistent report guard, including queued jobs; this does not mark them started."""

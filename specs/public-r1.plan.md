@@ -14,6 +14,7 @@ Toolbox direct methods are guarded before touching inputs or spawning work. An e
 | fetch_boards / discover_jobs | threads, JobSpy/Workday/smartextract, enrichment/model calls; reject before threads/configure |
 | applypilot_bridge.run_sources/configure | loads env, alters global vendor paths, creates staging DB; reject local mode before importing/configuring vendor |
 | start_applying / resume_applying / start_form_fill | Chrome, Claude, npx MCP and Gmail; reject before private input/preparation/activity mutation |
+| get_form_fill_gate / resume_form_fill | Original browser metadata / coordinated fill-only worker and one-time email-code handoff; reject in local-only before private input, browser inspection or activity mutation (form-fill decision 42) |
 | prepare_resume | _recover then CDP open_tabs despite preparation name; reject |
 | apply_status / stop_applying / _recover | ps/kill/orphan cleanup; local status must not recover/kill, stop must not touch global live runner |
 | save_cover_letter | headless Chrome PDF subprocess; reject real renderer in workspace; synthetic renderer tested separately |

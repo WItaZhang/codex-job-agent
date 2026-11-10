@@ -15,6 +15,7 @@ handed to it and answered within the time limit. Only this code reads profile.js
 
 import concurrent.futures
 import json
+import os
 import queue
 import sys
 import threading
@@ -29,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .. import browser_session, open_answer_pairs
 from ..open_answer_pairs import Draft, Mark
 from ..open_answers import QUESTION_TYPES
-from . import readback
+from . import continuation, readback
 from .columns import is_contact
 from .models import AnswerEntry
 from .recorder import url_key
@@ -79,6 +80,7 @@ class Config(BaseModel):
     db_path: str
     browser_profile: str  # the profile the binding must be on: dedicated, or the applicant's own (decision 33)
     before: list[str]
+    resume_tab: str | None = None
     recordings_dir: str
     rec_id: str
     run_id: str
@@ -147,8 +149,8 @@ class Session:
         self.sheet = sheet_entries(config.sheet)
         self.before = set(config.before)
         self.job_host = (urlsplit(config.url).hostname or "").lower()
-        self.family: list[str] = []
-        self.anchored = False  # the agent's checkpoint has pointed at a tab
+        self.family: list[str] = [config.resume_tab] if config.resume_tab else []
+        self.anchored = bool(config.resume_tab)
         self.cut: int | None = None  # requests from here on are past the first page's load (spec 6.2)
         self.last_tab: str | None = None
 
@@ -611,6 +613,14 @@ class LiveBrowser:
     def capture(self, tab: str, mhtml: bool = False, hide=()) -> Capture:
         """The page's simplified HTML and screenshot with the `hide` fields ((frame, path) of fields matched to a
         contact entry) and every element showing a contact value hidden or blacked out, and its MHTML."""
+        if getattr(self.redactor, "sensitive_handoff", False):
+            return Capture(
+                "<!-- withheld during email-code handoff -->",
+                None,
+                "email-code handoff",
+                None,
+                mhtml_why="email-code handoff",
+            )
         page = self._page(tab)
         shot, why = readback._masked_screenshot(page, self.redactor, hide, render_seconds=self.render_seconds)
         snapshot = None
@@ -704,6 +714,8 @@ def main(argv=None) -> int:
         return 2
     config = Config.model_validate_json(Path(args[0]).read_text(encoding="utf-8"))
     redactor = Redactor.from_profile(json.loads(Path(config.profile).read_text(encoding="utf-8")))
+    if code := os.environ.get(continuation.CODE_ENV):
+        redactor = redactor.with_verification_code(code)
     worker = Worker(
         lambda: Session(
             config,

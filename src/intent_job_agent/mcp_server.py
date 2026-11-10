@@ -82,6 +82,15 @@ Applying (project skill /apply):
   Never release autonomously. Old careful batches stay fill-only; observed readdition restores protection.
 - CAPTCHAs are never solved. Login/SSO/missing codes remain actual capability gates. Resume with evidence the gate
   is resolved via prepare_resume/resume_applying; no mandatory approval phrase. No automatic abandonment.
+- For a completed independent form-fill run, inspect get_form_fill_gate(run_id, job_id), then resume_form_fill
+  with its original list and identifiers within the user's existing scope. It adopts only the exact original
+  browser generation/tab, always fill-only. An optional current email code needs its timezone-qualified received
+  time and an authorized source; never echo it or put it in memory. It is never a CAPTCHA answer. Reused receipts
+  identify the existing continuation; do not start another worker. Missing/ambiguous tabs remain blocked; only an
+  explicit restart uses start_form_fill. This independent path does not update /apply holds.
+  See docs/form-fill-resume.md.
+- form_fill_status done means execution ended. Read each job's status and agent_result: incomplete/stuck/gate
+  is not filled, and a readable page or nonzero field count does not prove completion.
 - Held jobs are the gate list (apply_status held, held_count); report its counts by gate when /apply opens. When
   the user says they are away and it should keep going, pass unattended=true to start_applying (a gated job's tab
   is closed, the job stays on the list); otherwise leave it out. When the user says they have time now, re-run the
