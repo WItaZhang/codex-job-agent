@@ -112,6 +112,8 @@ def application_result(report: JobReport) -> Result:
     agent, conclusion = report.agent_result, report.conclusion
     if conclusion == "maybe_submitted":  # before anything else: a page said "received", so never pending again
         return Result("applied", "maybe_submitted")
+    if agent == "network_paused":
+        return Result("pending", agent)
     if agent == "browser_identity_lost_before_launch":
         return Result("pending", agent)
     if agent == "browser_identity_lost":

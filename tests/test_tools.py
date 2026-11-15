@@ -67,6 +67,8 @@ def test_every_tool_has_exactly_one_tier():
 
 def test_commit_tier_is_what_spec_5_1_lists():
     assert COMMIT_TOOLS == {
+        "resolve_network_pause",
+        "complete_dreaming",
         "record_labels",
         "decide",
         "correct_tags",

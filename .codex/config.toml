@@ -31,3 +31,9 @@ approval_mode = "approve"
 
 [mcp_servers.intent-agent.tools.start_form_fill]
 approval_mode = "approve"
+
+[mcp_servers.intent-agent.tools.resolve_network_pause]
+approval_mode = "approve"
+
+[mcp_servers.intent-agent.tools.complete_dreaming]
+approval_mode = "approve"

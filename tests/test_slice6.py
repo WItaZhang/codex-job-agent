@@ -552,8 +552,8 @@ def test_one_application_run_reads_the_stream(box, tmp_path, monkeypatch):
         box._apply_spec(jobs[0], "submit"), box.data_dir, box.settings, profile, synthetic_binding()
     )
     assert outcome.status == "applied" and outcome.other_sites == ["other.example.test"]
-    log = box.data_dir / box.settings.apply.logs_dir / "j00.jsonl"
-    assert outcome.log == str(log) and "browser_navigate" in log.read_text(encoding="utf-8")
+    log = Path(outcome.log)
+    assert log.name.startswith("j00-") and "metadata_only" in log.read_text(encoding="utf-8")
     stopped = apply_bridge.run_application(
         box._apply_spec(jobs[0], "stop"), box.data_dir, box.settings, profile, synthetic_binding()
     )
@@ -1098,9 +1098,12 @@ def test_an_apply_run_without_the_new_options_is_unchanged(box, tmp_path, monkey
     expected = apply_bridge.claude_command(box.settings, mcp, denied=[box.data_dir, profile])
     assert ["claude", *argv] == expected
     assert argv[argv.index("--disallowedTools") + 1] == APPLY_DISALLOWED
-    assert seen["prompt"] == apply_bridge.build_prompt(spec, box.data_dir, box.settings, profile)
-    log = box.data_dir / box.settings.apply.logs_dir / f"{job}.jsonl"
-    assert outcome.log == str(log) and "https://jobs.example.test/j00" in log.read_text(encoding="utf-8")
+    assert seen["prompt"].startswith(apply_bridge.build_prompt(spec, box.data_dir, box.settings, profile))
+    assert "Prior scoped observations" in seen["prompt"]
+    log = Path(outcome.log)
+    assert log.name.startswith(f"{job}-")
+    assert "https://jobs.example.test/j00" not in log.read_text(encoding="utf-8")
+    assert "metadata_only" in log.read_text(encoding="utf-8")
 
 
 FAKE_CLAUDE_SAYS_CONTACT = """#!/usr/bin/env python3

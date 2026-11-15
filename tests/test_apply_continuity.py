@@ -279,3 +279,22 @@ def test_submit_executor_rechecks_identity_without_cold_start(box, monkeypatch, 
     monkeypatch.setattr(apply_bridge, "run_application", forbidden)
     runner = apply_bridge.ChromeRunner(box.data_dir, box.settings, box._applicant().profile)
     assert runner(spec).reason == "browser_identity_lost_before_launch"
+
+
+def test_network_admission_rejection_preserves_resume_hold_and_attempt_count(box, monkeypatch):
+    from intent_job_agent.apply_bridge import ApplyOutcome
+
+    job = held_job(box)
+    before = box.store.hold(job)
+    attempts = len(box.store.apply_attempts())
+    monkeypatch.setattr(
+        box.form_fill_runner,
+        "fill",
+        lambda *args, **kwargs: ApplyOutcome("pending", "network_paused", ["synthetic admission denied"]),
+    )
+    gates.resumed(box, [job])
+    after = box.store.hold(job)
+    assert after["times"] == before["times"] and after["tab_id"] == before["tab_id"]
+    assert not after["resuming"]
+    assert len(box.store.apply_attempts()) == attempts
+    assert box.store.applications()[job]["status"] == "held"

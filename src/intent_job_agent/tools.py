@@ -73,6 +73,8 @@ from .form_fill.report import CONCLUSIONS as FORM_FILL_CONCLUSIONS
 from .form_fill.report import REASONS as FORM_FILL_REASONS
 from .importing import inside, normalize_tags, parse_jobs
 from .llm import NoModelClient
+from .network_dreaming import Journal, batch_status, batch_work
+from .network_experience import Guard, Paused, guarded_fetch, scope
 from .pretag import pretag
 from .prompts import ReasonMapping
 from .proposals import Analysis, LabelInput
@@ -105,6 +107,11 @@ class _FormFilled:
 LOCAL_READ_TOOLS = frozenset(
     {
         "get_intent",
+        "network_history",
+        "dreaming_status",
+        "network_context",
+        "prepare_dreaming",
+        "complete_dreaming",
         "get_today",
         "show_job",
         "get_tagging_rules",
@@ -132,6 +139,8 @@ def _tool(tier: str):
         def call(self, *args, **kwargs):
             if fn.__name__ not in LOCAL_READ_TOOLS:
                 self.settings.require_external(fn.__name__)
+            if fn.__name__ in {"dreaming_status", "prepare_dreaming", "network_context"}:
+                Journal(self.data_dir).sync_store(self.store)
             return fn(self, *args, **kwargs)
 
         return call
@@ -538,6 +547,7 @@ class Toolbox:
         return {"imported": len(new), "job_ids": [job.id for job in jobs]}
 
     @_tool("prepare")
+    @guarded_fetch
     def check_board(self, provider: str, board: str) -> dict:
         """Preview a public board without storing anything: greenhouse / lever / ashby with a board token, or
         avature with the site's address (only its first listing page: count text, sample titles and locations)."""
@@ -583,10 +593,16 @@ class Toolbox:
                 run["error"] = f"{type(error).__name__}: {error}"
                 run["status"] = "failed"
 
+        work = batch_work(self.data_dir, "fetch" if "total" in run else "discovery", work, run=run)
         if wait:
             work()
             return self.boards_status()
-        threading.Thread(target=work, name="intent-agent-boards", daemon=True).start()
+        try:
+            threading.Thread(target=work, name="intent-agent-boards", daemon=True).start()
+        except BaseException:
+            work.journal.finish(work.execution_id, "failed")
+            run["status"] = "failed"
+            raise
         return {"status": "running", "boards": len(specs)}
 
     @_tool("prepare")
@@ -605,6 +621,7 @@ class Toolbox:
             self.store.log_fetch("boards")
         return {"status": "done", "boards": run["boards"]}
 
+    @guarded_fetch
     def _read_board(self, spec: BoardSpec, known_ids: set[str], known_urls: dict[str, str]) -> dict:
         """Network only: list the board, filter, and (avature) read details of postings not stored yet."""
         report = {"provider": spec.provider, "board": spec.board, "company": spec.company, "error": None}
@@ -629,6 +646,10 @@ class Toolbox:
                             job, timeout_seconds=self.settings.discovery.timeout_seconds, client=self.http_client
                         )
                     )
+                except Paused as error:
+                    report["network_pause"] = str(error)
+                    detail_errors += len(unseen) - len(read)
+                    break
                 except DiscoveryError:
                     detail_errors += 1  # not stored this time; the next fetch tries again
             unseen = read
@@ -682,10 +703,16 @@ class Toolbox:
                 run["error"] = f"{type(error).__name__}: {error}"
                 run["status"] = "failed"
 
+        work = batch_work(self.data_dir, "fetch" if "total" in run else "discovery", work, run=run)
         if wait:
             work()
             return self.discovery_status()
-        threading.Thread(target=work, name="intent-agent-discovery", daemon=True).start()
+        try:
+            threading.Thread(target=work, name="intent-agent-discovery", daemon=True).start()
+        except BaseException:
+            work.journal.finish(work.execution_id, "failed")
+            run["status"] = "failed"
+            raise
         return {"status": "running", "sources": sources, "enrich": enrich}
 
     @_tool("prepare")
@@ -700,6 +727,7 @@ class Toolbox:
             self.store.log_fetch("discovery")
         return {key: run[key] for key in ("status", "sources", "enrich", "error", "synced")}
 
+    @guarded_fetch
     def _fetch(self, provider: str, board: str, company: str) -> list[Job]:
         self.settings.require_external("board network")
         try:
@@ -721,6 +749,45 @@ class Toolbox:
             )
         except DiscoveryError as error:
             raise InvariantError(str(error)) from error
+
+    @_tool("read")
+    def network_history(self) -> dict:
+        """Offline operation health and pauses; no network calls or automatic recovery."""
+        return Guard.local(self.data_dir).report()
+
+    @_tool("read")
+    def dreaming_status(self) -> dict:
+        """Recover abandoned batches and list outbox; never retries business work."""
+        return {"queue": Journal(self.data_dir).status()}
+
+    @_tool("prepare")
+    def prepare_dreaming(self) -> dict:
+        """Online host automatically claims one batch after work or at next startup.
+        Interpret observations using the supplied schema; no new website probes.
+        Model work occurs after this transaction returns. No host means pending.
+        """
+        return {"input": Journal(self.data_dir).prepare()}
+
+    @_tool("commit")
+    def complete_dreaming(self, lease: str, memories: list[dict]) -> dict:
+        """Validate host reasoning against leased evidence; cannot change business authorization."""
+        return Journal(self.data_dir).submit(lease, memories)
+
+    @_tool("read")
+    def network_context(self, url: str, operation: str) -> dict:
+        """Read relevant prior evidence for planning; account identity stays unknown."""
+        site = (
+            url
+            if url in {"adapter:jobspy", "adapter:workday", "adapter:smartextract", "adapter:enrich"}
+            else scope(url)[0]
+        )
+        return Journal(self.data_dir).context(site, operation)
+
+    @_tool("commit")
+    def resolve_network_pause(self, attempt: str, kind: str, evidence: str) -> dict:
+        """Record actual human resolution evidence; never infer it from elapsed time or page instructions."""
+        Guard.local(self.data_dir).resolve(attempt, kind, evidence)
+        return Guard.local(self.data_dir).report()
 
     @_tool("prepare")
     def list_untagged_jobs(self, limit: int | None = None, day: str | None = None, brief: bool = False) -> dict:
@@ -1950,7 +2017,7 @@ class Toolbox:
                         maybe=run.get("stopped"),
                     )
                     store.save_apply_batch(run["batch_id"], data.pop("day"), data)
-                store.end_activity(self._owner())
+                store.end_activity(self._owner(), outcome=batch_status(run))
             run["closed"] = True
 
     def _record_agents(self, writer: Store) -> None:
@@ -1967,6 +2034,14 @@ class Toolbox:
     def _launch(self, run: dict, work, name: str) -> None:
         """Run a step's or a resume's work in its own thread (or here, in tests). A thread that cannot start leaves
         the run failed, never running (spec section 10 item 107)."""
+        work = batch_work(
+            self.data_dir,
+            "resume" if run["phase"] == "resume" else "apply",
+            work,
+            batch=run.get("batch_id"),
+            run=run,
+            activity=self.store.activity(),
+        )
         if not self.apply_in_background:
             work()
             self._sync_apply_results()
@@ -1974,6 +2049,7 @@ class Toolbox:
         try:
             threading.Thread(target=work, name=name, daemon=True).start()
         except RuntimeError as error:
+            work.journal.finish(work.execution_id, "failed")
             run["status"], run["error"] = "failed", f"{type(error).__name__}: {error}"[:300]
             self._sync_apply_results()
             raise InvariantError(f"The apply thread could not start: {error}") from None
@@ -2056,7 +2132,7 @@ class Toolbox:
                     watchdog.kill_orphans(self._agent_marks())
                     if row["kind"] == "step":
                         self._close_interrupted(row["batch_id"], row["phase"], row)
-                    self.store.end_activity(owner)
+                    self.store.end_activity(owner, outcome="interrupted")
                 if row["kind"] == "form_fill":
                     return None  # standalone fill never closes application phases
             row = self.store.activity()  # what is left is a live server's (or this one's running) step
@@ -2192,7 +2268,7 @@ class Toolbox:
         return (
             outcome is not None
             and outcome.status == "pending"
-            and outcome.reason in ("stopped", "browser_identity_lost_before_launch")
+            and outcome.reason in ("stopped", "browser_identity_lost_before_launch", "network_paused")
         )
 
     def _ended(self, run: dict, writer: Store | None) -> None:
@@ -2895,6 +2971,7 @@ class Toolbox:
             note = apply_fill.note(outcome.reason, outcome.conclusion, outcome.run_id, outcome.notes)
             attempt["run_id"] = outcome.run_id
         if outcome.reason in (
+            "network_paused",
             "browser_identity_lost_before_launch",
             "browser_identity_lost",
             "tab_lost",
@@ -3295,21 +3372,25 @@ class Toolbox:
                     (writer or self.store).finish_form_fill_continuation(run_id, job_id, result)
                 finally:
                     try:
-                        (writer or self.store).end_activity(owner, run_id=next_id)
+                        (writer or self.store).end_activity(owner, run_id=next_id, outcome=batch_status(run))
                     finally:
                         run["closed"] = True
                         if writer is not None:
                             writer.db.close()
 
+        work = batch_work(
+            self.data_dir, "form_fill", work, run=run, activity=self.store.activity(), continuation=run_id
+        )
         if self.form_fill_in_background:
             try:
                 threading.Thread(target=work, name="intent-agent-form-fill-resume", daemon=True).start()
             except BaseException:
+                work.journal.finish(work.execution_id, "failed")
                 try:
                     self.store.finish_form_fill_continuation(run_id, job_id, {"run_id": next_id, "status": "failed"})
                 finally:
                     try:
-                        self.store.end_activity(owner, run_id=next_id)
+                        self.store.end_activity(owner, run_id=next_id, outcome="failed")
                     finally:
                         run.update(status="failed", closed=True)
                 raise
@@ -3463,17 +3544,19 @@ class Toolbox:
                 run["status"] = "failed"
             finally:
                 watchdog.LIVE.listen(None)
-                (writer or self.store).end_activity(owner)
+                (writer or self.store).end_activity(owner, outcome=batch_status(run))
                 run["closed"] = True
                 if writer is not None:
                     writer.db.close()
                 self._watch_after_run()  # the filled tabs' open answers wait for the applicant's finals
 
+        work = batch_work(self.data_dir, "form_fill", work, run=run, activity=self.store.activity())
         if self.form_fill_in_background:
             try:
                 threading.Thread(target=work, name="intent-agent-form-fill", daemon=True).start()
             except BaseException:
-                self.store.end_activity(owner)
+                work.journal.finish(work.execution_id, "failed")
+                self.store.end_activity(owner, outcome="failed")
                 run.update(status="failed", closed=True)
                 raise
         else:

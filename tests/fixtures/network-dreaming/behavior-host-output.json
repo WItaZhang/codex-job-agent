@@ -1,0 +1,254 @@
+{
+  "synthetic": true,
+  "host": "current online Codex session",
+  "output": [
+    {
+      "kind": "unresolved",
+      "sources": [
+        1
+      ],
+      "strategy": "await_human",
+      "explanation": "human_gate_unresolved"
+    }
+  ],
+  "validation": {
+    "status": "complete",
+    "execution_id": "f27cb9eeb9ea428aa2215da533e7ac88"
+  },
+  "next_batch_context": {
+    "site": "synthetic.test",
+    "operation": "apply",
+    "account": "unknown",
+    "memories": [
+      {
+        "id": "deb17e6b2da0f761359a888da7c4039d7ca4cdc35fd98fa9b145fbddf4370a97",
+        "execution": "f27cb9eeb9ea428aa2215da533e7ac88",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "body": "{\"kind\":\"unresolved\",\"sources\":[1],\"strategy\":\"await_human\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"human_gate_unresolved\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795329407.312263,
+        "active": 1,
+        "evidence": [
+          {
+            "seq": 1,
+            "kind": "stage",
+            "site": "synthetic.test",
+            "operation": "apply",
+            "observation": "captcha",
+            "call": "",
+            "tool": "other",
+            "action": "unknown",
+            "coverage": "observable_metadata_only",
+            "http_status": null,
+            "job_id": null,
+            "account": "unknown"
+          }
+        ]
+      }
+    ],
+    "human_resolutions": [],
+    "instruction": "Apply later actual human resolution before older unresolved advice; it does not prove website submission."
+  },
+  "host_decision_with_memory": {
+    "action": "await_human",
+    "called_execution_entry": false,
+    "reason": "The scoped evidence is CAPTCHA and there is no later actual human resolution. Repeating the entry would not advance this batch."
+  },
+  "synthetic_resolution_input": {
+    "execution_id": "resolution-c7dc59d03a7b46d88cd25ea5a43ed9e0",
+    "execution": {
+      "id": "resolution-c7dc59d03a7b46d88cd25ea5a43ed9e0",
+      "task": "resume",
+      "batch": null,
+      "parent": null,
+      "continuation": "ed4b1f10f1ed96d3f6abc60f2efbcb932a4f834bf6d49ce41573163f059cb82d",
+      "pid": null,
+      "birth": null,
+      "started": 1794724613.164135,
+      "ended": 1794724613.164135,
+      "status": "success",
+      "task_id": "resolution-c7dc59d03a7b46d88cd25ea5a43ed9e0"
+    },
+    "lease": "56ee574a107948d7b5db63e8a7b7d1ba",
+    "watermark": 1,
+    "events": [
+      {
+        "seq": 1,
+        "at": 1794724613.164135,
+        "kind": "stage",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "observation": "human_resolved",
+        "coverage": "explicit_human_report",
+        "account": "unknown"
+      }
+    ],
+    "truncated": false,
+    "missing": [
+      "browser HTTP",
+      "private reasoning",
+      "tool arguments and bodies",
+      "unexposed vendor internals"
+    ],
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "fact",
+            "hypothesis",
+            "strategy",
+            "unresolved"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "strategy": {
+          "enum": [
+            "inspect_prior_stage",
+            "await_human",
+            "use_existing_resume",
+            "check_current_evidence",
+            "unknown_cause"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "counterevidence": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20,
+          "title": "Counterevidence",
+          "type": "array"
+        },
+        "replaces": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Replaces",
+          "type": "array"
+        },
+        "ttl_days": {
+          "default": 7,
+          "maximum": 30,
+          "minimum": 1,
+          "title": "Ttl Days",
+          "type": "integer"
+        },
+        "explanation": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "observed_tool_error",
+            "human_gate_unresolved",
+            "prior_attempt_available"
+          ],
+          "title": "Explanation",
+          "type": "string"
+        },
+        "condition": {
+          "default": "same_scope_and_operation",
+          "enum": [
+            "same_scope_and_operation",
+            "human_resolution_observed"
+          ],
+          "title": "Condition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sources",
+        "strategy"
+      ],
+      "title": "Memory",
+      "type": "object"
+    },
+    "old_memories": [
+      {
+        "id": "deb17e6b2da0f761359a888da7c4039d7ca4cdc35fd98fa9b145fbddf4370a97",
+        "execution": "f27cb9eeb9ea428aa2215da533e7ac88",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "body": "{\"kind\":\"unresolved\",\"sources\":[1],\"strategy\":\"await_human\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"human_gate_unresolved\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795329407.312263,
+        "active": 1
+      }
+    ]
+  },
+  "resolution_output": [
+    {
+      "kind": "strategy",
+      "sources": [
+        1
+      ],
+      "counterevidence": [
+        1
+      ],
+      "replaces": [
+        "deb17e6b2da0f761359a888da7c4039d7ca4cdc35fd98fa9b145fbddf4370a97"
+      ],
+      "strategy": "use_existing_resume",
+      "condition": "human_resolution_observed",
+      "explanation": "prior_attempt_available"
+    }
+  ],
+  "resolution_validation": {
+    "status": "complete",
+    "execution_id": "resolution-c7dc59d03a7b46d88cd25ea5a43ed9e0"
+  },
+  "resolved_context": {
+    "site": "synthetic.test",
+    "operation": "apply",
+    "account": "unknown",
+    "memories": [
+      {
+        "id": "a602ee2173d0fbd6148927f8acfd0945d7587c2b73d7583fec0387b297ef0147",
+        "execution": "resolution-c7dc59d03a7b46d88cd25ea5a43ed9e0",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "body": "{\"kind\":\"strategy\",\"sources\":[1],\"strategy\":\"use_existing_resume\",\"counterevidence\":[1],\"replaces\":[\"deb17e6b2da0f761359a888da7c4039d7ca4cdc35fd98fa9b145fbddf4370a97\"],\"ttl_days\":7,\"explanation\":\"prior_attempt_available\",\"condition\":\"human_resolution_observed\"}",
+        "expires": 1795329422.3990788,
+        "active": 1,
+        "evidence": [
+          {
+            "seq": 1,
+            "kind": "stage",
+            "site": "synthetic.test",
+            "operation": "apply",
+            "observation": "human_resolved",
+            "coverage": "explicit_human_report",
+            "account": "unknown"
+          }
+        ]
+      }
+    ],
+    "human_resolutions": [
+      {
+        "attempt": "c7dc59d03a7b46d88cd25ea5a43ed9e0",
+        "time": 1794724613.164135,
+        "kind": "user_resolved"
+      }
+    ],
+    "instruction": "Apply later actual human resolution before older unresolved advice; it does not prove website submission."
+  },
+  "after_resolution_execution": {
+    "backend_calls": [
+      "synthetic_resume_backend"
+    ],
+    "outcome": "waiting",
+    "submitted": false,
+    "authorization_reasked": false
+  }
+}

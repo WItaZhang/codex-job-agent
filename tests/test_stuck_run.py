@@ -209,9 +209,11 @@ def test_a_live_run_shows_its_activity_and_a_stop_ends_a_stop_before_submit_agen
     thread = threading.Thread(target=lambda: result.update(o=run(box, spec, quick(box.settings), log_path=log)))
     thread.start()
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and not (log.is_file() and "step 3" in log.read_text(encoding="utf-8")):
+    while time.monotonic() < deadline and not (
+        log.is_file() and len(log.read_text(encoding="utf-8").splitlines()) >= 4
+    ):
         time.sleep(0.05)
-    assert "step 3" in log.read_text(encoding="utf-8")  # each line is written out as it comes
+    assert len(log.read_text(encoding="utf-8").splitlines()) >= 4  # each line is written out as it comes
     live = watchdog.LIVE.view()
     assert live["job_id"] == spec.job_id and live["alive"] and time.time() - live["last"] < 1
     assert watchdog.LIVE.stop(spec.job_id, modes=()) == "running"  # a running agent outside `modes` goes on

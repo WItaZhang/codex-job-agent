@@ -183,9 +183,10 @@ def workday_location(info: dict) -> str:
 
 
 def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
-    """Run the chosen sources, then enrichment. A failing source is reported; the others still run. In
-    smartextract a failing site is skipped and listed in its report's `failed_sites` (spec 2c item 19)."""
+    """Run the existing production adapters; unexposed requests are a trace gap."""
     settings.require_external("job discovery", data_dir)
+    from .network_dreaming import Journal, observe
+
     configure(data_dir, settings)
     from .vendor.applypilot import config
 
@@ -195,7 +196,9 @@ def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: 
     proxy = os.environ.get(settings.discovery.proxy_env) or None
     reports = {}
     for source in sources:
-        report = {"error": None, "skipped": None, "stats": None}
+        prior = Journal(data_dir).context("adapter:" + source, "discovery")
+        observe("stage", site="adapter:" + source, operation="discovery", observation="started")
+        report = {"error": None, "skipped": None, "stats": None, "prior_experience": prior}
         if source == "smartextract":
             report["failed_sites"] = []
         try:
@@ -219,8 +222,15 @@ def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: 
                         report["stats"] = smartextract.run_smart_extract()
         except Exception as error:  # one source's failure must not stop the others
             report["error"] = f"{type(error).__name__}: {error}"
+        observe(
+            "stage",
+            site="adapter:" + source,
+            operation="discovery",
+            observation="error" if report["error"] else ("missing" if report["skipped"] else "returned"),
+        )
         reports[source] = report
     if enrich:
+        observe("stage", site="adapter:enrich", operation="discovery", observation="started")
         report = {"error": None, "skipped": None, "stats": None}
         try:
             from .vendor.applypilot.enrichment import detail
@@ -230,6 +240,12 @@ def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: 
             report["stats"] = detail.run_enrichment(limit=settings.discovery.enrich_limit)
         except Exception as error:
             report["error"] = f"{type(error).__name__}: {error}"
+        observe(
+            "stage",
+            site="adapter:enrich",
+            operation="discovery",
+            observation="error" if report["error"] else "returned",
+        )
         reports["enrich"] = report
     return json.loads(json.dumps(reports, default=str))
 

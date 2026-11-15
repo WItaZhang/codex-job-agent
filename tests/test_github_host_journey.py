@@ -4,8 +4,10 @@ import json
 import socket
 from pathlib import Path
 
+import httpx
+import yaml
+
 from . import test_gate_handoff as gates
-from .test_applypilot import FakeJobSpy, ap_jobspy, discover, row, searches
 from .test_slice6 import write_letters
 
 box = gates.box
@@ -19,15 +21,44 @@ def test_four_skill_tool_journey_without_external_business(box, monkeypatch):
     for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_URL", "INTENT_AGENT_PROXY"):
         monkeypatch.delenv(key, raising=False)
     box.settings = box.settings.model_copy(update={"apply": box.settings.apply.model_copy(update={"review_first": 0})})
-    rows = [row(n, company=f"Synthetic Co {n}", title=f"Synthetic ML role {n}") for n in range(24)]
-    rows[1]["company"] = "Stripe, Inc."
-    collector = FakeJobSpy({"machine learning engineer": rows})
-    monkeypatch.setattr(ap_jobspy, "scrape_jobs", collector)
-    searches(box)
-    result = discover(box)
-    assert result["synced"]["new"] == 24
-    assert len(collector.calls) == 1
-    jobs = box.store.jobs()
+    boards = [
+        {
+            "provider": "greenhouse",
+            "board": f"synthetic{n}",
+            "company": "Stripe, Inc." if n == 1 else f"Synthetic Co {n}",
+        }
+        for n in range(24)
+    ]
+    (box.data_dir / box.settings.discovery.boards_file).write_text(yaml.safe_dump({"boards": boards}))
+    calls = []
+
+    def collector(request):
+        calls.append(request)
+        token = request.url.path.split("/")[3]
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    {
+                        "id": token,
+                        "absolute_url": f"https://jobs.example.test/{token}",
+                        "title": f"Synthetic ML role {token}",
+                        "content": "Synthetic machine learning position",
+                        "location": {"name": "Seattle, US"},
+                    }
+                ]
+            },
+        )
+
+    box.http_client = httpx.Client(transport=httpx.MockTransport(collector))
+    result = box.fetch_boards(wait=True)
+    assert sum(board["new"] for board in result["boards"]) == 24
+    assert len(calls) == 24
+    assert len(box.network_history()["sites"]) == 24
+    all_jobs = box.store.jobs()
+    ordinary = [job for job in all_jobs if job.company != "Stripe, Inc."]
+    protected = next(job for job in all_jobs if job.company == "Stripe, Inc.")
+    jobs = [ordinary[0], protected, *ordinary[1:]]
     for n, job in enumerate(jobs):
         tags = ["location.us.seattle", "role.ml_engineering" if n < 18 else "role.data_science"]
         if n == 0:

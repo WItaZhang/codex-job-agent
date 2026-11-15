@@ -1,0 +1,149 @@
+{
+  "synthetic": true,
+  "workflow": "fetch_boards(wait=True) -> automatic host prepare_dreaming, no user dream command",
+  "result": {
+    "status": "done",
+    "boards": [
+      {
+        "provider": "lever",
+        "board": "synthetic",
+        "company": "Synthetic",
+        "error": "Could not read public board https://api.lever.co/v0/postings/synthetic: HTTPStatusError"
+      }
+    ]
+  },
+  "input": {
+    "execution_id": "8f499af1907a4c9787ca9ccb1cfdcef2",
+    "execution": {
+      "id": "8f499af1907a4c9787ca9ccb1cfdcef2",
+      "task": "fetch",
+      "batch": null,
+      "parent": null,
+      "continuation": null,
+      "pid": 24130,
+      "birth": "Sun Nov 15 06:32:02 2026",
+      "started": 1794724323.441569,
+      "ended": 1794724323.44785,
+      "status": "success"
+    },
+    "lease": "163e0f33f91b47c19ce7d2d893233e1d",
+    "watermark": 2,
+    "events": [
+      {
+        "seq": 1,
+        "at": 1794724323.447037,
+        "kind": "stage",
+        "site": "lever:b3cc0475bb78a5026098858e",
+        "operation": "fetch",
+        "observation": "error",
+        "call": "",
+        "tool": "other",
+        "action": "unknown",
+        "coverage": "observable_metadata_only",
+        "account": "unknown"
+      },
+      {
+        "seq": 2,
+        "at": 1794724323.447777,
+        "kind": "outcome",
+        "observation": "success",
+        "site": "",
+        "operation": "fetch",
+        "coverage": "batch_status_not_website_success"
+      }
+    ],
+    "truncated": false,
+    "missing": [
+      "browser HTTP",
+      "private reasoning",
+      "tool arguments and bodies",
+      "unexposed vendor internals"
+    ],
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "fact",
+            "hypothesis",
+            "strategy",
+            "unresolved"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        },
+        "strategy": {
+          "enum": [
+            "inspect_prior_stage",
+            "await_human",
+            "use_existing_resume",
+            "check_current_evidence",
+            "unknown_cause"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "counterevidence": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20,
+          "title": "Counterevidence",
+          "type": "array"
+        },
+        "replaces": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Replaces",
+          "type": "array"
+        },
+        "ttl_days": {
+          "default": 7,
+          "maximum": 30,
+          "minimum": 1,
+          "title": "Ttl Days",
+          "type": "integer"
+        },
+        "explanation": {
+          "default": "unknown",
+          "enum": [
+            "unknown",
+            "observed_tool_error",
+            "human_gate_unresolved",
+            "prior_attempt_available"
+          ],
+          "title": "Explanation",
+          "type": "string"
+        },
+        "condition": {
+          "default": "same_scope_and_operation",
+          "enum": [
+            "same_scope_and_operation",
+            "human_resolution_observed"
+          ],
+          "title": "Condition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sources",
+        "strategy"
+      ],
+      "title": "Memory",
+      "type": "object"
+    },
+    "old_memories": []
+  }
+}
