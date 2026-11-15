@@ -188,6 +188,8 @@ class Guard:
             s = db.execute("SELECT * FROM sites WHERE latest=?", (attempt,)).fetchone()
             if not s or not s["manual"] or s["active"]:
                 raise ValueError("Not the current manual pause")
+            if s["reason"] in {"captcha", "login", "account_locked"} and kind != "user_resolved":
+                raise ValueError("The actual human gate must be resolved")
             if s["reason"] == "rate_limit" and s["until"] > self.clock():
                 raise ValueError("Server cooldown has not elapsed")
             db.execute("INSERT INTO resolutions VALUES(?,?,?,?)", (attempt, self.clock(), kind, digest(evidence)))
@@ -240,7 +242,16 @@ def request(client, url, **kwargs):
     a = guard.begin(url, "fetch")
     try:
         response = client.get(url, **kwargs)
-    except httpx.TransportError:
+    except httpx.TransportError as error:
+        from .network_dreaming import observe
+
+        observe(
+            "stage",
+            site=scope(url)[0],
+            operation="fetch",
+            observation="error",
+            action="timeout" if isinstance(error, httpx.TimeoutException) else "unknown",
+        )
         guard.finish(a, "transient")
         raise
     except BaseException:
@@ -253,6 +264,7 @@ def request(client, url, **kwargs):
         site=scope(url)[0],
         operation="fetch",
         observation="returned" if response.status_code < 400 else "error",
+        http_status=response.status_code,
     )
     code = response.status_code
     result = (
@@ -289,8 +301,9 @@ def guarded_application(fn):
 
         settings.require_external("network admission", data_dir)
         guard = Guard.local(data_dir)
+        operation = "form_fill" if kwargs.get("extra_servers") else "apply"
         try:
-            a = guard.begin(spec.url, "form_fill" if kwargs.get("extra_servers") else "apply")
+            a = guard.begin(spec.url, operation)
         except Paused as exc:
             return ApplyOutcome("pending", "network_paused", [str(exc)])
         try:
@@ -309,7 +322,13 @@ def guarded_application(fn):
         guard.finish(a, result)
         from .network_dreaming import observe
 
-        observe("stage", site=scope(spec.url)[0], operation="apply", observation=reason or "returned")
+        observe(
+            "stage",
+            site=scope(spec.url)[0],
+            operation=operation,
+            observation=reason or "returned",
+            job_id=getattr(spec, "job_id", None),
+        )
         if result != "success":
             outcome.notes.append(json.dumps(guard.report(), ensure_ascii=False))
         return outcome
@@ -342,26 +361,23 @@ def parsed_response(fn):
 
 
 def demo():
-    """Synthetic offline acceptance demonstration, with disposable state."""
+    """Synthetic evidence generation only; model work stays pending without an online host."""
     import tempfile
 
+    from .network_dreaming import Journal
+
     with tempfile.TemporaryDirectory(prefix="synthetic-network-") as folder:
-        clock = [1000.0]
-        guard = Guard(Path(folder) / "events.sqlite3", clock=lambda: clock[0])
-        a = guard.begin("https://synthetic.example/one?token=omitted", "fetch")
-        guard.finish(a, "transient")
-        try:
-            guard.begin("https://synthetic.example/two", "apply")
-        except Paused as error:
-            print("冷却拒绝（外部调用=0）：", error)
-        clock[0] += 60
-        a = guard.begin("https://synthetic.example/two", "form_fill")
-        guard.finish(a, "captcha")
-        print("验证码暂停：", json.dumps(guard.report(), ensure_ascii=False, indent=2))
-        guard.resolve(a, "user_resolved", "SYNTHETIC 本人已处理的证据")
-        a = guard.begin("https://synthetic.example/two", "form_fill")
-        guard.finish(a, "success")
-        print("离线复盘：", json.dumps(guard.report(), ensure_ascii=False, indent=2))
+        journal = Journal(folder)
+        execution = journal.start("apply")
+        journal.event(execution, "stage", site="synthetic.example", operation="apply", observation="captcha")
+        journal.finish(execution, "waiting")
+        print(
+            json.dumps(
+                {"synthetic": True, "model": "pending_online_host", "input": journal.prepare()},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
 
 
 if __name__ == "__main__":

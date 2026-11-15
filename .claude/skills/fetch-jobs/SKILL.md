@@ -63,6 +63,6 @@ description: 每日模块①：抓取今天能抓到的岗位，代码预打标�
 1. 调用 `dreaming_status` 恢复待办；用户明确停止全部时到此为止，不启动模型整理或业务。
 2. 调用 `prepare_dreaming`，有 input 时由当前在线宿主理解本批结构化轨迹、结果和相关旧经验。按返回 schema 整理事实、待证解释、可复用策略、未解决事项，来源只引用本次可见seq；摘要不是新增观察，returned不是网站成功，403原因未知。只填有证据的条目，允许空列表，不补造事实。
 3. 自动调用 `complete_dreaming(lease, memories)`，成功继续取下一份；每次收尾最多处理3份。模型不可用/失败保留待办，下次启动补；不重跑业务。不得读profile/.env/原始日志以补足输入，不试探网站。
-4. 下一批计划在已知目标URL上调用 `network_context(url, operation)`，报告上次相关门槛及待改变条件，结合network_history决定等待本人或按既有授权接续。执行agent还会收到相关经验。普通错误不能升级为永久禁站，不跨租户推广。无人在线没有后台模型。
+4. 下一批计划对来源使用 `adapter:jobspy` / `adapter:workday` / `adapter:smartextract` / `adapter:enrich`（operation=discovery），对已知目标URL调用 `network_context(url, operation)`，报告上次相关门槛及待改变条件，结合network_history决定等待本人或按既有授权接续。执行agent还会收到相关经验。普通错误不能升级为永久禁站，不跨租户推广。无人在线没有后台模型。
 
 这是宿主遵循的编排协议，不是MCP强制调度。正常成功简要汇报；重要门槛立即说明，最终汇报pending/error及实际覆盖缺口。

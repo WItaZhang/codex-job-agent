@@ -776,7 +776,12 @@ class Toolbox:
     @_tool("read")
     def network_context(self, url: str, operation: str) -> dict:
         """Read relevant prior evidence for planning; account identity stays unknown."""
-        return Journal(self.data_dir).context(scope(url)[0], operation)
+        site = (
+            url
+            if url in {"adapter:jobspy", "adapter:workday", "adapter:smartextract", "adapter:enrich"}
+            else scope(url)[0]
+        )
+        return Journal(self.data_dir).context(site, operation)
 
     @_tool("commit")
     def resolve_network_pause(self, attempt: str, kind: str, evidence: str) -> dict:
@@ -3373,7 +3378,9 @@ class Toolbox:
                         if writer is not None:
                             writer.db.close()
 
-        work = batch_work(self.data_dir, "form_fill", work, run=run, activity=self.store.activity())
+        work = batch_work(
+            self.data_dir, "form_fill", work, run=run, activity=self.store.activity(), continuation=run_id
+        )
         if self.form_fill_in_background:
             try:
                 threading.Thread(target=work, name="intent-agent-form-fill-resume", daemon=True).start()

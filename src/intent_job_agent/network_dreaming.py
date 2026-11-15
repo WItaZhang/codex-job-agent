@@ -38,6 +38,7 @@ OBSERVATIONS = {
     "login",
     "account_locked",
     "unknown",
+    "human_resolved",
 }
 
 
@@ -76,6 +77,10 @@ class Journal:
                     id TEXT PRIMARY KEY, execution TEXT, site TEXT, operation TEXT,
                     body TEXT, expires REAL, active INTEGER DEFAULT 1);
             """)
+        with self.db() as db:
+            columns = {r["name"] for r in db.execute("PRAGMA table_info(executions)")}
+            if "task_id" not in columns:
+                db.execute("ALTER TABLE executions ADD COLUMN task_id TEXT")
         self.path.chmod(0o600)
 
     @contextmanager
@@ -93,31 +98,66 @@ class Journal:
         finally:
             db.close()
 
-    def start(self, task, *, batch=None, parent=None, continuation=None, execution=None):
+    def start(self, task, *, batch=None, parent=None, continuation=None, execution=None, task_id=None, resume_jobs=()):
         if task not in {"fetch", "discovery", "apply", "form_fill", "resume"}:
             raise ValueError("Unknown task")
         if execution is None:
             self.recover()
         execution = execution or uuid.uuid4().hex
         with self.db() as db:
+            if resume_jobs and parent is None:
+                parents = []
+                for job_id in resume_jobs:
+                    prior = db.execute(
+                        "SELECT execution FROM trajectory WHERE json_extract(body,'$.job_id')=? "
+                        "ORDER BY rowid DESC LIMIT 1",
+                        (digest(str(job_id)),),
+                    ).fetchone()
+                    if prior and prior[0] not in parents:
+                        parents.append(prior[0])
+                parent = parents[0] if len(parents) == 1 else json.dumps(parents) if parents else None
+            if continuation and parent is None:
+                old = db.execute(
+                    "SELECT id FROM executions WHERE task_id=? ORDER BY started DESC LIMIT 1", (digest(continuation),)
+                ).fetchone()
+                parent = old[0] if old else None
+            if batch and parent is None:
+                old = db.execute(
+                    "SELECT id FROM executions WHERE batch=? ORDER BY started DESC LIMIT 1", (digest(str(batch)),)
+                ).fetchone()
+                parent = old[0] if old else None
             db.execute(
-                "INSERT OR IGNORE INTO executions VALUES(?,?,?,?,?,?,?,?,NULL,?)",
+                "INSERT OR IGNORE INTO executions(id,task,batch,parent,continuation,"
+                "pid,birth,started,ended,status,task_id) "
+                "VALUES(?,?,?,?,?,?,?,?,NULL,?,?)",
                 (
                     execution,
                     task,
                     digest(str(batch)) if batch else None,
                     parent,
-                    continuation,
+                    digest(continuation) if continuation else None,
                     os.getpid(),
                     watchdog.me()[1],
                     time.time(),
                     "running",
+                    digest(task_id) if task_id else execution,
                 ),
             )
         return execution
 
     def event(
-        self, execution, kind, *, site="", operation="", observation="unknown", call="", tool="", action="unknown"
+        self,
+        execution,
+        kind,
+        *,
+        site="",
+        operation="",
+        observation="unknown",
+        call="",
+        tool="",
+        action="unknown",
+        http_status=None,
+        job_id=None,
     ):
         if kind not in KINDS or observation not in OBSERVATIONS:
             raise ValueError("Unstructured observation")
@@ -135,6 +175,8 @@ class Journal:
             if action in {"navigate", "snapshot", "click", "fill", "extract", "retry", "timeout", "unknown"}
             else "unknown",
             coverage="observable_metadata_only",
+            http_status=http_status if type(http_status) is int and 100 <= http_status <= 599 else None,
+            job_id=digest(str(job_id)) if job_id is not None else None,
             account="unknown",
         )
         with self.db() as db:
@@ -146,7 +188,7 @@ class Journal:
             ).fetchone()[0]
             db.execute("INSERT INTO trajectory VALUES(?,?,?,?)", (execution, seq, time.time(), json.dumps(body)))
 
-    def stream(self, execution, line, site, operation):
+    def stream(self, execution, line, site, operation, job_id=None):
         try:
             value = json.loads(line)
         except ValueError:
@@ -172,6 +214,7 @@ class Journal:
                 observation="started" if kind == "tool_use" else ("error" if item.get("is_error") else "returned"),
                 call=str(item.get("id") or item.get("tool_use_id") or ""),
                 tool=tool,
+                job_id=job_id,
                 action=next((a for a in ("navigate", "snapshot", "click", "fill", "extract") if a in name), "unknown"),
             )
 
@@ -220,6 +263,35 @@ class Journal:
             if not alive:
                 self.finish(row["id"], "interrupted")
         with self.db() as db:
+            resolutions = []
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='resolutions'").fetchone():
+                resolutions = [
+                    dict(r)
+                    for r in db.execute(
+                        "SELECT r.attempt,r.time,r.kind,a.site,a.operation FROM resolutions r "
+                        "JOIN attempts a ON a.id=r.attempt WHERE r.time>?",
+                        (time.time() - self.policy["retention_days"] * 86400,),
+                    )
+                ]
+            for resolution in resolutions:
+                key = "resolution-" + resolution["attempt"]
+                inserted = db.execute(
+                    "INSERT OR IGNORE INTO executions(id,task,continuation,started,ended,status,task_id) "
+                    "VALUES(?,'resume',?,?,?,'success',?)",
+                    (key, digest(resolution["attempt"]), resolution["time"], resolution["time"], key),
+                ).rowcount
+                if inserted:
+                    body = dict(
+                        kind="stage",
+                        site=resolution["site"],
+                        operation=resolution["operation"],
+                        observation="human_resolved" if resolution["kind"] == "user_resolved" else "unknown",
+                        coverage="explicit_human_report",
+                        account="unknown",
+                    )
+                    db.execute("INSERT INTO trajectory VALUES(?,1,?,?)", (key, resolution["time"], json.dumps(body)))
+                    db.execute("INSERT INTO dreams(execution,status,watermark) VALUES(?,'pending',1)", (key,))
+        with self.db() as db:
             db.execute(
                 "UPDATE dreams SET status='error' WHERE attempts>=? AND status='leased' AND until<?",
                 (self.policy["dream_max_attempts"], time.time()),
@@ -267,11 +339,16 @@ class Journal:
                     dict(r)
                     for r in db.execute(
                         "SELECT * FROM memories WHERE active=1 AND expires>? AND site IN "
-                        "(SELECT DISTINCT json_extract(body,'$.site') FROM trajectory WHERE execution=?)",
-                        (time.time(), row["execution"]),
+                        "(SELECT DISTINCT json_extract(body,'$.site') FROM trajectory WHERE execution=?) "
+                        "ORDER BY rowid DESC LIMIT ?",
+                        (time.time(), row["execution"], self.policy["dream_max_memories"]),
                     )
                 ],
             )
+            payload["scope_watermarks"] = [
+                dict(site=site, operation=operation, watermark=scope_watermark(db, site, operation))
+                for site, operation in sorted({(e["site"], e["operation"]) for e in payload["events"] if e["site"]})
+            ]
             db.execute(
                 "UPDATE dreams SET status='leased',lease=?,until=?,attempts=attempts+1,input=? WHERE execution=?",
                 (lease, time.time() + self.policy["dream_lease_seconds"], json.dumps(payload), row["execution"]),
@@ -287,6 +364,9 @@ class Journal:
             if not row or row["until"] < time.time():
                 raise ValueError("Stale lease")
             payload = json.loads(row["input"])
+            for prior in payload.get("scope_watermarks", []):
+                if prior["watermark"] != scope_watermark(db, prior["site"], prior["operation"]):
+                    raise ValueError("Scope evidence changed; prepare a fresh revision")
             events = {e["seq"]: e for e in payload["events"]}
             current = db.execute("SELECT max(seq) FROM trajectory WHERE execution=?", (row["execution"],)).fetchone()[0]
             if current != row["watermark"]:
@@ -308,10 +388,14 @@ class Journal:
                 if m.explanation == "human_gate_unresolved" and m.strategy != "await_human":
                     raise ValueError("Gate explanation requires gate strategy")
                 if m.counterevidence and not any(
-                    events[s]["observation"] in {"success", "captcha", "login", "account_locked"}
+                    events[s]["observation"] in {"success", "captcha", "login", "account_locked", "human_resolved"}
                     for s in m.counterevidence
                 ):
                     raise ValueError("Counterevidence has no verified result")
+                if m.condition == "human_resolution_observed" and not any(
+                    s["observation"] == "human_resolved" for s in sources
+                ):
+                    raise ValueError("No actual human resolution")
                 for old in m.replaces:
                     prior = db.execute(
                         "SELECT * FROM memories WHERE id=? AND site=? AND operation=?", (old, site, operation)
@@ -338,8 +422,9 @@ class Journal:
         with self.db() as db:
             memories = []
             for row in db.execute(
-                "SELECT * FROM memories WHERE site=? AND operation=? AND active=1 AND expires>?",
-                (site, operation, time.time()),
+                "SELECT * FROM memories WHERE site=? AND operation=? AND active=1 AND expires>? "
+                "ORDER BY rowid DESC LIMIT ?",
+                (site, operation, time.time(), self.policy["dream_max_memories"]),
             ):
                 memory = dict(row)
                 refs = json.loads(row["body"])["sources"]
@@ -365,6 +450,8 @@ class Journal:
                 account="unknown",
                 memories=memories,
                 human_resolutions=resolutions,
+                memory_limit=self.policy["dream_max_memories"],
+                coverage="most_recent_scoped_memories_with_source_events",
                 instruction=(
                     "Apply later actual human resolution before older unresolved advice; "
                     "it does not prove website submission."
@@ -374,7 +461,7 @@ class Journal:
     def sync_store(self, store):
         """Receive the business transaction's durable handoff idempotently."""
         for row in store.db.execute("SELECT * FROM network_lifecycle WHERE closed=1"):
-            self.start(row["task"], execution=row["execution"], batch=row["batch"])
+            self.start(row["task"], execution=row["execution"], batch=row["batch"], task_id=row["run_id"])
             self.finish(row["execution"], row["status"], authoritative=True)
             with store._tx():
                 store.db.execute("DELETE FROM network_lifecycle WHERE execution=? AND closed=1", (row["execution"],))
@@ -389,7 +476,12 @@ def batch_work(data_dir, task, work, *, batch=None, continuation=None, run=None,
     """Persist before thread launch; a dead owner becomes interrupted on next access."""
     journal = Journal(data_dir)
     execution = journal.start(
-        task, batch=batch, continuation=continuation, execution=(activity or {}).get("execution_id")
+        task,
+        batch=batch,
+        continuation=continuation,
+        execution=(activity or {}).get("execution_id"),
+        task_id=(activity or {}).get("run_id"),
+        resume_jobs=json.loads((activity or {}).get("resume_jobs") or "[]"),
     )
 
     def wrapped():
@@ -450,3 +542,22 @@ def batch_status(run):
     ):
         return "waiting"
     return status
+
+
+def scope_watermark(db, site, operation):
+    latest = db.execute(
+        "SELECT coalesce(max(rowid),0) FROM trajectory WHERE json_extract(body,'$.site')=? "
+        "AND json_extract(body,'$.operation')=?",
+        (site, operation),
+    ).fetchone()[0]
+    resolutions = []
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='resolutions'").fetchone():
+        resolutions = [
+            tuple(r)
+            for r in db.execute(
+                "SELECT r.attempt,r.kind,r.time FROM resolutions r JOIN attempts a ON a.id=r.attempt "
+                "WHERE a.site=? AND a.operation=? ORDER BY r.attempt",
+                (site, operation),
+            )
+        ]
+    return digest(json.dumps([latest, resolutions]))
