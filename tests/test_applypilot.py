@@ -65,12 +65,6 @@ class FakeJobSpy:
 
 
 @pytest.fixture(autouse=True)
-def retained_vendor_adapter(monkeypatch):
-    """Keep synthetic legacy adapter regressions; public denial is tested in test_network_experience."""
-    monkeypatch.setattr(bridge, "run_sources", bridge._run_sources_uncontrolled)
-
-
-@pytest.fixture(autouse=True)
 def no_llm_keys(monkeypatch):
     for key in LLM_KEYS:
         monkeypatch.delenv(key, raising=False)

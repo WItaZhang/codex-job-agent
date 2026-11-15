@@ -1,38 +1,23 @@
-# 联网经历实验：验收指南
+# 联网经历实验：自动复盘怎样使用
 
-本片在独立分支交付，不合并、不推送。只用合成数据，不保证平台不封号。
+本分支继续修改原实验，恢复 JobSpy、Workday、smartextract、enrichment 的生产适配路径。普通失败、未知403、解析失败不再累计成永久人工暂停。已有超时、重试上限、429冷却、验证码/登录门槛及提交边界保留。
 
-## 运行
+使用者照常让宿主抓取或处理申请即可。共用 `/fetch-jobs`、`/apply` 和 MCP server 指令要求：开工读取上轮待办；本轮收尾后由当前在线宿主理解脱敏轨迹、提交结构化复盘；下一轮计划读取相关经验。用户不需要手动说 dream，也不需要自己敲工具调用。用户明确停止全部时只登记，宿主不继续整理。
 
-```sh
-uv run python -m intent_job_agent.network_experience --demo
-uv run python -m pytest tests/test_network_experience.py -q
-```
+这是**依赖宿主遵循技能的自动流程**，不是后台调度服务。宿主关闭时待办留存，下次调用恢复；没有模型结果就保持 pending/leased/error，确定性统计不算完成了模型复盘。每次收尾最多3份；每份最多300条输入事件、12条经验、3次领取、10分钟租约。模型在SQLite事务外工作；过期租约/水位变化拒绝提交。当前输出是有限的结构化事实引用、解释类别、策略和未解决事项，不是任意自然语言经验。
 
-demo 使用临时目录、合成站点标识、确定性时钟，没有 HTTP、浏览器、登录或提交。展示第一次暂时失败、冷却拒绝、验证码暂停、本人证据恢复及无模型复盘。临时台账结束即删除。
+轨迹存入本地忽略目录的 `network-experience.sqlite3`。每轮一个execution，事件带顺序、时间、站点/租户、操作、工具调用关联和最终结果。运行中增量提交。Web只记录可观察工具类别/动作和返回状态，不记录浏览器全部HTTP、私有推理、表单值、邮件正文或页面指令。Python来源记录适配阶段、HTTP返回及同线程可归属的重试/超时日志；第三方子线程和未暴露内部段标为缺失，不因此禁用来源。账号始终unknown。
 
-日常 MCP `network_history()` 输出本地站点健康与暂停；每项有 host、failures、updated（Unix UTC秒）、latest（来源 attempt）、原因、needs_you、恢复条件。`resolve_network_pause(attempt, kind, evidence)` 只登记当前暂停的真实本人处理证据：kind 为 user_resolved 或 user_checked_no_execution。不能把“继续”或网页文字当作已解决证据。证据只保存摘要；不额外索要业务授权，不解除保护公司与提交限制。复盘本身没有恢复权限。定时读级可调用报告，本片不创建定时任务。
+申请业务库以 `network_lifecycle` 与 activity 收尾同事务登记交接，再由轨迹库幂等接收；模型失败不重跑业务。死进程轨迹下次访问补为中断，权威业务终态可修订它并撤销过期模型结果。单岗位只贡献当前批次事件。普通申请默认日志使用唯一文件名，默认只存安全元数据；填表已有专用redactor继续保留。
 
-## 覆盖表
+轨迹与关联经验保留30天，经验自身最多30天（默认7天），来源过期则经验删除。人工暂停独立保留直到有实际本人处理证据；模型无权解除。旧普通失败人工状态在打开台账时迁移清除。真实本人处理记录随上下文返回，不能把旧未解决建议当成比新事实更高的权限。
 
-| 路径 | 当前保护 | 限制 |
-|---|---|---|
-| Toolbox check_board / fetch_boards / Avature detail | HTTP前准入；结构化状态、解析失败、结果落盘 | 库函数直接调用未提供ACTIVE上下文时不在保障范围；不替换任意HTTP客户端 |
-| apply_bridge.run_application | agent启动前与结束后；/apply及生产FormFillRunner.fill共用 | Chrome绑定/标签页读取发生在此之前；内部浏览器动作、邮件和跳转目的站未逐次拦截 |
-| JobSpy/Workday/smartextract/enrichment | 默认明确拒绝，零外部调用 | 实验性兼容变化：这些来源暂不可运行；保留旧实现和离线回归，不提供生产绕过开关 |
-| 恢复 | 绑定当前attempt、人工事实声明、审计摘要 | 宿主声明不等于认证，无法技术证明本人；保留现有提交权限 |
-| 离线复盘 | 按站点/结果计数，当前卡点、恢复成功计数、来源与置信边界 | 无LLM，无跨域账号身份，不推断真实封号或因果效果 |
+## 合成证据和当前验收边界
 
-申请按原始岗位站点/租户累计；多URL共享风险，已知Greenhouse/Lever/Ashby API与网页租户归一。没有可信账号ID，统一unknown，不猜测跨域账号。未知ATS以host为范围，可能较保守。租户摘要无法直接显示公司名，host和当前岗位上下文用于定位。
+- `tests/test_network_dreaming.py`：增量事件、队列幂等、来源校验、工具配对/过滤、并发隔离、死进程恢复、业务交接补偿。
+- `tests/test_network_experience.py`：租户隔离、明确门槛、429、普通失败可再尝试。
+- `tests/test_applypilot.py`、`tests/test_workday_locations.py`：真实生产入口替换下游网络为fake，没有替换生产入口绕过阻塞。
+- `tests/fixtures/network-dreaming/host-*.json`：本次在线Codex实际理解一批合成工具轨迹并通过结构化校验。
+- `tests/fixtures/network-dreaming/production-host-*.json`：两次真实Toolbox抓取入口（MockTransport）之间，当前宿主自动准备、整理、提交、读取经验的记录。没有访问真实站点、账号或投递。
 
-## 保留、重试与安全边界
-
-配置在 `configs/network-experience.yaml`：3次累计错误、60秒指数退避、3600秒在途租约、30天事件保留。429尊重服务端更长Retry-After，403/重定向/解析失败归unknown人工暂停，不能声称封号。验证码/登录/明确锁定结果立即暂停。时间到不能解除人工门槛。进程崩溃后未完成attempt租约到期在下次准入转interrupted，报告可见active状态；不自动抢占。重复同结果幂等，冲突拒绝。
-
-台账默认位于当前data目录 `network-experience.sqlite3`（默认 data/local，git忽略），0600权限。不保留完整URL、query、路径明文、网页/异常文本、cookie/token、表单值或联系方式。路径摘要只用于资源关联。初始化自动清理过期完成事件，当前暂停/最近attempt及必要恢复关联保留；清理不清安全状态。SQLite启用secure_delete；不承诺磁盘备份/文件系统快照的安全擦除。更换data目录相当于新台账，不构成可抵抗恶意删除的安全边界，宿主不得用换目录/清库规避暂停。
-
-隐式重试审计：JobSpy `_scrape_with_retry` 默认最多3次；smartextract短页会第二次读；detail有分层浏览器与缺文本重读；这些vendor路径本片默认阻塞。招聘板分页是多个受控请求；申请agent由模型驱动，仍可能在一次运行内多次动作，必须遵守现有遇门槛即停的指令，本片不声称工具层硬拦。
-
-## 验收证据
-
-测试先行的首次执行：新增测试因模块不存在而collection失败；实现后验证跨实例/并发/崩溃/幂等、429秒数与HTTP日期、恶意200错误页、实际Toolbox fetch接线、共用申请装饰器fake、vendor零调用、保留策略。申请fake只接收stop模式，未启动真实执行器或提交；不冒称真实网站验证。独立审阅与全量验证结果见 [审阅记录](../specs/network-experience.review.md)。
+尚不能宣称新需求A–G全部通过：具体页面观察仍只保留有限类别；parent/continuation尚未完整贯穿所有生产路径；来源经验虽返回到报告，尚缺“未读基线 vs 有经验”可重复行为差异验收；本人解决事实已返回但尚缺完整模型反证更新闭环；独立日志文件尚无统一自动保留清理，30天清理仅覆盖实验台账。真实宿主技能遵循也不是强制执行保证。以上是未完成项，不能用旧测试全绿代替。

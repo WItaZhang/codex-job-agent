@@ -12,7 +12,7 @@ A保留4.1–4.9；B保留4.10及填表模块；JSON/CSV/applications是交接�
 
 新来源、校准新规则、定时业务、填表录制重放/评审产品功能不因目标变更解冻。当前仅文档/配置/示例/干净源码使用和经复现的旧host阻塞修复；不继续R2/R2b公众路线，不整体合入S2。现有local_only保护不解除，源码用户显式legacy配置与标记workspace不能互相偷换。
 
-本次独立开发实验的窄例外：[联网操作经历与准入](specs/network-experience.md)。仅操作安全与离线复盘，不改变偏好、评分或业务授权；不依赖未合并的长期记忆实验。
+本次独立开发实验的窄例外：[联网经历与跨批次学习](specs/network-experience.md)。仅操作经历与宿主复盘，不改变偏好、评分或业务授权；不依赖未合并的长期记忆实验。
 
 ## 2. 使用者与授权
 
@@ -398,7 +398,7 @@ exception 默认为空。新增一个 exception 必须**同时满足**以下条�
 
 ### 5.1 工具分三级
 
-联网实验增加读级 `network_history` 与提交级 `resolve_network_pause`。后者仅登记当前暂停的真实本人处理证据，不发起网络请求、不扩大业务权限；不对定时入口开放。
+联网实验增加读级 `network_history`、`dreaming_status`、`network_context`，准备级 `prepare_dreaming`，提交级 `complete_dreaming` 与 `resolve_network_pause`。模型复盘只接受有来源的结构化经验，不改业务权限。后者仅登记当前暂停的真实本人处理证据，不发起网络请求、不扩大业务权限；不对定时入口开放。
 
 
 读名单时可追加保护审计快照作为读级的例外，不修改意图、label 或投递状态。

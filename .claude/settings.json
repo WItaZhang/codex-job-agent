@@ -6,6 +6,7 @@
       "Read(./data/local/form-fill/runs/*/*/log.jsonl)"
     ],
     "allow": [
+      "mcp__intent-agent__complete_dreaming",
       "mcp__intent-agent__correct_tags",
       "mcp__intent-agent__decide",
       "mcp__intent-agent__initialize_intent",

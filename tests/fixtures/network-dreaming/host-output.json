@@ -1,0 +1,88 @@
+{
+  "synthetic": true,
+  "host": "current Codex session, structured interpretation; no website access",
+  "output": [
+    {
+      "kind": "fact",
+      "sources": [
+        3
+      ],
+      "strategy": "check_current_evidence",
+      "explanation": "unknown"
+    },
+    {
+      "kind": "hypothesis",
+      "sources": [
+        1,
+        2,
+        3
+      ],
+      "strategy": "unknown_cause",
+      "explanation": "unknown"
+    },
+    {
+      "kind": "strategy",
+      "sources": [
+        3
+      ],
+      "strategy": "await_human",
+      "explanation": "human_gate_unresolved"
+    },
+    {
+      "kind": "unresolved",
+      "sources": [
+        3
+      ],
+      "strategy": "await_human",
+      "explanation": "human_gate_unresolved"
+    }
+  ],
+  "validation": {
+    "status": "complete",
+    "execution_id": "608554eb91134b9eb688090e93ebb465"
+  },
+  "second_batch_context": {
+    "site": "synthetic.test",
+    "operation": "apply",
+    "account": "unknown",
+    "memories": [
+      {
+        "id": "9d67e1d55449a038a861dc098ea90b36698221622d12645fc1c2861f2a5824dd",
+        "execution": "608554eb91134b9eb688090e93ebb465",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "body": "{\"kind\":\"fact\",\"sources\":[3],\"strategy\":\"check_current_evidence\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"unknown\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795328973.260092,
+        "active": 1
+      },
+      {
+        "id": "7ad5a7e865c8dd1261f99e84f75437b36e06c2502c755dabbcc8a8db1a044392",
+        "execution": "608554eb91134b9eb688090e93ebb465",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "body": "{\"kind\":\"hypothesis\",\"sources\":[1,2,3],\"strategy\":\"unknown_cause\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"unknown\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795328973.260355,
+        "active": 1
+      },
+      {
+        "id": "f7898e95d7acc091c27cba4a0fc4b86447a1e438a696dba0acf43019b51ccd00",
+        "execution": "608554eb91134b9eb688090e93ebb465",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "body": "{\"kind\":\"strategy\",\"sources\":[3],\"strategy\":\"await_human\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"human_gate_unresolved\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795328973.260366,
+        "active": 1
+      },
+      {
+        "id": "22cb9900c4c496a32c013282a7f7966c294dd9dad0a621460a630f5abc8171ab",
+        "execution": "608554eb91134b9eb688090e93ebb465",
+        "site": "synthetic.test",
+        "operation": "apply",
+        "body": "{\"kind\":\"unresolved\",\"sources\":[3],\"strategy\":\"await_human\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"human_gate_unresolved\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795328973.260372,
+        "active": 1
+      }
+    ]
+  },
+  "interpretation": "Browser tool returned, which does not prove site success. The adapter observed CAPTCHA. Cause and account identity remain unknown; wait for actual human resolution and use existing resume. Batch success only describes wrapper completion."
+}

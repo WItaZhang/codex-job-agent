@@ -4,3 +4,7 @@ max_failures: 3
 backoff_seconds: 60
 lease_seconds: 3600
 retention_days: 30
+dream_max_attempts: 3
+dream_lease_seconds: 600
+dream_max_events: 300
+dream_max_memories: 12

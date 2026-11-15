@@ -1,0 +1,129 @@
+{
+  "synthetic": true,
+  "host": "current Codex session",
+  "output": [
+    {
+      "kind": "fact",
+      "sources": [
+        1
+      ],
+      "strategy": "check_current_evidence",
+      "explanation": "observed_tool_error"
+    },
+    {
+      "kind": "hypothesis",
+      "sources": [
+        1
+      ],
+      "strategy": "unknown_cause",
+      "explanation": "unknown"
+    },
+    {
+      "kind": "strategy",
+      "sources": [
+        1
+      ],
+      "strategy": "inspect_prior_stage",
+      "explanation": "observed_tool_error"
+    }
+  ],
+  "validation": {
+    "status": "complete",
+    "execution_id": "8f499af1907a4c9787ca9ccb1cfdcef2"
+  },
+  "next_plan_context": {
+    "site": "lever:b3cc0475bb78a5026098858e",
+    "operation": "fetch",
+    "account": "unknown",
+    "memories": [
+      {
+        "id": "d83d055e299cff642a9cf1b689d639d8a0370a3867250bd1c0244fc15f44d004",
+        "execution": "8f499af1907a4c9787ca9ccb1cfdcef2",
+        "site": "lever:b3cc0475bb78a5026098858e",
+        "operation": "fetch",
+        "body": "{\"kind\":\"fact\",\"sources\":[1],\"strategy\":\"check_current_evidence\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"observed_tool_error\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795329156.892617,
+        "active": 1,
+        "evidence": [
+          {
+            "seq": 1,
+            "kind": "stage",
+            "site": "lever:b3cc0475bb78a5026098858e",
+            "operation": "fetch",
+            "observation": "error",
+            "call": "",
+            "tool": "other",
+            "action": "unknown",
+            "coverage": "observable_metadata_only",
+            "account": "unknown"
+          }
+        ]
+      },
+      {
+        "id": "cdfea3ec930c13db1c5b52816f4b9f30dc6796ce1a7bd3cd74e579f25b27f72d",
+        "execution": "8f499af1907a4c9787ca9ccb1cfdcef2",
+        "site": "lever:b3cc0475bb78a5026098858e",
+        "operation": "fetch",
+        "body": "{\"kind\":\"hypothesis\",\"sources\":[1],\"strategy\":\"unknown_cause\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"unknown\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795329156.892887,
+        "active": 1,
+        "evidence": [
+          {
+            "seq": 1,
+            "kind": "stage",
+            "site": "lever:b3cc0475bb78a5026098858e",
+            "operation": "fetch",
+            "observation": "error",
+            "call": "",
+            "tool": "other",
+            "action": "unknown",
+            "coverage": "observable_metadata_only",
+            "account": "unknown"
+          }
+        ]
+      },
+      {
+        "id": "f9f76ebc43cd7f3234c4cdfbacf11784e690f80f406be29afa0be8f09dce50d1",
+        "execution": "8f499af1907a4c9787ca9ccb1cfdcef2",
+        "site": "lever:b3cc0475bb78a5026098858e",
+        "operation": "fetch",
+        "body": "{\"kind\":\"strategy\",\"sources\":[1],\"strategy\":\"inspect_prior_stage\",\"counterevidence\":[],\"replaces\":[],\"ttl_days\":7,\"explanation\":\"observed_tool_error\",\"condition\":\"same_scope_and_operation\"}",
+        "expires": 1795329156.892896,
+        "active": 1,
+        "evidence": [
+          {
+            "seq": 1,
+            "kind": "stage",
+            "site": "lever:b3cc0475bb78a5026098858e",
+            "operation": "fetch",
+            "observation": "error",
+            "call": "",
+            "tool": "other",
+            "action": "unknown",
+            "coverage": "observable_metadata_only",
+            "account": "unknown"
+          }
+        ]
+      }
+    ],
+    "human_resolutions": [],
+    "instruction": "Apply later actual human resolution before older unresolved advice; it does not prove website submission."
+  },
+  "second_production_result": {
+    "status": "done",
+    "boards": [
+      {
+        "provider": "lever",
+        "board": "synthetic",
+        "company": "Synthetic",
+        "error": null,
+        "fetched": 0,
+        "filtered_out": 0,
+        "already_known": 0,
+        "new": 0,
+        "detail_errors": 0
+      }
+    ]
+  },
+  "boundary": "Actual host interpretation and two Toolbox runs with MockTransport. No real website. This is not a proof of autonomous strategy selection or all host versions."
+}

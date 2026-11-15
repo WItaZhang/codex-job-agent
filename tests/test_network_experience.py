@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from intent_job_agent.domain import InvariantError
 from intent_job_agent.network_experience import Guard, Paused, scope
 
 
@@ -14,11 +15,10 @@ def test_restart_budget_and_privacy(tmp_path):
         g = Guard(path, clock=lambda: clock[0])
         a = g.begin("https://u:password@example.test/private?token=secret", "fetch")
         g.finish(a, "transient")
-        with pytest.raises(Paused):
-            g.begin("https://example.test/other", "apply")
+        b = g.begin("https://example.test/other", "apply")
+        g.finish(b, "unknown")
         clock[0] += 10000
-    with pytest.raises(Paused):
-        Guard(path, clock=lambda: clock[0]).begin("https://example.test/new", "fetch")
+    assert Guard(path, clock=lambda: clock[0]).begin("https://example.test/new", "fetch")
     assert all(s not in path.read_bytes().decode("latin1") for s in ["password", "secret", "/private"])
 
 
@@ -62,8 +62,7 @@ def test_concurrency_crash_and_tenants(tmp_path):
         assert sum(v is not None for v in pool.map(start, range(2))) == 1
     clock[0] += 100000
     g = Guard(path, clock=lambda: clock[0])
-    with pytest.raises(Paused):
-        g.begin("https://example.test/b", "apply")
+    assert g.begin("https://example.test/b", "apply")
     assert g.report()["sites"][0]["reason"] == "interrupted"
     assert scope("https://jobs.lever.co/acme/1")[0] == scope("https://api.lever.co/v0/postings/acme")[0]
     assert scope("https://jobs.lever.co/other/1")[0] != scope("https://jobs.lever.co/acme/1")[0]
@@ -85,11 +84,11 @@ def test_actual_toolbox_fetch_and_parse_failure(tmp_path):
         settings=SimpleNamespace(require_external=lambda *a: None, discovery=SimpleNamespace(timeout_seconds=1)),
         http_client=client,
     )
-    with pytest.raises(Paused):
+    with pytest.raises(InvariantError):
         Toolbox._fetch(tool, "lever", "synthetic", "Synthetic")
-    with pytest.raises(Paused):
+    with pytest.raises(InvariantError):
         Toolbox._fetch(tool, "lever", "synthetic", "Synthetic")
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert Guard.local(tmp_path).report()["sites"][0]["reason"] == "unknown"
 
 
@@ -109,9 +108,9 @@ def test_request_429_zero_calls_and_http_date(tmp_path):
     ) as client:
         token = ACTIVE.set(g)
         try:
-            for _ in range(2):
-                with pytest.raises(Paused):
-                    request(client, "https://example.test/path")
+            assert request(client, "https://example.test/path").status_code == 429
+            with pytest.raises(Paused):
+                request(client, "https://example.test/path")
         finally:
             ACTIVE.reset(token)
     assert len(calls) == 1
@@ -148,17 +147,6 @@ def test_application_gate_zero_relaunch_and_no_submit(tmp_path, reason):
     assert len(calls) == 2
 
 
-def test_vendor_default_denial_before_configuration(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    from intent_job_agent import applypilot_bridge
-    from intent_job_agent.domain import InvariantError
-
-    monkeypatch.setattr(applypilot_bridge, "configure", lambda *a: pytest.fail("must not configure or launch vendor"))
-    with pytest.raises(InvariantError, match="network_coverage_blocked"):
-        applypilot_bridge.run_sources(tmp_path, SimpleNamespace(require_external=lambda *a: None), ["jobspy"], True)
-
-
 def test_retention_preserves_pause(tmp_path):
     clock = [1000.0]
     g = Guard(tmp_path / "e.db", clock=lambda: clock[0])
@@ -185,8 +173,7 @@ def test_ashby_tenant_and_partial_success_does_not_reset_failures(tmp_path):
         b = g.begin("https://example.test/page2", "fetch")
         g.finish(b, "transient")
         clock[0] += 10000
-    with pytest.raises(Paused):
-        g.begin("https://example.test/page1", "fetch")
+    assert g.begin("https://example.test/page1", "fetch")
 
 
 def test_admission_rejection_is_not_business_attempt():

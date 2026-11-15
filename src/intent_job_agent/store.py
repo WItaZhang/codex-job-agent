@@ -110,6 +110,15 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self._depth = 0  # > 0 inside exclusive(): writes join that transaction
         self.db.executescript(_SCHEMA)
+        self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS network_lifecycle (
+                execution TEXT PRIMARY KEY, run_id TEXT, task TEXT, batch TEXT,
+                started TEXT, status TEXT, closed INTEGER DEFAULT 0);
+        """)
+        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(apply_running)")}
+        if "execution_id" not in columns:
+            with self._tx():
+                self.db.execute("ALTER TABLE apply_running ADD COLUMN execution_id TEXT")
         columns = {row["name"] for row in self.db.execute("PRAGMA table_info(applications)")}
         if "note" not in columns:  # databases created before slice 6
             with self._tx():
@@ -600,6 +609,16 @@ class Store:
                         json.dumps(resume_jobs) if resume_jobs is not None else None,
                     ),
                 )
+                from . import open_answer_pairs
+
+                if not run_id.startswith(open_answer_pairs.WATCH_PREFIX):
+                    execution = new_id("execution")
+                    task = {"step": "apply", "resume": "resume", "form_fill": "form_fill"}[kind]
+                    self.db.execute(
+                        "INSERT INTO network_lifecycle VALUES(?,?,?,?,?,?,0)",
+                        (execution, run_id, task, batch_id, _now(), "running"),
+                    )
+                    self.db.execute("UPDATE apply_running SET execution_id=? WHERE id=1", (execution,))
                 if batch:
                     self._save_batch(batch_id, batch[2], batch[3])
         except sqlite3.IntegrityError:
@@ -673,10 +692,21 @@ class Store:
                 (pid, started, owner[0], owner[1]),
             )
 
-    def end_activity(self, owner: tuple[int, str], run_id: str | None = None) -> None:
+    def end_activity(self, owner: tuple[int, str], run_id: str | None = None, *, outcome: str = "unknown") -> None:
         """`owner`'s step or resume is closed: only its own row goes (review #3). With `run_id`, only while the row is
         that run's: a watch of open answers that ends late never removes the row of a run started after it."""
         with self._tx():
+            row = self.activity()
+            if (
+                row
+                and (row["owner_pid"], row["owner_started"]) == owner
+                and (run_id is None or row["run_id"] == run_id)
+            ):
+                self.db.execute(
+                    "UPDATE network_lifecycle SET status=?,closed=1 WHERE execution=?",
+                    (outcome, row.get("execution_id")),
+                )
+
             if run_id is None:
                 self.db.execute(
                     "DELETE FROM apply_running WHERE owner_pid = ? AND owner_started = ?", (owner[0], owner[1])

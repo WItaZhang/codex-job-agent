@@ -17,6 +17,11 @@ SERVER_NAME = "intent-agent"
 
 INSTRUCTIONS = """Job-intent calibration tools. The user labels a few jobs a day; you help them keep their intent
 model accurate. Rules:
+- After a network batch ends and before the next batch, automatically drain up to 3 dreaming items:
+  dreaming_status, prepare_dreaming, understand the sanitized input, complete_dreaming using its schema.
+  Never call this deterministic report model dreaming; only validated host output completes it.
+  If the user stops all work, register/recover only; do not run model work. Offline items stay pending.
+  Read network_context for relevant target URLs before planning; never infer website success from returned tools.
 - Work only within this user's explicit delegation. The repository author's decision25 delegation does not
   authorize other users' business actions. Existing authorization persists; obey actual host approvals.
 - Show numbered choices. The delegated coordinator may choose from existing evidence; never invent user facts.

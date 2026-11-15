@@ -183,17 +183,10 @@ def workday_location(info: dict) -> str:
 
 
 def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
-    """Refuse vendor network work until internal requests support persistent admission."""
+    """Run the existing production adapters; unexposed requests are a trace gap."""
     settings.require_external("job discovery", data_dir)
-    raise InvariantError(
-        "network_coverage_blocked: vendor JobSpy/Workday/smartextract/enrichment 内部请求尚未接入准入；"
-        "本实验暂停这些来源。请使用 fetch_boards 的受控招聘板；不会发起探测请求。"
-    )
+    from .network_dreaming import Journal, observe
 
-
-def _run_sources_uncontrolled(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
-    """Retained implementation; production entry is blocked until request-level admission exists."""
-    settings.require_external("retained vendor implementation", data_dir)
     configure(data_dir, settings)
     from .vendor.applypilot import config
 
@@ -203,7 +196,9 @@ def _run_sources_uncontrolled(data_dir: Path, settings: Settings, sources: list[
     proxy = os.environ.get(settings.discovery.proxy_env) or None
     reports = {}
     for source in sources:
-        report = {"error": None, "skipped": None, "stats": None}
+        prior = Journal(data_dir).context("adapter:" + source, "discovery")
+        observe("stage", site="adapter:" + source, operation="discovery", observation="started")
+        report = {"error": None, "skipped": None, "stats": None, "prior_experience": prior}
         if source == "smartextract":
             report["failed_sites"] = []
         try:
@@ -227,8 +222,15 @@ def _run_sources_uncontrolled(data_dir: Path, settings: Settings, sources: list[
                         report["stats"] = smartextract.run_smart_extract()
         except Exception as error:  # one source's failure must not stop the others
             report["error"] = f"{type(error).__name__}: {error}"
+        observe(
+            "stage",
+            site="adapter:" + source,
+            operation="discovery",
+            observation="error" if report["error"] else ("missing" if report["skipped"] else "returned"),
+        )
         reports[source] = report
     if enrich:
+        observe("stage", site="adapter:enrich", operation="discovery", observation="started")
         report = {"error": None, "skipped": None, "stats": None}
         try:
             from .vendor.applypilot.enrichment import detail
@@ -238,6 +240,12 @@ def _run_sources_uncontrolled(data_dir: Path, settings: Settings, sources: list[
             report["stats"] = detail.run_enrichment(limit=settings.discovery.enrich_limit)
         except Exception as error:
             report["error"] = f"{type(error).__name__}: {error}"
+        observe(
+            "stage",
+            site="adapter:enrich",
+            operation="discovery",
+            observation="error" if report["error"] else "returned",
+        )
         reports["enrich"] = report
     return json.loads(json.dumps(reports, default=str))
 

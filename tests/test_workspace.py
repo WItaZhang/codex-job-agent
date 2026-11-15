@@ -153,7 +153,7 @@ def test_all_registered_nonlocal_tools_reject_direct_calls(tmp_path):
     # adding a tool requires reviewing the R1 side-effect inventory: open_answer_pairs (watches the applying Chrome)
     # and open_answer_choice (reads profile.json, writes the bank) are not local reads, so local-only refuses them
     # Original-tab inspection touches browser metadata; continuation also starts a worker. Neither is local-only.
-    assert len(TOOL_TIERS) == 54
+    assert len(TOOL_TIERS) == 58
     assert LOCAL_READ_TOOLS <= TOOL_TIERS.keys()
     for name in TOOL_TIERS.keys() - LOCAL_READ_TOOLS:
         # Guard must run before even interpreting arguments/looking up personal input.

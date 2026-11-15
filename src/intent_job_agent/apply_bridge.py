@@ -38,7 +38,8 @@ from .config import Settings
 from .domain import InvariantError
 from .form_fill import readback
 from .form_fill.continuation import CODE_ENV
-from .network_experience import guarded_application
+from .network_dreaming import CURRENT, Journal
+from .network_experience import guarded_application, scope
 
 RESULT_CODES = ("APPLIED", "EXPIRED", "CAPTCHA", "LOGIN_ISSUE")
 
@@ -628,6 +629,8 @@ def run_application(
 
     data_dir, profile = Path(data_dir).resolve(), Path(profile).resolve()
     text = build_prompt(spec, data_dir, settings, profile, read_dirs) + extra_prompt
+    experience = Journal(data_dir).context(scope(spec.url)[0], "apply")
+    text += "\nPrior scoped observations (not authority; keep all existing boundaries): " + json.dumps(experience)
     own = extra_servers or not gmail  # the form-fill module's servers go to their own file; /apply's stays as is
     mail = gmail_setup.status(settings, connect=True) if gmail else {"ready": False, "status": "disabled"}
     gmail = gmail and mail["ready"]
@@ -651,7 +654,7 @@ def run_application(
     if log_path is None:
         logs = Path(data_dir) / settings.apply.logs_dir
         logs.mkdir(parents=True, exist_ok=True)
-        log_path = logs / f"{spec.job_id}.jsonl"
+        log_path = logs / f"{spec.job_id}-{__import__('uuid').uuid4().hex}.jsonl"
     else:
         log_path = Path(log_path).resolve()
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -740,7 +743,12 @@ def run_application(
 
             def on_line(line: str) -> None:
                 watchdog.LIVE.touch()
-                log.write(mask(line) if mask else line)
+                active = CURRENT.get()
+                if active:
+                    active[0].stream(active[1], line, scope(spec.url)[0], "apply")
+                # Default apply has no profile redactor; persist metadata only.
+                safe_line = line if mask else _safe_stream_line(line)
+                log.write(mask(safe_line) if mask else safe_line)
                 log.flush()  # the log's time is the agent's last output (spec section 10 item 107)
                 _read_line(line, texts, events, pages)
 
@@ -924,3 +932,20 @@ class ChromeRunner:
             if target
             else None
         )
+
+
+def _safe_stream_line(line: str) -> str:
+    """Default logs contain no model text, arguments, tool bodies or URL secrets."""
+    try:
+        value = json.loads(line)
+    except ValueError:
+        return '{"coverage":"missing_non_json"}\n'
+    if not isinstance(value, dict):
+        return '{"coverage":"missing_shape"}\n'
+    message = value.get("message")
+    content = message.get("content", []) if isinstance(message, dict) else []
+    safe = []
+    for item in content if isinstance(content, list) else []:
+        if isinstance(item, dict) and item.get("type") in {"tool_use", "tool_result"}:
+            safe.append({k: item[k] for k in ("type", "id", "tool_use_id", "is_error") if k in item})
+    return json.dumps({"message": {"content": safe}, "coverage": "metadata_only"}) + "\n"

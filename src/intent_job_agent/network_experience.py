@@ -78,6 +78,8 @@ class Guard:
                     attempt TEXT PRIMARY KEY, time REAL, kind TEXT, evidence_hash TEXT);
             """)
         self.path.chmod(0o600)
+        with self.db() as db:
+            db.execute("UPDATE sites SET manual=0,until=0 WHERE reason IN ('unknown','transient','interrupted')")
         self.prune()
 
     @classmethod
@@ -118,9 +120,9 @@ class Guard:
                         (now, old["id"]),
                     )
                     db.execute(
-                        "UPDATE sites SET active=NULL,manual=1,reason='interrupted',updated=? WHERE site=?", (now, site)
+                        "UPDATE sites SET active=NULL,manual=0,reason='interrupted',updated=? WHERE site=?", (now, site)
                     )
-                    row.update(active=None, manual=1, reason="interrupted", updated=now)
+                    row.update(active=None, manual=0, reason="interrupted", updated=now)
             if row["active"] or row["manual"] or row["until"] > now:
                 blocked = self.summary(row)
                 db.execute("INSERT INTO denials VALUES(?,?,?)", (site, now, row["reason"] or "in_flight"))
@@ -147,8 +149,8 @@ class Guard:
                 return
             s = db.execute("SELECT * FROM sites WHERE site=?", (a["site"],)).fetchone()
             failures = s["failures"] + (result != "success")
-            manual = result not in {"success", "transient", "rate_limit"} or failures >= self.policy["max_failures"]
-            delay = 0 if result == "success" else self.policy["backoff_seconds"] * 2 ** min(failures - 1, 12)
+            manual = result in {"captcha", "login", "account_locked"}
+            delay = self.policy["backoff_seconds"] if result == "rate_limit" else 0
             if result == "rate_limit" and retry_after:
                 try:
                     delay = max(delay, float(retry_after))
@@ -240,10 +242,18 @@ def request(client, url, **kwargs):
         response = client.get(url, **kwargs)
     except httpx.TransportError:
         guard.finish(a, "transient")
-        raise Paused(json.dumps(guard.report(), ensure_ascii=False)) from None
+        raise
     except BaseException:
         guard.finish(a, "unknown")
         raise
+    from .network_dreaming import observe
+
+    observe(
+        "stage",
+        site=scope(url)[0],
+        operation="fetch",
+        observation="returned" if response.status_code < 400 else "error",
+    )
     code = response.status_code
     result = (
         "success"
@@ -254,7 +264,6 @@ def request(client, url, **kwargs):
         PENDING.set(a)
     else:
         guard.finish(a, result, retry_after=response.headers.get("Retry-After"))
-        raise Paused(json.dumps(guard.report(), ensure_ascii=False))
     return response
 
 
@@ -263,9 +272,11 @@ def guarded_fetch(fn):
     def wrapped(self, *args, **kwargs):
         guard = Guard.local(self.data_dir)
         token = ACTIVE.set(guard)
+        pending = PENDING.set(None)
         try:
             return fn(self, *args, **kwargs)
         finally:
+            PENDING.reset(pending)
             ACTIVE.reset(token)
 
     return wrapped
@@ -296,6 +307,9 @@ def guarded_application(fn):
         }.get(outcome.reason)
         result = reason or ("success" if outcome.status in {"applied", "waiting"} else "unknown")
         guard.finish(a, result)
+        from .network_dreaming import observe
+
+        observe("stage", site=scope(spec.url)[0], operation="apply", observation=reason or "returned")
         if result != "success":
             outcome.notes.append(json.dumps(guard.report(), ensure_ascii=False))
         return outcome
@@ -317,7 +331,7 @@ def parsed_response(fn):
             if PENDING.get():
                 guard.finish(PENDING.get(), "unknown")
                 PENDING.set(None)
-                raise Paused(json.dumps(guard.report(), ensure_ascii=False)) from None
+                raise
             raise
         if PENDING.get():
             guard.finish(PENDING.get(), "success")
