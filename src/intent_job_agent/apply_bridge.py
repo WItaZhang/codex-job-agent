@@ -38,6 +38,7 @@ from .config import Settings
 from .domain import InvariantError
 from .form_fill import readback
 from .form_fill.continuation import CODE_ENV
+from .network_experience import guarded_application
 
 RESULT_CODES = ("APPLIED", "EXPIRED", "CAPTCHA", "LOGIN_ISSUE")
 
@@ -597,6 +598,7 @@ def ensure_chrome(settings: Settings, worker_id: int = 0):
     return browser_session.ensure(settings)
 
 
+@guarded_application
 def run_application(
     spec: ApplySpec,
     data_dir: Path,

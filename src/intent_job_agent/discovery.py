@@ -25,6 +25,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from .domain import Job, Salary
+from .network_experience import Paused, parsed_response, request
 
 PROVIDERS = ("greenhouse", "lever", "ashby")
 _BOARD_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
@@ -255,16 +256,19 @@ def _ashby(item: dict, board: str) -> dict:
 
 def _get(client: httpx.Client, url: str, params: dict, timeout: float) -> Any:
     try:
-        response = client.get(
-            url, params=params, timeout=timeout, follow_redirects=False, headers={"Accept": "application/json"}
+        response = request(
+            client, url, params=params, timeout=timeout, follow_redirects=False, headers={"Accept": "application/json"}
         )
         response.raise_for_status()
         return response.json()
+    except Paused:
+        raise
     except (httpx.HTTPError, ValueError) as exc:
         # No fallback to an empty list; never include response bodies in errors.
         raise DiscoveryError(f"Could not read public board {url}: {type(exc).__name__}") from exc
 
 
+@parsed_response
 def fetch_board(
     provider: str, board: str, *, company: str, timeout_seconds: float, client: httpx.Client | None = None
 ) -> list[Job]:

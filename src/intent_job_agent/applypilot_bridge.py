@@ -183,9 +183,17 @@ def workday_location(info: dict) -> str:
 
 
 def run_sources(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
-    """Run the chosen sources, then enrichment. A failing source is reported; the others still run. In
-    smartextract a failing site is skipped and listed in its report's `failed_sites` (spec 2c item 19)."""
+    """Refuse vendor network work until internal requests support persistent admission."""
     settings.require_external("job discovery", data_dir)
+    raise InvariantError(
+        "network_coverage_blocked: vendor JobSpy/Workday/smartextract/enrichment 内部请求尚未接入准入；"
+        "本实验暂停这些来源。请使用 fetch_boards 的受控招聘板；不会发起探测请求。"
+    )
+
+
+def _run_sources_uncontrolled(data_dir: Path, settings: Settings, sources: list[str], enrich: bool) -> dict:
+    """Retained implementation; production entry is blocked until request-level admission exists."""
+    settings.require_external("retained vendor implementation", data_dir)
     configure(data_dir, settings)
     from .vendor.applypilot import config
 

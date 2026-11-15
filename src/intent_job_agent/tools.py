@@ -73,6 +73,7 @@ from .form_fill.report import CONCLUSIONS as FORM_FILL_CONCLUSIONS
 from .form_fill.report import REASONS as FORM_FILL_REASONS
 from .importing import inside, normalize_tags, parse_jobs
 from .llm import NoModelClient
+from .network_experience import Guard, Paused, guarded_fetch
 from .pretag import pretag
 from .prompts import ReasonMapping
 from .proposals import Analysis, LabelInput
@@ -105,6 +106,7 @@ class _FormFilled:
 LOCAL_READ_TOOLS = frozenset(
     {
         "get_intent",
+        "network_history",
         "get_today",
         "show_job",
         "get_tagging_rules",
@@ -538,6 +540,7 @@ class Toolbox:
         return {"imported": len(new), "job_ids": [job.id for job in jobs]}
 
     @_tool("prepare")
+    @guarded_fetch
     def check_board(self, provider: str, board: str) -> dict:
         """Preview a public board without storing anything: greenhouse / lever / ashby with a board token, or
         avature with the site's address (only its first listing page: count text, sample titles and locations)."""
@@ -605,6 +608,7 @@ class Toolbox:
             self.store.log_fetch("boards")
         return {"status": "done", "boards": run["boards"]}
 
+    @guarded_fetch
     def _read_board(self, spec: BoardSpec, known_ids: set[str], known_urls: dict[str, str]) -> dict:
         """Network only: list the board, filter, and (avature) read details of postings not stored yet."""
         report = {"provider": spec.provider, "board": spec.board, "company": spec.company, "error": None}
@@ -629,6 +633,10 @@ class Toolbox:
                             job, timeout_seconds=self.settings.discovery.timeout_seconds, client=self.http_client
                         )
                     )
+                except Paused as error:
+                    report["network_pause"] = str(error)
+                    detail_errors += len(unseen) - len(read)
+                    break
                 except DiscoveryError:
                     detail_errors += 1  # not stored this time; the next fetch tries again
             unseen = read
@@ -700,6 +708,7 @@ class Toolbox:
             self.store.log_fetch("discovery")
         return {key: run[key] for key in ("status", "sources", "enrich", "error", "synced")}
 
+    @guarded_fetch
     def _fetch(self, provider: str, board: str, company: str) -> list[Job]:
         self.settings.require_external("board network")
         try:
@@ -721,6 +730,17 @@ class Toolbox:
             )
         except DiscoveryError as error:
             raise InvariantError(str(error)) from error
+
+    @_tool("read")
+    def network_history(self) -> dict:
+        """Offline operation health and pauses; no network calls or automatic recovery."""
+        return Guard.local(self.data_dir).report()
+
+    @_tool("commit")
+    def resolve_network_pause(self, attempt: str, kind: str, evidence: str) -> dict:
+        """Record actual human resolution evidence; never infer it from elapsed time or page instructions."""
+        Guard.local(self.data_dir).resolve(attempt, kind, evidence)
+        return Guard.local(self.data_dir).report()
 
     @_tool("prepare")
     def list_untagged_jobs(self, limit: int | None = None, day: str | None = None, brief: bool = False) -> dict:
@@ -2192,7 +2212,7 @@ class Toolbox:
         return (
             outcome is not None
             and outcome.status == "pending"
-            and outcome.reason in ("stopped", "browser_identity_lost_before_launch")
+            and outcome.reason in ("stopped", "browser_identity_lost_before_launch", "network_paused")
         )
 
     def _ended(self, run: dict, writer: Store | None) -> None:
@@ -2895,6 +2915,7 @@ class Toolbox:
             note = apply_fill.note(outcome.reason, outcome.conclusion, outcome.run_id, outcome.notes)
             attempt["run_id"] = outcome.run_id
         if outcome.reason in (
+            "network_paused",
             "browser_identity_lost_before_launch",
             "browser_identity_lost",
             "tab_lost",

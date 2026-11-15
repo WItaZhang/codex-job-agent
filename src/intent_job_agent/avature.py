@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup, Tag
 
 from .discovery import DiscoveryError, _html_to_text, _url, stable_job_id
 from .domain import Job
+from .network_experience import parsed_response, request
 
 PROVIDER = "avature"
 _LEGEND = re.compile(r"(\d[\d,.]*)\s*[-–]\s*(\d[\d,.]*)\D*?(\d[\d,.]*\+?)")
@@ -67,7 +68,7 @@ def _posting_id(board: str, url: str) -> tuple[str, str]:
 
 def _get(client: httpx.Client, url: str, params: dict | None, timeout: float) -> str:
     try:
-        response = client.get(url, params=params, timeout=timeout, follow_redirects=False)
+        response = request(client, url, params=params, timeout=timeout, follow_redirects=False)
     except httpx.HTTPError as exc:
         raise DiscoveryError(f"Could not read {url}: {type(exc).__name__}") from exc
     if response.status_code != 200:
@@ -144,6 +145,7 @@ def _page(board: str, company: str, offset: int, timeout: float, client: httpx.C
     return parse_results(board, company, _get(client, f"{board}/SearchJobs/", {"jobOffset": offset}, timeout))
 
 
+@parsed_response
 def first_page(board: str, *, timeout_seconds: float, client: httpx.Client | None = None) -> ResultsPage:
     """Only the first listing page, for a preview: one request, no details."""
     board = site_url(board)
@@ -153,6 +155,7 @@ def first_page(board: str, *, timeout_seconds: float, client: httpx.Client | Non
     return _page(board, "", 0, timeout_seconds, client)
 
 
+@parsed_response
 def list_site(
     board: str,
     *,
@@ -239,6 +242,7 @@ def parse_detail(page: str) -> tuple[dict[str, str], str]:
     return attributes, "\n".join(blocks)
 
 
+@parsed_response
 def read_detail(job: Job, *, timeout_seconds: float, client: httpx.Client | None = None) -> Job:
     """The job with its detail page's fields added to its attributes and its description filled in."""
     board = site_url(job.board)

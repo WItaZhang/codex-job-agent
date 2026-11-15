@@ -22,6 +22,12 @@ BOTH, HYBRID = {"location", "work_mode"}, "work_mode.hybrid"
 LONG = "SYNTHETIC posting. " + "Build and ship machine learning systems with a small team. " * 8
 
 
+@pytest.fixture(autouse=True)
+def retained_vendor_adapter(monkeypatch):
+    """Exercise retained Workday parsing with fake requests; production admission is tested separately."""
+    monkeypatch.setattr(bridge, "run_sources", bridge._run_sources_uncontrolled)
+
+
 def read(location: str) -> tuple[set[str], set[str]]:
     """The location and work_mode pre-tags of a location, and which of those two were read with confidence."""
     result = pretag(Job(id="j", title="Engineer", location=location, tags=[]), VOCAB)

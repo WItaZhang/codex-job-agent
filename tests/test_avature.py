@@ -467,16 +467,19 @@ def test_details_are_read_only_for_new_jobs_that_pass_the_filters(box, fake):
     assert fake.detail_ids() == []  # stored jobs are not read again
 
 
-def test_a_failed_detail_page_skips_only_that_job_until_the_next_fetch(box, fake):
+def test_a_failed_detail_page_pauses_site_until_cooldown(box, fake):
     site = Site(SITE_A, [us(1), us(2)], details={2: 500})
     fake.sites.append(site)
     write_boards(box)
     report = fetch(box)
     assert (report["new"], report["detail_errors"], report["error"]) == (1, 1, None)
     assert posting_ids(box.store.jobs()) == ["1"]
+    assert "network_pause" in report
+    before = len(fake.detail_ids())
     del site.details[2]
-    assert fetch(box)["new"] == 1
-    assert sorted(posting_ids(box.store.jobs())) == ["1", "2"]
+    assert "冷却" in fetch(box)["error"]
+    assert len(fake.detail_ids()) == before
+    assert posting_ids(box.store.jobs()) == ["1"]
 
 
 def test_jobs_gone_from_the_site_are_not_recommended(box, fake):
