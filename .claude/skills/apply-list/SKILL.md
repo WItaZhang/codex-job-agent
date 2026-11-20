@@ -15,7 +15,7 @@ description: 每日模块③：按当前意图生成可交接的投递清单（J
 
 ```
 最近 7 个标注日一致率 87%（45/52；想投 18/20，不要 27/32）
-待投 63 个，其中新的 12 个。文件：<json 路径>、<csv 路径>
+待投 63 个，其中新的 12 个。文件：<json 路径>、<csv 路径>、<html 总榜路径>
 1 [新][你标了想投] Senior ML Engineer — Acme · us.seattle · https://…
 2 [新] ML Engineer, Ads — Beta · us.new_york, us.seattle · https://…
      role.ml_engineering 强烈偏好；specialty.recsys 偏好；work_mode.onsite 回避

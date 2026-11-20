@@ -42,6 +42,7 @@ from . import (
     notify,
     open_answer_pairs,
     open_answers,
+    ranking_html,
     watchdog,
 )
 from .boards import BoardSpec, load_boards
@@ -931,6 +932,10 @@ class Toolbox:
         window = self.settings.apply_list.agreement_window_days
         rate = apply_list.agreement(self.store.current_intent(), self.store, self.settings, window).text()
         files = self._write_apply_list(day, rate, items)
+        html_path = Path(files["json"]).with_name("ranking.html")
+        stage = applypilot_bridge.staging_dir(self.data_dir, self.settings) / "applypilot.db"
+        ranking_html.write(html_path, day, pending, ranking_html.fetch_days(self.store, stage))
+        files["html"] = str(html_path)
         limit = self.settings.apply_list.shown if limit is None else limit
         return {
             "day": day,
