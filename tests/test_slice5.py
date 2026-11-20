@@ -294,6 +294,8 @@ def test_html_ranks_old_and_new_by_score(box):
     assert [json.loads(r["data-ids"]) for r in rows] == [["new"], ["old"]]
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", rows[0].select_one("time").text)
     assert "未知" in rows[1].text
+    assert [th.text for th in document.select("thead th")][-2:] == ["已申请", "已过期或放弃"]
+    assert all(len(row.select('input[type="checkbox"]')) == 2 for row in rows)
 
 
 def test_ranking_fetch_date_uses_original_id_after_relink(box):
