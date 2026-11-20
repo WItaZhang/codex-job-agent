@@ -218,7 +218,11 @@ def test_files_for_the_next_step(box):
     add(box, "A", ["role.ml_engineering", *US], url="https://example.test/a", description="SYNTHETIC secret text")
     result = box.build_apply_list(DAY1)
     folder = box.data_dir / box.settings.apply_list.dir
-    assert result["files"] == {"json": str(folder / f"{DAY1}.json"), "csv": str(folder / f"{DAY1}.csv")}
+    assert result["files"] == {
+        "json": str(folder / f"{DAY1}.json"),
+        "csv": str(folder / f"{DAY1}.csv"),
+        "html": str(folder / "ranking.html"),
+    }
 
     doc = json.loads((folder / f"{DAY1}.json").read_text(encoding="utf-8"))
     assert doc["day"] == DAY1 and doc["agreement"] == result["agreement"]
@@ -271,3 +275,35 @@ def test_apply_list_skill():
     assert {"build_apply_list", "mark_applications"} <= called
     assert "record_labels" not in called  # skipping is not a label
     assert "allowed-tools" not in meta
+
+
+def test_html_ranks_old_and_new_by_score(box):
+    from pathlib import Path
+
+    from bs4 import BeautifulSoup
+
+    add(box, "old", ["role.data_science", *US])
+    label(box, "old", "want")
+    first = box.build_apply_list(DAY1)
+    add(box, "new", ["role.ml_engineering", *US], source="greenhouse", board="synthetic")
+    box.store.record_board_snapshot("greenhouse", "synthetic", ["new"])
+    second = box.build_apply_list(DAY2)
+    assert first["files"]["html"] == second["files"]["html"]
+    document = BeautifulSoup(Path(second["files"]["html"]).read_text(), "html.parser")
+    rows = document.select("tbody tr")
+    assert [json.loads(r["data-ids"]) for r in rows] == [["new"], ["old"]]
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", rows[0].select_one("time").text)
+    assert "未知" in rows[1].text
+
+
+def test_ranking_fetch_date_uses_original_id_after_relink(box):
+    import sqlite3
+
+    from intent_job_agent.ranking_html import fetch_days
+
+    stage = box.data_dir / "synthetic.db"
+    with sqlite3.connect(stage) as db:
+        db.execute("CREATE TABLE jobs (url TEXT, discovered_at TEXT)")
+        db.execute("INSERT INTO jobs VALUES ('https://synthetic.test/new', '2026-10-01')")
+    box.store.mark_external("https://synthetic.test/new", "old-id", "imported")
+    assert fetch_days(box.store, stage) == {"old-id": "2026-10-01"}

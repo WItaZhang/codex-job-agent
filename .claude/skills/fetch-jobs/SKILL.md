@@ -40,6 +40,8 @@ description: 每日模块①：抓取今天能抓到的岗位，代码预打标�
 
 ## 5. 汇报
 
+本轮打标签结束后，调用 `build_apply_list(limit=0)` 更新新老岗位 HTML 总榜，给出返回的 HTML 路径。
+
 再调用一次 `get_fetch_status()`，用两三行告诉用户：
 
 - 新抓到多少（看 `discovery_status` 和 `boards_status` 的结果）、预筛排除多少、今天打了多少标签（剩余预算）、还有多少在排队。
