@@ -27,7 +27,8 @@ async def handshake(command, args, cwd, env, initialize):
         async with ClientSession(read, write) as session:
             greeting = await session.initialize()
             names = sorted(t.name for t in (await session.list_tools()).tools)
-            assert len(names) == 47
+            assert len(names) == 67
+            assert {"get_tailor_setup", "start_tailor_run", "adopt_tailored_resume"} <= set(names)
             assert {"discover_jobs", "select_today", "build_apply_list", "start_applying"} <= set(names)
             if initialize:
                 result = await session.call_tool("initialize_intent", {"path": "data/local/intent.yaml"})
