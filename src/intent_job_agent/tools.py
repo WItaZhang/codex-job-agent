@@ -1376,7 +1376,7 @@ class Toolbox:
         actor: str = APPROVED_VIA,
     ) -> dict:
         """Use one tailored version for this job's cover letter and application, or, with only job_id, withdraw the
-        adoption so the job goes back to the applicant's own resumes. Each version must pass precheck. Full-mode versions
+        adoption and restore the regular resume selection. All versions must pass precheck. Full-mode versions
         also need a valid evaluation and a reason when adopted before stop. Any saved letter for the job is voided
         and must be written again. actor: user, or delegated_coordinator when the coordinator chose (audit only)."""
         busy = "An apply step, a resume or a form-fill run is in progress; adopt or withdraw after it ends"
