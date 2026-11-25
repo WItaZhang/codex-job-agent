@@ -215,6 +215,14 @@ def load_inputs(list_path: str | Path, applicant: Applicant, settings: Settings)
     except InvariantError as error:
         problems.append(str(error))
     if jobs is not None:
+        for entry in jobs.jobs:  # a tailored resume belongs to one job and must be the adopted PDF
+            try:
+                applicant.resume_for(entry.id, entry.resume)
+            except InvariantError as error:
+                problems.append(f"{entry.id}: {error}")
+            tailored = applicant.tailored_for(entry.id)
+            if tailored is not None and entry.resume != tailored.id:
+                problems.append(f"{entry.id}: a tailored resume ({tailored.id}) is adopted for this job; use it")
         unsafe = [entry.id for entry in jobs.jobs if not SAFE_ID.match(entry.id)]
         if unsafe:
             problems.append(
@@ -438,7 +446,7 @@ def _error(error: Exception) -> str:
 def job_spec(entry: ListEntry, applicant: Applicant, job_dir: Path) -> apply_bridge.ApplySpec:
     """The list entry as a stop-before-submit application. Without a cover letter the letter path points at a file
     that is never written, so the prompt says there is none."""
-    resume = applicant.resume(entry.resume)
+    resume = applicant.resume_for(entry.id, entry.resume)
     letter = job_dir / "no-cover-letter.txt" if entry.cover_letter == "none" else Path(entry.cover_letter)
     return apply_bridge.ApplySpec(
         job_id=entry.id,

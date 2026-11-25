@@ -182,6 +182,30 @@ class OpenAnswers(_Section):
     watch: OpenAnswerWatch = OpenAnswerWatch()
 
 
+class TailorEvaluator(_Section):
+    """The isolated evaluator process (specs/resume-tailor.md section 5)."""
+
+    host: Literal["auto", "claude", "codex"] = "auto"  # auto: the first host whose isolation probe passes
+    claude_bin: str | None = None  # None: `claude` on PATH, else ~/.local/bin/claude
+    model: str | None = None  # None: the CLI's default model
+    max_budget_usd: float = Field(default=1.0, gt=0)  # per evaluation (Claude's --max-budget-usd)
+    timeout_seconds: float = Field(default=600, gt=0)
+
+
+class ResumeTailor(_Section):
+    """Tailoring a resume to one job (specs/resume-tailor.md); the applicant's settings file is named in
+    applicant.yaml."""
+
+    dir: str = "resume-tailor"  # under storage.data_dir (git-ignored)
+    max_evaluations_per_run: int = Field(default=12, gt=0)  # reached: the verdict asks the user
+    read_chars: int = Field(default=12000, gt=0)  # get_tailor_file returns long files in parts of this size
+    tectonic: str | None = None  # None: found on PATH; same for the poppler programs below
+    pdfinfo: str | None = None
+    pdftoppm: str | None = None
+    pdftotext: str | None = None
+    evaluator: TailorEvaluator = TailorEvaluator()
+
+
 class LLM(_Section):
     provider: Literal["host", "fake", "anthropic", "openai_compatible"]
     model: str | None
@@ -207,6 +231,7 @@ class Settings(_Section):
     apply: Apply
     form_fill: FormFill
     open_answers: OpenAnswers = OpenAnswers()  # optional: older workspace settings lack it
+    resume_tailor: ResumeTailor = ResumeTailor()  # optional: older workspace settings lack it
     llm: LLM
     storage: Storage
     runtime: dict | None = None

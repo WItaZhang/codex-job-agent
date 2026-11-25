@@ -5,6 +5,7 @@ nothing here is stored in the database. Paths are relative to the applicant dire
 knowledge base elsewhere on the machine).
 """
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Annotated
@@ -15,6 +16,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 from .domain import InvariantError
 
 FILE = "applicant.yaml"
+# Written only by adopt_tailored_resume (specs/resume-tailor.md 3): one resume per job, kept next to FILE.
+TAILORED_FILE = "tailored_resumes.yaml"
 
 
 # One line of English that goes into the apply agent's instructions as it is.
@@ -30,6 +33,9 @@ class Resume(_Model):
     pdf: Path
     text: Path  # plain text of the same resume: cover letters are checked against it
     use_for: str = ""  # when to choose this one, for the agent
+    tex: Path | None = None  # LaTeX source of the same resume: only these can be tailored (specs/resume-tailor.md)
+    job_id: str | None = None  # set on a tailored resume: it is used for this job only
+    sha256: str | None = None  # set on a tailored resume: the adopted PDF, checked before every use
 
 
 class Applicant(_Model):
@@ -45,6 +51,7 @@ class Applicant(_Model):
     relocation: Line | None = None  # the answer to relocation questions; None: ApplyPilot's "cannot relocate"
     chrome_user_data_dir: Path | None = None  # the applicant's own Chrome instance (decision 33); None: dedicated
     open_answers: Path | None = None  # the open-answer bank (specs/open-answers.md, decision 35); None: no bank
+    resume_tailor: Path | None = None  # resume tailoring settings (specs/resume-tailor.md); None: not set up
 
     @field_validator("careful_companies")
     @classmethod
@@ -59,14 +66,38 @@ class Applicant(_Model):
                 return resume
         raise InvariantError(f"Unknown resume {resume_id!r}; choose from {[r.id for r in self.resumes]}")
 
+    def tailored_for(self, job_id: str) -> Resume | None:
+        return next((r for r in self.resumes if r.job_id == job_id), None)
+
+    def resume_for(self, job_id: str, resume_id: str) -> Resume:
+        """The resume to use for this job. A tailored one belongs to one job and must be the PDF that was adopted."""
+        resume = self.resume(resume_id)
+        if resume.job_id is not None and resume.job_id != job_id:
+            raise InvariantError(f"{resume_id} is tailored for job {resume.job_id}, not {job_id}")
+        if resume.sha256 is not None and (
+            not resume.pdf.is_file()
+            or not resume.text.is_file()
+            or hashlib.sha256(resume.pdf.read_bytes()).hexdigest() != resume.sha256
+        ):
+            raise InvariantError(
+                f"The tailored resume for {job_id} changed or is gone since it was adopted. For a job not tried "
+                "yet: adopt it again (adopt_tailored_resume) and save the cover letter again. For a job already "
+                "held: restore the adopted PDF, or leave the job out (mark_applications)"
+            )
+        return resume
+
     def missing_files(self) -> list[str]:
-        paths = [self.profile, *(p for r in self.resumes for p in (r.pdf, r.text)), *self.cover_letter_context]
+        own = [r for r in self.resumes if r.job_id is None]  # a tailored one is checked where it is used
+        paths = [self.profile, *(p for r in own for p in (r.pdf, r.text)), *self.cover_letter_context]
+        paths += [r.tex for r in self.resumes if r.tex]
         if self.resume_selection:
             paths.append(self.resume_selection)
         if self.cover_letter_skill:
             paths.append(self.cover_letter_skill / "SKILL.md")
         if self.open_answers:
             paths.append(self.open_answers)
+        if self.resume_tailor:
+            paths.append(self.resume_tailor)
         return [str(path) for path in paths if not path.is_file()]
 
 
@@ -92,6 +123,9 @@ def load(data_dir: Path, applicant_dir: str) -> Applicant:
         value = Path(value).expanduser()
         return value if value.is_absolute() else base / value
 
+    if any(r.job_id is not None or r.sha256 is not None for r in applicant.resumes):
+        raise InvariantError(f"Invalid {path}: job_id and sha256 are set only by adopt_tailored_resume")
+    applicant = applicant.model_copy(update={"resumes": [*applicant.resumes, *_tailored(base)]})
     ids = [resume.id for resume in applicant.resumes]
     if len(ids) != len(set(ids)):
         raise InvariantError(f"Resume ids in {path} must be unique")
@@ -99,7 +133,8 @@ def load(data_dir: Path, applicant_dir: str) -> Applicant:
         update={
             "profile": resolve(applicant.profile),
             "resumes": [
-                r.model_copy(update={"pdf": resolve(r.pdf), "text": resolve(r.text)}) for r in applicant.resumes
+                r.model_copy(update={"pdf": resolve(r.pdf), "text": resolve(r.text), "tex": resolve(r.tex)})
+                for r in applicant.resumes
             ],
             "resume_selection": resolve(applicant.resume_selection),
             "cover_letter_skill": resolve(applicant.cover_letter_skill),
@@ -107,8 +142,38 @@ def load(data_dir: Path, applicant_dir: str) -> Applicant:
             "apply_agent_read": [resolve(p) for p in applicant.apply_agent_read],
             "chrome_user_data_dir": applicant.chrome_user_data_dir and applicant.chrome_user_data_dir.expanduser(),
             "open_answers": resolve(applicant.open_answers),
+            "resume_tailor": resolve(applicant.resume_tailor),
         }
     )
+
+
+TAILORED_RECOVERY = "delete it to withdraw every adoption (those jobs go back to your own resumes)"
+
+
+def read_tailored(base: Path) -> list[dict]:
+    """The raw entries of the tailored-resume file; a broken file says how to recover."""
+    path = base / TAILORED_FILE
+    if not path.is_file():
+        return []
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
+        if not isinstance(raw, list):
+            raise TypeError("not a list")
+        resumes = [Resume.model_validate(item) for item in raw]
+    except (ValidationError, yaml.YAMLError, TypeError) as error:
+        raise InvariantError(
+            f"Invalid {path} (written by adopt_tailored_resume): {error}; {TAILORED_RECOVERY}"
+        ) from error
+    if any(r.job_id is None or r.sha256 is None or not r.id.startswith("tailored-") for r in resumes):
+        raise InvariantError(
+            f"Invalid {path}: every entry needs a tailored- id, a job_id and a sha256; {TAILORED_RECOVERY}"
+        )
+    return raw
+
+
+def _tailored(base: Path) -> list[Resume]:
+    """Adopted tailored resumes (absolute paths, one per job). Ids start with tailored- and never clash."""
+    return [Resume.model_validate(item) for item in read_tailored(base)]
 
 
 def read_dir_problems(applicant: Applicant, data_dir: Path, home: Path | None = None) -> list[str]:

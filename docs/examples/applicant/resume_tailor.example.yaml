@@ -1,0 +1,27 @@
+# Resume tailoring settings (specs/resume-tailor.md). SYNTHETIC example: copy it next to your applicant.yaml (or into
+# your own knowledge base), point applicant.yaml's resume_tailor at it, and give the resumes you want to tailor a tex.
+# Paths are relative to this file's folder, or absolute. Everything here is personal: keep it out of git.
+
+roles:                             # direction -> what that role needs (your own words, a few lines each)
+  ml_engineer: roles/ml_engineer.md
+  data_scientist: roles/data_scientist.md
+role_sections: {}                  # optional: direction -> {entry name: other direction it is judged against},
+                                   # e.g. {ml_engineer: {Research Lab: data_scientist}}
+style: style.md                    # optional: your writing rules; the writing agent follows them, the evaluator never
+                                   # sees them
+approved_numbers: approved_numbers.txt   # optional: numbers you confirmed may appear, one per line
+rubric: null                       # optional: your own rubric; empty: the project's general rubric
+evidence_read:                     # folders the writing agent may read to back each claim (not your home folder,
+  - notes                          # nothing containing the data folder or profile.json)
+
+checks:                            # hard checks every version must pass
+  must_keep: []                    # entries that must stay, by the name written in the entry macro
+  approved_only_sections: []       # entries whose bullets may only use approved numbers
+  no_arrows: true                  # no arrow symbols (write "from X to Y")
+  no_doubled_verbs: true           # no "Designed and built"
+  max_bold_per_item: 3
+  no_full_bold: true
+
+template:                          # how your LaTeX template writes entries and bullets
+  entry_macros: [roleentry, projectentry, publicationentry]
+  items_env: cvitems

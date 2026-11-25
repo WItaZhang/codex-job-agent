@@ -1,0 +1,18 @@
+# SYNTHETIC resume-tailor configuration for tests (specs/resume-tailor.md section 2).
+roles:
+  ml: roles/ml.md
+  risk: roles/risk.md
+role_sections:
+  ml:
+    Contoso Trust: risk          # this section is judged against the risk role
+style: style.md
+approved_numbers: approved_numbers.txt
+evidence_read:
+  - notes
+checks:
+  must_keep: [Northwind Labs, GraphLens]
+  approved_only_sections: [Contoso Trust]
+  no_arrows: true
+  no_doubled_verbs: true
+  max_bold_per_item: 3
+  no_full_bold: true

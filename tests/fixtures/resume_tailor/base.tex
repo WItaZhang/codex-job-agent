@@ -1,0 +1,27 @@
+% SYNTHETIC resume for the resume-tailor tests (specs/resume-tailor.md). Not a real person.
+\documentclass[10pt]{article}
+\usepackage[margin=0.6in]{geometry}
+\usepackage{hyperref}
+\newcommand{\roleentry}[3]{\par\noindent\textbf{#1} \hfill #2\\\textit{#3}\par}
+\newcommand{\projectentry}[2]{\par\noindent\textbf{#1} \hfill #2\par}
+\newcommand{\sectionrule}[1]{\section*{#1}}
+\newenvironment{cvitems}{\begin{itemize}\setlength\itemsep{0pt}}{\end{itemize}}
+\pagestyle{empty}
+\begin{document}
+\begin{center}{\Large Sam Example}\\ \href{mailto:sam.synthetic@example.test}{sam.synthetic@example.test} $\cdot$ 555-0100 $\cdot$ Austin\end{center}
+\sectionrule{Experience}
+\roleentry{Northwind Labs}{2023--2025}{Machine Learning Engineer}
+\begin{cvitems}
+\item Built a \textbf{ranking model} that lifted click-through rate by 12\% on 3 product surfaces.
+\item Shipped a \textbf{feature store} used by 40 engineers.
+\end{cvitems}
+\roleentry{Contoso Trust}{2021--2023}{Risk Analyst}
+\begin{cvitems}
+\item Reviewed fraud alerts with \textbf{rule engines} and wrote weekly reports.
+\end{cvitems}
+\sectionrule{Projects}
+\projectentry{GraphLens}{2024}
+\begin{cvitems}
+\item Built a graph anomaly detector in \textbf{PyTorch Geometric}.
+\end{cvitems}
+\end{document}
