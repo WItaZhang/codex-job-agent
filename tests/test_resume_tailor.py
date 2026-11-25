@@ -872,3 +872,14 @@ def test_real_programs_render_one_page(tmp_path):
     programs.first_page_png(pdf, tmp_path / "page1.png")
     assert (tmp_path / "page1.png").read_bytes()[:4] == b"\x89PNG"
     assert "Northwind Labs" in programs.text(pdf)
+
+
+def test_evaluator_receives_role_priorities_without_contact_details(tmp_path):
+    box = make_box(tmp_path)
+    box.tailor_runner = FakeClaude([evaluation()])
+    role = "S1: production ranking. Contact: sam.synthetic@example.test"
+    run = start(box, role_profile=role)["run_id"]
+    box.evaluate_tailor_version(run, "v00")
+    materials = box.tailor_runner.evaluations()[0]["files"]
+    assert b"S1: production ranking" in materials["role.md"]
+    assert b"sam.synthetic@example.test" not in materials["role.md"]
