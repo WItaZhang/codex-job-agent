@@ -193,6 +193,20 @@ open_answers:                     # 开放题答案库（specs/open-answers.md�
     timeout_seconds: null         # 一次最多看多久；null 不限时：工具服务开着、还有对在等就一直看（用户 2026-11-08 选定，决定 9）；写秒数就到时停下
     poll_seconds: 5               # 多久读一次每个标签页
     read_seconds: 30              # 一次读最多多久（页面开着对话框时读会卡住）
+resume_tailor:                    # 按 JD 定制简历（specs/resume-tailor.md）；申请人的配置由 applicant.yaml 的 resume_tailor 指定
+  dir: resume-tailor              # 各次定制的存档，位于 storage.data_dir 下（git 忽略）
+  max_evaluations_per_run: 12     # 一次定制最多评价几次；到了就停下问申请人
+  read_chars: 12000               # get_tailor_file 每段最多多少字符
+  tectonic: null                  # null：在 PATH 里找；下面三个 poppler 程序同样
+  pdfinfo: null
+  pdftoppm: null
+  pdftotext: null
+  evaluator:                      # 隔离的评价进程（规格第 5 节）
+    host: auto                    # auto | claude | codex；auto 用第一个隔离探测通过的；codex 还没做（切片 3）
+    claude_bin: null              # null：PATH 里的 claude，没有就用 ~/.local/bin/claude
+    model: null                   # null：CLI 默认模型
+    max_budget_usd: 1.0           # 单次评价的费用上限（Claude 的 --max-budget-usd）
+    timeout_seconds: 600
 llm:
   provider: host                  # host：理解由对话中的宿主 agent 以工具参数提供；fake 仅用于测试；anthropic | openai_compatible 以后实现
   model: null

@@ -10,8 +10,11 @@ resumes:                          # one or more; the text file is what cover let
     pdf: resumes/main.pdf
     text: resumes/main.md
     use_for: Any role             # when to choose this one
+    tex: null                     # optional: its LaTeX source; only resumes with one can be tailored to a job
 
 resume_selection: null            # optional: a file with your own rules for choosing a resume
+resume_tailor: null               # optional: resume tailoring settings, e.g. resume_tailor.yaml (see
+                                  # resume_tailor.example.yaml and specs/resume-tailor.md). Empty: no tailoring.
 cover_letter_skill: null          # optional: your own cover-letter skill folder (with SKILL.md); otherwise the
                                   # project's general skill in .claude/skills/cover-letter is used
 cover_letter_context: []          # optional: other files your skill needs, given to the writer read-only

@@ -185,6 +185,15 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 
 草稿和定稿成对存在 `data/local/open-answers/pairs/` 里，打过码，只有你自己看；不进数据库，也不交给打标签和分析用的模型。自动提交的岗位没有这些记录（交上以后页面上就没有答案了）。
 
+### 按 JD 定制简历（可选）
+
+投递前可以为某个岗位定制一份一页简历（[规格](../specs/resume-tailor.md)）。需要：
+
+- 本机装好 `tectonic` 和 poppler（macOS：`brew install tectonic poppler`）。直接使用底稿、仅修改 Skills 都只需简历渲染工具。配套求职信 PDF 另用本机 Chrome 或 Chromium。完整定制另需 Claude Code CLI。评价用一个隔离的 `claude -p` 进程，每次评价都花钱，用量和费用记在 `data/local/resume-tailor/` 下。
+- `applicant.yaml` 里给要定制的简历写上 `tex`（LaTeX 源），并用 `resume_tailor` 指向你自己的定制配置（照 `docs/examples/applicant/resume_tailor.example.yaml` 写，可以放在你的知识库里）。岗位要求、写法、确认过的数字和资料目录都是你的个人内容，不要放进仓库。
+
+在宿主里说 `/resume-tailor <岗位编号>`（Codex 是 `$resume-tailor`），或贴一段 JD 加一个英文短名。第一次评价前会跑一次隔离探测，确认评价进程读不到你的 CLAUDE.md、memory 和别的文件；Claude Code 自己注入的账号邮箱是已知例外。Codex 作评价进程目前隔离不了，`host: auto` 只会用 Claude。
+
 ### 投递和日常浏览共用一个 Chrome（可选）
 
 Chrome 不允许自动化工具接入默认数据目录里的日常 Chrome，所以把求职用的那个账号放进一个单独的数据目录，以后这个账号就用它浏览。投递接入的就是这一个实例，你在里面登录过的招聘网站、Google 账号、LinkedIn 都直接可用。网站看到的是一个长期使用、有历史记录的正常浏览器，验证码通常会少一些，但不保证没有；遇到时照常停下等你处理，系统不破解验证码，也不加任何伪装检测的参数。

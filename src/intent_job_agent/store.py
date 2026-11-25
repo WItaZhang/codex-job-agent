@@ -547,6 +547,11 @@ class Store:
                 (job_id, resume_id, _now()),
             )
 
+    def delete_cover_letter(self, job_id: str) -> None:
+        """Forget a job's letter (its resume changed, specs/resume-tailor.md 3); the caller removes the files."""
+        with self._tx():
+            self.db.execute("DELETE FROM cover_letters WHERE job_id = ?", (job_id,))
+
     def cover_letter(self, job_id: str) -> dict | None:
         row = self.db.execute("SELECT resume_id FROM cover_letters WHERE job_id = ?", (job_id,)).fetchone()
         return dict(row) if row else None

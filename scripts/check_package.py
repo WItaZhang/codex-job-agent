@@ -94,7 +94,8 @@ async def handshake(profile):
             names = {t.name for t in (await session.list_tools()).tools}
             assert 'discover_jobs' in names
             if profile == 'full':
-                assert len(names) == 47
+                assert len(names) == 67
+                assert {"get_tailor_setup", "start_tailor_run", "adopt_tailored_resume"} <= set(names)
             # Refusal path only: no website is visited, also for scheduled profile.
             for tool,args in [('discover_jobs',{}),('fetch_boards',{}),
                               ('check_board',{'provider':'greenhouse','board':'synthetic'})]:
@@ -119,7 +120,7 @@ report = subprocess.run([sys.executable,'-I','-m','intent_job_agent.form_fill.cl
 assert report.returncode == 0, report.stderr
 assert (job.parent / 'summary.md').exists()
 assert not (b / 'form-fill').exists()
-print(json.dumps({'installed':True,'tools':47,'profiles':['full','scheduled'],
+print(json.dumps({'installed':True,'tools':67,'profiles':['full','scheduled'],
     'resource_closure':True,'cwd_independent':True,'form_fill_missing_run':True}))
 """
 

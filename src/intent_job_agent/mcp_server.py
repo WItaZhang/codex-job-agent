@@ -123,6 +123,12 @@ Applying (project skill /apply):
 - other_session: another session's tool server runs a step; start nothing here. After a restart, an idle
   apply_status may give the latest batch's next step (next) and a notice; a job held as interrupted may have been
   submitted: check submission evidence before retrying, without guessing who submitted.
+Resume tailoring (project skill /resume-tailor, specs/resume-tailor.md):
+- Check get_tailor_setup first. Only facts and numbers from the applicant's material; requirements without
+  evidence are not written. The code verdict decides stop/continue/ask_user, never the model. Each
+  evaluation costs money: never in scheduled runs.
+- After adopt_tailored_resume a job's letter and application use the tailored resume; the old letter is
+  voided. Withdraw (job id only) when the user wants their own resume back.
 - Never ask for or show passwords, an SSN, card details or keys in chat."""
 
 
