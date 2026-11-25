@@ -17,7 +17,7 @@ def validate_workflow(document):
     assert set(document["jobs"]) == {"check"}
     job = document["jobs"]["check"]
     assert set(job) == {"runs-on", "steps"}  # no job-level permission escalation or reusable workflow
-    assert job["runs-on"] == "ubuntu-latest"
+    assert job["runs-on"] == "ubuntu-24.04"
     assert job["steps"] == [
         {"uses": "actions/checkout@v4"},
         {"uses": "astral-sh/setup-uv@v6", "with": {"python-version": "3.13"}},

@@ -23,7 +23,7 @@ description: 按一个岗位的 JD 定制简历：从申请人带 LaTeX 源的�
 
 - 候选是 resumes 里 tailorable 为 true 的简历。用 `show_job(job_id)` 读岗位，用 `get_tailor_file("role/<方向>")` 读各方向的岗位要求，按 JD 的主要职责、交付目标和技术要求选最贴近的一份；交叉岗位按主要工作判断。
 - 对照候选底稿第一屏，逐一指出哪条经历回答 S1、S2。两项已有直接证据且技术覆盖充分时选 `mode="base"`；只缺有实践依据的技术词时选 `mode="skills"`；证据埋得深、项目需要重写或职责需要澄清时选 `mode="full"`。Skills 快速路径支持独立的 Skills / Technical Skills 标题（section、section*、sectionrule），其他模板改走完整路径。
-- `start_tailor_run(resume_id, direction, reason, job_id=...)`；贴来的 JD 用 `jd_text` 加 `slug`（小写字母、数字、连字符）。传入所选 mode，reason 记录关键筛选项、第一屏证据和剩余缺口，second_choice 写第二候选和没选它的原因。记下返回的 run_id。
+- `start_tailor_run(resume_id, direction, reason, job_id=...)`；贴来的 JD 用 `jd_text` 加 `slug`（小写字母、数字、连字符）。传入所选 mode，将仅含岗位信息的画像传给 role_profile，供 evaluator 核对岗位原文。reason 记录关键筛选项、第一屏证据和剩余缺口，second_choice 写第二候选和没选它的原因。记下返回的 run_id。
 
 ## 2. 提炼要求
 

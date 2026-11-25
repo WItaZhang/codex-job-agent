@@ -189,7 +189,7 @@ Avature 没有跨公司的搜索入口，可以对 agent 说"帮我找用 Avatur
 
 投递前可以为某个岗位定制一份一页简历（[规格](../specs/resume-tailor.md)）。需要：
 
-- 本机装好 `tectonic` 和 poppler（macOS：`brew install tectonic poppler`）。直接使用底稿、仅修改 Skills 都只需渲染工具。完整定制另需 Claude Code CLI。评价用一个隔离的 `claude -p` 进程，每次评价都花钱，用量和费用记在 `data/local/resume-tailor/` 下。
+- 本机装好 `tectonic` 和 poppler（macOS：`brew install tectonic poppler`）。直接使用底稿、仅修改 Skills 都只需简历渲染工具。配套求职信 PDF 另用本机 Chrome 或 Chromium。完整定制另需 Claude Code CLI。评价用一个隔离的 `claude -p` 进程，每次评价都花钱，用量和费用记在 `data/local/resume-tailor/` 下。
 - `applicant.yaml` 里给要定制的简历写上 `tex`（LaTeX 源），并用 `resume_tailor` 指向你自己的定制配置（照 `docs/examples/applicant/resume_tailor.example.yaml` 写，可以放在你的知识库里）。岗位要求、写法、确认过的数字和资料目录都是你的个人内容，不要放进仓库。
 
 在宿主里说 `/resume-tailor <岗位编号>`（Codex 是 `$resume-tailor`），或贴一段 JD 加一个英文短名。第一次评价前会跑一次隔离探测，确认评价进程读不到你的 CLAUDE.md、memory 和别的文件；Claude Code 自己注入的账号邮箱是已知例外。Codex 作评价进程目前隔离不了，`host: auto` 只会用 Claude。
